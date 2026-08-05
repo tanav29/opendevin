@@ -17,7 +17,8 @@ model Sessions {
   git         String
   issueNumber Int?
   PRNumber    Int?
-  parts       String  @default("{}")
+  // JSON-encoded AI SDK UIMessage[]; SQLite has no native JSON column.
+  parts       String  @default("[]")
   archived    Boolean @default(false)
   status      String  @default("idle")
   sandbox     String
