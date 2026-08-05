@@ -1,0 +1,28 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Sessions {
+  id          String  @id @default(cuid())
+  git         String
+  issueNumber Int?
+  PRNumber    Int?
+  parts       String  @default("{}")
+  archived    Boolean @default(false)
+  status      String  @default("idle")
+  sandbox     String
+  cwd         String  @default("/home/user/")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
