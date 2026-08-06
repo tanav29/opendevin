@@ -8,6 +8,7 @@ import {
   stepCountIs,
   streamText,
   toUIMessageStream,
+  type UIMessage,
 } from "ai";
 import { prisma } from "./lib/db";
 import { sandboxTools } from "./lib/ai";
@@ -15,11 +16,9 @@ import { sandboxTools } from "./lib/ai";
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
 
-type StoredMessage = {
-  id?: string;
-  role: "user" | "assistant" | "system";
-  parts: Array<{ type: string; text?: string; [key: string]: unknown }>;
-};
+// Keep the complete AI SDK UI message. Text-only persistence loses the tool
+// call and tool-result parts that make an agent run auditable in the client.
+type StoredMessage = UIMessage;
 const parseMessages = (value: string): StoredMessage[] => {
   try {
     const parsed = JSON.parse(value);
@@ -30,18 +29,13 @@ const parseMessages = (value: string): StoredMessage[] => {
 };
 app.use(express.json({ limit: "2mb" }));
 app.use((_req, res, next) => {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    process.env.FRONTEND_URL ?? "http://localhost:3000",
-  );
+  res.setHeader("Access-Control-Allow-Origin", process.env.FRONTEND_URL ?? "http://localhost:3000");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (_req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
-app.get("/", (_req, res) =>
-  res.json({ ok: true, service: "opendevin", version: "0.1.0" }),
-);
+app.get("/", (_req, res) => res.json({ ok: true, service: "opendevin", version: "0.1.0" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/sessions", async (_req, res) => {
@@ -64,9 +58,7 @@ app.post("/new", async (req, res) => {
     typeof gitUrl !== "string" ||
     !/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//i.test(gitUrl)
   ) {
-    return res
-      .status(400)
-      .json({ message: "Enter a valid public Git repository URL" });
+    return res.status(400).json({ message: "Enter a valid public Git repository URL" });
   }
   try {
     const sandbox = await Sandbox.create({
@@ -82,9 +74,7 @@ app.post("/new", async (req, res) => {
         ?.replace(/\.git$/, "") || "repository";
     const clone = await sandbox.git.clone(gitUrl);
     if (clone.exitCode !== 0)
-      return res
-        .status(502)
-        .json({ message: "Could not clone repository", stderr: clone.stderr });
+      return res.status(502).json({ message: "Could not clone repository", stderr: clone.stderr });
     const session = await prisma.sessions.create({
       data: {
         git: gitUrl,
@@ -102,8 +92,7 @@ app.post("/new", async (req, res) => {
   } catch (error) {
     console.error("create session failed", error);
     res.status(500).json({
-      message:
-        "Could not create session. Check E2B_API_KEY and repository access.",
+      message: "Could not create session. Check E2B_API_KEY and repository access.",
     });
   }
 });
@@ -139,10 +128,7 @@ app.post("/ai/:sessionId", async (req, res) => {
   });
   if (!session) return res.status(404).json({ message: "Session not found" });
   const body = req.body as { prompt?: string; messages?: unknown[] };
-  if (
-    (!body.prompt || typeof body.prompt !== "string") &&
-    !Array.isArray(body.messages)
-  )
+  if ((!body.prompt || typeof body.prompt !== "string") && !Array.isArray(body.messages))
     return res.status(400).json({ message: "prompt or messages is required" });
   try {
     await prisma.sessions.update({
@@ -156,9 +142,7 @@ app.post("/ai/:sessionId", async (req, res) => {
     req.once("aborted", abort);
     res.once("close", abort);
     const sandbox = await Sandbox.connect(session.sandbox);
-    const incoming = Array.isArray(body.messages)
-      ? (body.messages as StoredMessage[])
-      : [];
+    const incoming = Array.isArray(body.messages) ? (body.messages as StoredMessage[]) : [];
     // Persist the complete UIMessage[] before starting generation so a disconnect never loses the user prompt.
     if (incoming.length) {
       await prisma.sessions.update({
@@ -177,31 +161,23 @@ app.post("/ai/:sessionId", async (req, res) => {
       tools: sandboxTools(sandbox, session.cwd),
       stopWhen: stepCountIs(12),
       maxRetries: 1,
-      onFinish: async ({ text }) => {
-        // Store the assistant response using the same UIMessage parts shape used by the AI SDK.
-        const current = await prisma.sessions.findUnique({
-          where: { id: session.id },
-          select: { parts: true },
-        });
-        const history = current ? parseMessages(current.parts) : incoming;
-        history.push({
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          parts: [{ type: "text", text }],
-        });
-        await prisma.sessions
-          .update({
-            where: { id: session.id },
-            data: { parts: JSON.stringify(history), status: "idle" },
-          })
-          .catch(() => undefined);
-      },
     });
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("X-Accel-Buffering", "no");
     await pipeUIMessageStreamToResponse({
       response: res,
-      stream: toUIMessageStream({ stream: result.stream }),
+      stream: toUIMessageStream({
+        stream: result.stream,
+        originalMessages: incoming as UIMessage[],
+        onFinish: async ({ messages }) => {
+          await prisma.sessions
+            .update({
+              where: { id: session.id },
+              data: { parts: JSON.stringify(messages), status: "idle" },
+            })
+            .catch(() => undefined);
+        },
+      }),
     });
   } catch (error) {
     await prisma.sessions
@@ -209,12 +185,8 @@ app.post("/ai/:sessionId", async (req, res) => {
       .catch(() => undefined);
     console.error("AI request failed", error);
     if (!res.headersSent)
-      res
-        .status(502)
-        .json({ message: "AI request failed. Check that Ollama is running." });
+      res.status(502).json({ message: "AI request failed. Check that Ollama is running." });
   }
 });
 
-app.listen(port, () =>
-  console.log(`OpenDevin listening on http://localhost:${port}`),
-);
+app.listen(port, () => console.log(`OpenDevin listening on http://localhost:${port}`));

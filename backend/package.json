@@ -2,23 +2,21 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
   "type": "module",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx watch src/index.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.33.2",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3"
-    ]
+    "db:studio": "prisma studio",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check"
   },
   "dependencies": {
     "@e2b/code-interpreter": "^2.7.0",
@@ -39,8 +37,16 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.4",
+    "oxfmt": "^0.62.0",
+    "oxlint": "^1.77.0",
     "prisma": "^7.9.1",
     "tsx": "^4.23.8",
     "typescript": "^7.0.2"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   }
 }

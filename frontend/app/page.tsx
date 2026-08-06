@@ -1,111 +1,133 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport, getToolName, isToolUIPart, type UIMessage, type UIMessagePart } from 'ai';
+import { Streamdown } from 'streamdown';
+import {
+  Bot, Box, ChevronDown, CircleStop, Code2, FileText, GitFork, LoaderCircle,
+  MessageSquareText, Plus, SendHorizontal, Sparkles, Terminal, Wrench,
+} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 type Session = { id: string; git: string; status: string; archived: boolean; createdAt: string; updatedAt: string };
-type Message = { role: 'user' | 'assistant'; content: string; time?: string };
-
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const suggestions = ['Map the architecture and key risks', 'Add coverage for the authentication flow', 'Find and fix the failing build'];
 
-function Icon({ name, size = 17 }: { name: string; size?: number }) {
-  const paths: Record<string, ReactNode> = {
-    grid: <><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/></>,
-    plus: <><path d="M12 5v14M5 12h14"/></>,
-    search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></>,
-    send: <><path d="m21 3-7.3 18-3.1-7.6L3 10.3 21 3Z"/><path d="m10.6 13.4 4.5-4.5"/></>,
-    chevron: <path d="m8 10 4 4 4-4"/>,
-    terminal: <><path d="m5 7 5 5-5 5"/><path d="M12 17h7"/></>,
-    file: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></>,
-    github: <><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.3 4c.1-1.2.1-2.3-.3-3.3 0 0-1.2-.4-4 1.5a13.7 13.7 0 0 0-6 0C6.2.3 5 .7 5 .7c-.4 1-.4 2.1-.3 3.3A5.4 5.4 0 0 0 3.2 7.5c0 5.4 3.5 6.6 6.8 7a4.8 4.8 0 0 0-1 3.5v4"/><path d="M9 18c-4 .9-4-2-5.6-2"/></>,
-    dot: <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>,
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+function messageText(parts: UIMessagePart<never, never>[]) {
+  return parts.filter((part) => part.type === 'text').map((part) => part.text).join('');
 }
 
-const examples = ['Review the open issues and suggest priorities', 'Add tests for the authentication flow', 'Find and fix the failing build'];
+function ToolCall({ part }: { part: UIMessagePart<never, never> }) {
+  if (!isToolUIPart(part)) return null;
+  const name = getToolName(part);
+  const tool = part as unknown as { state?: string; input?: unknown; output?: unknown; errorText?: string };
+  const state = tool.state ?? 'input-streaming';
+  const done = state === 'output-available' || state === 'output-error' || state === 'output-denied';
+  const detail = tool.output ?? tool.input;
+
+  return <details className="tool-call" open={!done}>
+    <summary>
+      <span className={cn('tool-icon', done ? 'tool-icon-done' : 'tool-icon-live')}>
+        {done ? <Wrench size={14} /> : <LoaderCircle className="animate-spin" size={14} />}
+      </span>
+      <span className="min-w-0 flex-1"><strong>{name.replaceAll('_', ' ')}</strong><small>{done ? state === 'output-error' ? 'Tool failed' : 'Completed' : 'Running in sandbox'}</small></span>
+      <ChevronDown size={15} className="tool-chevron" />
+    </summary>
+    {(detail !== undefined || tool.errorText) && <pre>{typeof (tool.errorText ?? detail) === 'string' ? String(tool.errorText ?? detail) : JSON.stringify(detail, null, 2)}</pre>}
+  </details>;
+}
+
+function Message({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
+  const isUser = message.role === 'user';
+  const hasText = messageText(message.parts as UIMessagePart<never, never>[]).trim().length > 0;
+  return <article className={cn('message-row', isUser ? 'message-user' : 'message-agent')}>
+    {!isUser && <div className="message-avatar"><Bot size={17} /></div>}
+    <div className="min-w-0 flex-1">
+      <div className="message-meta"><span>{isUser ? 'You' : 'OpenDevin'}</span>{!isUser && isStreaming && <span className="streaming-state"><i /> thinking</span>}</div>
+      <div className={cn('message-content', isUser && 'user-content')}>
+        {message.parts.map((part, index) => {
+          if (part.type === 'text') return <Streamdown key={`${message.id}-${index}`} mode={isStreaming ? 'streaming' : 'static'} className="agent-markdown">{part.text}</Streamdown>;
+          if (isToolUIPart(part)) return <ToolCall key={`${message.id}-${index}`} part={part as UIMessagePart<never, never>} />;
+          return null;
+        })}
+        {!isUser && !hasText && isStreaming && <span className="typing-dots"><i /><i /><i /></span>}
+      </div>
+    </div>
+  </article>;
+}
 
 export default function Home() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [active, setActive] = useState<Session | null>(null);
   const [repo, setRepo] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState('');
   const bottom = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const transport = useMemo(() => new DefaultChatTransport({ api: `${API}/ai/${active?.id ?? 'new-session'}` }), [active?.id]);
+  const { messages, setMessages, sendMessage, status, stop, error } = useChat({ transport, throttle: 40 });
+  const isWorking = status === 'submitted' || status === 'streaming';
+  const repoName = useMemo(() => active?.git.split('/').pop()?.replace('.git', '') || 'workspace', [active]);
 
-  useEffect(() => { fetch(`${API}/sessions`).then(r => r.ok ? r.json() : []).then(setSessions).catch(() => setNotice('Backend offline — start it with pnpm dev in backend.')); }, []);
+  useEffect(() => {
+    fetch(`${API}/sessions`).then((r) => r.ok ? r.json() : []).then(setSessions).catch(() => setNotice('Backend offline — start it with pnpm dev in backend.'));
+  }, []);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, status]);
+
   async function selectSession(session: Session) {
-    setActive(session); setMessages([]);
+    setActive(session); setMessages([]); setNotice('');
     try {
       const response = await fetch(`${API}/sessions/${session.id}/messages`);
-      if (!response.ok) return;
-      const stored = await response.json() as Array<{ role: 'user' | 'assistant'; parts?: Array<{ type: string; text?: string }> }>;
-      setMessages(stored.map(message => ({ role: message.role, content: (message.parts || []).filter(part => part.type === 'text').map(part => part.text || '').join('') })));
-    } catch { setNotice('Could not load workspace messages.'); }
+      if (!response.ok) throw new Error('Could not load workspace messages.');
+      const stored = await response.json() as UIMessage[];
+      setMessages(stored.filter((message) => message.role === 'user' || message.role === 'assistant'));
+    } catch (err) { setNotice(err instanceof Error ? err.message : 'Could not load workspace messages.'); }
   }
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
 
-  async function createSession(e?: FormEvent) {
-    e?.preventDefault();
+  async function createSession(event?: FormEvent) {
+    event?.preventDefault();
     if (!repo.trim()) return;
     setCreating(true); setNotice('');
     try {
-      const r = await fetch(`${API}/new`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gitUrl: repo.trim() }) });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.message || 'Could not create session');
-      const next = { id: data.sessionId, git: repo.trim(), status: 'idle', archived: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      setSessions(s => [next, ...s]); setActive(next); setMessages([]); setRepo('');
+      const response = await fetch(`${API}/new`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gitUrl: repo.trim() }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not create session');
+      const next: Session = { id: data.sessionId, git: repo.trim(), status: 'idle', archived: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      setSessions((current) => [next, ...current]); setActive(next); setMessages([]); setRepo('');
     } catch (err) { setNotice(err instanceof Error ? err.message : 'Could not create session'); }
     finally { setCreating(false); }
   }
 
   async function send(text = prompt) {
-    if (!active || !text.trim() || loading) return;
-    const user = { role: 'user' as const, content: text.trim(), time: 'now' };
-    setMessages(m => [...m, user]); setPrompt(''); setLoading(true); setNotice('');
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const response = await fetch(`${API}/ai/${active.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ messages: [...messages, user].map((m, index) => ({ id: `msg-${index}`, role: m.role, parts: [{ type: 'text', text: m.content }] })) }) });
-      if (!response.ok) throw new Error((await response.json()).message || 'Agent request failed');
-      const reader = response.body?.getReader(); if (!reader) throw new Error('No stream returned');
-      const decoder = new TextDecoder(); let buffer = ''; let answer = '';
-      setMessages(m => [...m, { role: 'assistant', content: '' }]);
-      while (true) {
-        const { value, done } = await reader.read(); if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n'); buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          try { const part = JSON.parse(line.slice(5).trim()); const delta = part.delta || part.textDelta || (part.type === 'text-delta' ? part.text : ''); if (delta) { answer += delta; setMessages(m => { const copy = [...m]; copy[copy.length - 1] = { role: 'assistant', content: answer }; return copy; }); } } catch { /* stream metadata */ }
-        }
-      }
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) setNotice(err instanceof Error ? err.message : 'Agent request failed');
-      setMessages(m => m.filter((item, i) => i !== m.length - 1 || item.content));
-    }
-    finally { abortRef.current = null; setLoading(false); }
+    if (!active || !text.trim() || isWorking) return;
+    setPrompt(''); setNotice('');
+    await sendMessage({ text: text.trim() });
   }
 
-  function stopResponse() { abortRef.current?.abort(); }
-
-  const repoName = useMemo(() => active?.git.split('/').pop()?.replace('.git', '') || 'workspace', [active]);
-
-  return <main className="shell">
-    <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">⌁</span><span>opendevin</span><span className="beta">BETA</span></div>
-      <nav><button className="nav-item active"><Icon name="grid"/> Workspace</button><button className="nav-item"><Icon name="terminal"/> Activity <span className="nav-count">{sessions.length}</span></button></nav>
-      <div className="side-label"><span>WORKSPACES</span><button onClick={() => setActive(null)} aria-label="New workspace"><Icon name="plus" size={15}/></button></div>
-      <div className="session-list">{sessions.length === 0 && <p className="empty-side">Your workspaces will appear here.</p>}{sessions.map(s => <button key={s.id} className={`session ${active?.id === s.id ? 'selected' : ''}`} onClick={() => selectSession(s)}><span className={`status-dot ${s.status === 'running' ? 'running' : ''}`}/><span><strong>{s.git.split('/').pop()?.replace('.git', '')}</strong><small>{s.status === 'idle' ? 'Ready' : s.status}</small></span></button>)}</div>
-      <div className="sidebar-bottom"><div className="avatar">OP</div><div><strong>Operator</strong><small>Local account</small></div><button className="more">···</button></div>
+  return <main className="app-shell">
+    <aside className="sidebar-panel">
+      <div className="brand"><span className="brand-orbit"><Sparkles size={15} /></span><span>opendevin</span><Badge variant="outline" className="beta-badge">LOCAL</Badge></div>
+      <div className="sidebar-section"><p>Control room</p><Button variant="secondary" className="nav-button"><MessageSquareText /> Workspace</Button><Button variant="ghost" className="nav-button"><Terminal /> Activity <Badge variant="outline" className="ml-auto">{sessions.length}</Badge></Button></div>
+      <div className="workspace-list-head"><p>Workspaces</p><Button variant="ghost" size="icon-sm" onClick={() => { setActive(null); setMessages([]); }} aria-label="Create workspace"><Plus /></Button></div>
+      <ScrollArea className="workspace-list">
+        {sessions.length === 0 ? <p className="empty-workspaces">Connect a repository to give your agent somewhere to work.</p> : sessions.map((session) => <button key={session.id} onClick={() => selectSession(session)} className={cn('workspace-link', active?.id === session.id && 'workspace-link-active')}><span className={cn('workspace-status', session.status === 'running' && 'workspace-status-running')} /><span><strong>{session.git.split('/').pop()?.replace('.git', '')}</strong><small>{session.status === 'idle' ? 'Ready' : session.status}</small></span></button>)}
+      </ScrollArea>
+      <div className="operator"><div className="operator-avatar">OP</div><span><strong>Operator</strong><small>Local account</small></span></div>
     </aside>
-    <section className="workspace">
-      <header className="topbar"><div className="crumb"><Icon name="grid" size={15}/> <span>Workspace</span>{active && <><b>/</b><strong>{repoName}</strong></>}</div><div className="top-actions"><span className="connection"><i/> Agent online</span><button className="icon-button"><Icon name="search"/></button></div></header>
-      {!active ? <div className="welcome"><div className="eyebrow"><span className="pulse"/> AUTONOMOUS DEVELOPER</div><h1>Build something<br/><em>worth shipping.</em></h1><p className="intro">Give OpenDevin a repository and a goal. It will inspect the code, make a plan, and work alongside you.</p><form className="repo-card" onSubmit={createSession}><label>CONNECT A REPOSITORY</label><div className="repo-input"><Icon name="github"/><input value={repo} onChange={e => setRepo(e.target.value)} placeholder="https://github.com/owner/repository" aria-label="GitHub repository URL"/><button disabled={creating || !repo.trim()}>{creating ? 'Connecting…' : 'Connect'} <span>↗</span></button></div><div className="repo-hint"><span>⌘</span> Public GitHub repositories supported</div></form><div className="suggestions"><span>OR START WITH A GOAL</span><div>{examples.map(x => <button key={x} onClick={() => setPrompt(x)}>{x}<span>→</span></button>)}</div></div>{notice && <div className="notice">{notice}</div>}</div> : <div className="chat-layout"><div className="chat"><div className="chat-head"><div><span className="eyebrow">ACTIVE WORKSPACE</span><h2>{repoName}</h2></div><span className="ready"><i/> Ready to work</span></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><div className="empty-glyph"><Icon name="terminal" size={23}/></div><h3>What should I work on?</h3><p>Describe a task in plain language. I’ll inspect the repository before making changes.</p></div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><div className="message-label">{m.role === 'user' ? 'YOU' : 'OPENDEVIN'} <span>{m.time || (loading && i === messages.length - 1 ? 'working' : 'just now')}</span></div><div className="message-body">{m.content || <span className="typing"><i/><i/><i/></span>}</div></div>)}<div ref={bottom}/></div><div className="composer-wrap"><div className="composer"><textarea value={prompt} onChange={e => setPrompt(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Tell OpenDevin what to do…" rows={1}/><button onClick={loading ? stopResponse : () => send()} disabled={!loading && !prompt.trim()} aria-label={loading ? 'Stop response' : 'Send'} className={loading ? 'stop-button' : ''}>{loading ? <span className="stop-square"/> : <Icon name="send"/>}</button></div><div className="composer-footer"><span><kbd>Enter</kbd> to send <kbd>Shift + Enter</kbd> for new line</span><span className="secure">⌁ Sandbox secured</span></div></div>{notice && <div className="notice">{notice}</div>}</div><aside className="activity"><div className="activity-title"><span>RUN ACTIVITY</span><button>···</button></div><div className="activity-line"><span className="activity-icon"><Icon name="github" size={14}/></span><div><strong>Repository connected</strong><small>{repoName}</small></div><time>now</time></div><div className="activity-line muted"><span className="activity-icon"><Icon name="terminal" size={14}/></span><div><strong>Sandbox ready</strong><small>Waiting for your first task</small></div></div><div className="activity-note"><span>TIP</span><p>OpenDevin can run commands, edit files, and verify its work inside an isolated sandbox.</p></div></aside></div>}
+
+    <section className="main-panel">
+      <header className="topbar"><div className="breadcrumb"><Box size={15} /><span>Workspace</span>{active && <><b>/</b><strong>{repoName}</strong></>}</div><Badge variant="outline" className="online-badge"><i /> Agent online</Badge></header>
+      {!active ? <section className="welcome-screen"><div className="welcome-kicker"><Sparkles size={14} /> Autonomous development</div><h1>Give your repository<br />a capable <em>pair.</em></h1><p>OpenDevin explores the codebase, uses real tools in an isolated workspace, and leaves a clear trail of everything it did.</p><form className="connect-card" onSubmit={createSession}><label htmlFor="repository">Repository URL</label><div><GitFork size={18} /><input id="repository" value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="https://github.com/owner/repository" /><Button type="submit" disabled={creating || !repo.trim()}>{creating ? <LoaderCircle className="animate-spin" /> : <>Connect <span>↗</span></>}</Button></div><small>Public GitHub, GitLab, and Bitbucket repositories are supported.</small></form><div className="suggestion-grid">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setPrompt(suggestion)}><span>{suggestion}</span><span>→</span></button>)}</div>{(notice || error?.message) && <div className="notice">{notice || error?.message}</div>}</section> : <section className="chat-screen">
+        <div className="chat-column"><header className="chat-heading"><div><p>Active workspace</p><h2>{repoName}</h2></div><Badge variant="secondary" className="ready-badge"><i /> {isWorking ? 'Agent working' : 'Ready to work'}</Badge></header>
+          <ScrollArea className="chat-scroll"><div className="messages-stack">{messages.length === 0 && <div className="empty-chat"><div><Code2 size={23} /></div><h3>What should I work on?</h3><p>Describe the outcome you want. The agent will inspect before it changes anything.</p><div>{suggestions.map((suggestion) => <Button key={suggestion} variant="outline" size="sm" onClick={() => send(suggestion)}>{suggestion}</Button>)}</div></div>}{messages.map((message) => <Message key={message.id} message={message} isStreaming={isWorking && message.id === messages.at(-1)?.id} />)}<div ref={bottom} /></div></ScrollArea>
+          <div className="composer-zone"><div className="composer"><Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Ask OpenDevin to investigate, build, or fix…" rows={1} /><Button size="icon" onClick={() => isWorking ? stop() : send()} disabled={!isWorking && !prompt.trim()} aria-label={isWorking ? 'Stop response' : 'Send message'} variant={isWorking ? 'destructive' : 'default'}>{isWorking ? <CircleStop /> : <SendHorizontal />}</Button></div><div className="composer-hint"><span><kbd>Enter</kbd> to send <kbd>Shift + Enter</kbd> for a new line</span><span>Sandboxed execution</span></div>{(notice || error?.message) && <div className="notice">{notice || error?.message}</div>}</div>
+        </div><aside className="activity-panel"><div className="activity-head"><div><p>Live trace</p><h3>Run activity</h3></div><Badge variant="outline">{isWorking ? 'LIVE' : 'IDLE'}</Badge></div><div className="trace-line"><span className="trace-icon"><GitFork size={14} /></span><div><strong>Repository connected</strong><small>{repoName}</small></div><time>now</time></div><div className="trace-line"><span className="trace-icon"><Terminal size={14} /></span><div><strong>{isWorking ? 'Sandbox is executing' : 'Sandbox ready'}</strong><small>{isWorking ? 'Tool output will appear in chat' : 'Waiting for your direction'}</small></div></div><div className="activity-tip"><FileText size={15} /><p>Every command, file read, and edit stays visible in the conversation.</p></div></aside>
+      </section>}
     </section>
   </main>;
 }
