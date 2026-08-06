@@ -10,9 +10,11 @@
     "format": "turbo fmt:check",
     "format:fix": "turbo fmt",
     "db:generate": "pnpm --filter @opendevin/backend db:generate",
-    "db:migrate": "pnpm --filter @opendevin/backend db:migrate"
+    "db:migrate": "pnpm --filter @opendevin/backend db:migrate",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
     "turbo": "^2.5.6"
   },
   "pnpm": {
