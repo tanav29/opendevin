@@ -15,6 +15,8 @@ import { sandboxTools } from "./lib/ai";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
+type TerminalSession = { sandbox: Sandbox; pid: number; output: string };
+const terminals = new Map<string, TerminalSession>();
 
 // Keep the complete AI SDK UI message. Text-only persistence loses the tool
 // call and tool-result parts that make an agent run auditable in the client.
@@ -112,9 +114,19 @@ app.get("/sessions/:sessionId/messages", async (req, res) => {
 
 app.patch("/sessions/:sessionId", async (req, res) => {
   try {
+    const current = await prisma.sessions.findUnique({ where: { id: req.params.sessionId } });
+    if (!current) return res.status(404).json({ message: "Session not found" });
+    if (req.body.archived) {
+      const terminal = terminals.get(current.id);
+      if (terminal) {
+        await terminal.sandbox.pty.kill(terminal.pid).catch(() => undefined);
+        terminals.delete(current.id);
+      }
+      await Sandbox.connect(current.sandbox).then((sandbox) => sandbox.kill()).catch(() => undefined);
+    }
     const session = await prisma.sessions.update({
       where: { id: req.params.sessionId },
-      data: { archived: Boolean(req.body.archived) },
+      data: { archived: Boolean(req.body.archived), ...(req.body.archived ? { status: "stopped" } : {}) },
     });
     res.json(session);
   } catch {
@@ -122,11 +134,95 @@ app.patch("/sessions/:sessionId", async (req, res) => {
   }
 });
 
+app.get("/sessions/:sessionId/sandbox", async (req, res) => {
+  const session = await prisma.sessions.findUnique({ where: { id: req.params.sessionId } });
+  if (!session) return res.status(404).json({ message: "Session not found" });
+  if (session.status === "stopped") return res.json({ status: "stopped" });
+  try {
+    const sandbox = await Sandbox.connect(session.sandbox);
+    res.json({ status: (await sandbox.isRunning()) ? "running" : "stopped" });
+  } catch {
+    res.json({ status: "stopped" });
+  }
+});
+
+app.post("/sessions/:sessionId/stop", async (req, res) => {
+  const session = await prisma.sessions.findUnique({ where: { id: req.params.sessionId } });
+  if (!session) return res.status(404).json({ message: "Session not found" });
+  const terminal = terminals.get(session.id);
+  if (terminal) {
+    await terminal.sandbox.pty.kill(terminal.pid).catch(() => undefined);
+    terminals.delete(session.id);
+  }
+  await Sandbox.connect(session.sandbox).then((sandbox) => sandbox.kill()).catch(() => undefined);
+  const updated = await prisma.sessions.update({ where: { id: session.id }, data: { status: "stopped" } });
+  res.json({ status: "stopped", session: updated });
+});
+
+app.get("/sessions/:sessionId/diff", async (req, res) => {
+  const session = await prisma.sessions.findUnique({ where: { id: req.params.sessionId } });
+  if (!session) return res.status(404).json({ message: "Session not found" });
+  if (session.status === "stopped") return res.status(409).json({ message: "Start a new workspace to inspect a stopped sandbox." });
+  try {
+    const sandbox = await Sandbox.connect(session.sandbox);
+    const result = await sandbox.commands.run("git diff --no-ext-diff --unified=3", { cwd: session.cwd, timeoutMs: 30_000 });
+    if (result.exitCode !== 0) return res.status(502).json({ message: result.stderr || "Could not read Git diff." });
+    res.json({ diff: result.stdout });
+  } catch {
+    res.status(502).json({ message: "Could not connect to this sandbox." });
+  }
+});
+
+app.post("/sessions/:sessionId/terminal", async (req, res) => {
+  const session = await prisma.sessions.findUnique({ where: { id: req.params.sessionId } });
+  if (!session) return res.status(404).json({ message: "Session not found" });
+  if (session.status === "stopped") return res.status(409).json({ message: "This sandbox has been stopped." });
+  try {
+    let terminal = terminals.get(session.id);
+    if (!terminal) {
+      const sandbox = await Sandbox.connect(session.sandbox);
+      let created: TerminalSession | undefined;
+      const handle = await sandbox.pty.create({
+        cols: 100,
+        rows: 32,
+        cwd: session.cwd,
+        onData: (data) => {
+          if (created) created.output = (created.output + new TextDecoder().decode(data)).slice(-100_000);
+        },
+      });
+      created = { sandbox, pid: handle.pid, output: "" };
+      terminal = created;
+      terminals.set(session.id, terminal);
+      // The PTY's first prompt arrives asynchronously; let the client poll for it.
+    }
+    res.json({ pid: terminal.pid, output: terminal.output });
+  } catch {
+    res.status(502).json({ message: "Could not start a terminal for this sandbox." });
+  }
+});
+
+app.get("/sessions/:sessionId/terminal", async (req, res) => {
+  const terminal = terminals.get(req.params.sessionId);
+  if (!terminal) return res.status(404).json({ message: "Terminal is not open." });
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  res.json({ output: terminal.output.slice(offset), offset: terminal.output.length });
+});
+
+app.post("/sessions/:sessionId/terminal/input", async (req, res) => {
+  const terminal = terminals.get(req.params.sessionId);
+  const input = req.body.input;
+  if (!terminal) return res.status(404).json({ message: "Terminal is not open." });
+  if (typeof input !== "string" || !input) return res.status(400).json({ message: "Terminal input is required." });
+  await terminal.sandbox.pty.sendInput(terminal.pid, new TextEncoder().encode(input));
+  res.sendStatus(204);
+});
+
 app.post("/ai/:sessionId", async (req, res) => {
   const session = await prisma.sessions.findUnique({
     where: { id: req.params.sessionId },
   });
   if (!session) return res.status(404).json({ message: "Session not found" });
+  if (session.status === "stopped") return res.status(409).json({ message: "This session's sandbox has been stopped." });
   const body = req.body as { prompt?: string; messages?: unknown[] };
   if ((!body.prompt || typeof body.prompt !== "string") && !Array.isArray(body.messages))
     return res.status(400).json({ message: "prompt or messages is required" });
