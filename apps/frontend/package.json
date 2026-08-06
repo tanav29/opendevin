@@ -1,12 +1,14 @@
 {
-  "name": "frontend",
+  "name": "@opendevin/frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "fmt": "echo \"Formatting is not configured for frontend\"",
+    "fmt:check": "echo \"Formatting is not configured for frontend\""
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.55",

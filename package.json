@@ -1,0 +1,23 @@
+{
+  "name": "opendevin",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "format": "turbo fmt:check",
+    "format:fix": "turbo fmt",
+    "db:generate": "pnpm --filter @opendevin/backend db:generate",
+    "db:migrate": "pnpm --filter @opendevin/backend db:migrate"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
