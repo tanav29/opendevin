@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import {
+  Archive,
   CheckCircle2,
   CircleDashed,
   Command,
@@ -56,8 +57,45 @@ export function AppSidebar() {
   const { activeSessionId, selectSession } = useSessionSelection();
   const router = useRouter();
   const workingCount = sessions.filter((session) =>
+    !session.archived &&
     ["working", "running", "starting"].includes(session.status),
   ).length;
+  const activeSessions = sessions.filter((session) => !session.archived);
+  const archivedSessions = sessions.filter((session) => session.archived);
+
+  function renderSession(session: Session) {
+    const working = ["working", "running", "starting"].includes(
+      session.status,
+    );
+    return (
+      <SidebarMenuItem key={session.id}>
+        <SidebarMenuButton
+          isActive={activeSessionId === session.id}
+          onClick={() => {
+            selectSession(session.id);
+            router.push(`/s/${session.id}`);
+          }}
+          tooltip={sessionName(session)}
+          className="h-fit">
+          {session.archived ? (
+            <Archive className="text-muted-foreground" />
+          ) : working ? (
+            <LoaderCircle className="animate-spin text-emerald-600" />
+          ) : session.status === "stopped" ? (
+            <CircleDashed />
+          ) : (
+            <CheckCircle2 />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate">{sessionName(session)}</span>
+            <span className="block text-[10px] font-normal capitalize text-muted-foreground">
+              {session.archived ? "Archived" : session.status || "idle"}
+            </span>
+          </span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
 
   return (
     <Sidebar>
@@ -89,7 +127,7 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <div className="flex items-center justify-between">
-            <SidebarGroupLabel>Sessions</SidebarGroupLabel>
+            <SidebarGroupLabel>Workspaces</SidebarGroupLabel>
             {workingCount > 0 && (
               <span className="mr-2 text-[10px] text-emerald-600">
                 {workingCount} active
@@ -115,47 +153,23 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
-            {!isLoading && !isError && sessions.length === 0 && (
+            {!isLoading && !isError && activeSessions.length === 0 && (
               <SidebarMenuItem>
                 <p className="px-2 py-2 text-xs text-sidebar-foreground/60">
-                  No sessions yet
+                  No active workspaces
                 </p>
               </SidebarMenuItem>
             )}
-            {sessions.map((session) => {
-              const working = ["working", "running", "starting"].includes(
-                session.status,
-              );
-              return (
-                <SidebarMenuItem key={session.id}>
-                  <SidebarMenuButton
-                    isActive={activeSessionId === session.id}
-                    onClick={() => {
-                      selectSession(session.id);
-                      router.push(`/s/${session.id}`);
-                    }}
-                    tooltip={sessionName(session)}
-                    className="h-fit">
-                    {working ? (
-                      <LoaderCircle className="animate-spin text-emerald-600" />
-                    ) : session.status === "stopped" ? (
-                      <CircleDashed />
-                    ) : (
-                      <CheckCircle2 />
-                    )}
-                    <span className="min-w-0">
-                      <span className="block truncate">
-                        {sessionName(session)}
-                      </span>
-                      <span className="block text-[10px] font-normal capitalize text-muted-foreground">
-                        {session.status || "idle"}
-                      </span>
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
+            {activeSessions.map(renderSession)}
           </SidebarMenu>
+          {archivedSessions.length > 0 && (
+            <div className="mt-5 border-t border-sidebar-border/70 pt-4">
+              <SidebarGroupLabel className="h-7 text-[10px] uppercase tracking-[0.16em]">
+                Archived · {archivedSessions.length}
+              </SidebarGroupLabel>
+              <SidebarMenu>{archivedSessions.map(renderSession)}</SidebarMenu>
+            </div>
+          )}
         </SidebarGroup>
       </SidebarContent>
     </Sidebar>

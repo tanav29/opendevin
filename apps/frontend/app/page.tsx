@@ -42,7 +42,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { API, type Session, useSessionSelection } from "@/components/providers";
-type View = "chat" | "diff" | "terminal";
+type View = "chat" | "activity" | "review" | "diff" | "terminal";
+type AgentRun = { id: string; status: string; prompt: string; plan: Record<string, unknown>; branch?: string; baseBranch?: string; summary?: string; validationStatus?: string; prTitle?: string; prBody?: string };
+type RunEvent = { id: string; sequence: number; type: string; status?: string; message: string; createdAt: string };
 
 const suggestions = [
   "Map the architecture and key risks",
@@ -85,7 +87,7 @@ function Message({
   return (
     <article className={cn("flex gap-3", user ? "justify-end" : "items-start")}>
       {!user && (
-        <div className="mt-1 grid size-7 shrink-0 place-items-center rounded-lg bg-foreground text-background shadow-sm">
+        <div className="mt-1 grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-background">
           <Code2 className="size-3.5" />
         </div>
       )}
@@ -95,7 +97,7 @@ function Message({
         </p>
         <div className={cn(
           "text-sm leading-7",
-          user && "rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 leading-6 text-background shadow-sm",
+          user && "rounded-lg rounded-tr-sm bg-foreground px-4 py-2.5 leading-6 text-background",
         )}>
           {message.parts.map((part, i) => {
             if (part.type === "text")
@@ -212,6 +214,8 @@ export function Home() {
   const [sandbox, setSandbox] = useState("unknown");
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
+  const [runDiff, setRunDiff] = useState("");
 
   const bottom = useRef<HTMLDivElement>(null);
   const transport = useMemo(
@@ -221,14 +225,23 @@ export function Home() {
       }),
     [active?.id],
   );
-  const { messages, setMessages, sendMessage, status, stop, error } = useChat({
+  const { messages, setMessages, status, error } = useChat({
     transport,
     throttle: 40,
   });
   const working = status === "submitted" || status === "streaming";
+  const sandboxRunning = sandbox === "running";
+  const sandboxUnavailable = !sandboxRunning;
   const repoName =
     active?.git.split("/").pop()?.replace(".git", "") || "workspace";
   const alert = notice || error?.message;
+  const runsQuery = useQuery<AgentRun[]>({
+    queryKey: ["runs", active?.id],
+    queryFn: async () => { const response = await fetch(`${API}/sessions/${active!.id}/runs`); if (!response.ok) throw new Error("Could not load runs."); return response.json(); },
+    enabled: Boolean(active), refetchInterval: 2000,
+  });
+  const run = runsQuery.data?.[0];
+  const runWorking = run && ["planning", "running", "validating"].includes(run.status);
 
   const messagesQuery = useQuery<UIMessage[]>({
     queryKey: ["messages", active?.id],
@@ -256,6 +269,16 @@ export function Home() {
         .then((data) => setSandbox(data.status || "unknown"))
         .catch(() => setSandbox("unknown"));
   }, [active]);
+  useEffect(() => {
+    if (!run?.id) {
+      const reset = window.setTimeout(() => setRunEvents([]), 0);
+      return () => window.clearTimeout(reset);
+    }
+    const source = new EventSource(`${API}/runs/${run.id}/events`);
+    source.onmessage = (event) => { const next = JSON.parse(event.data) as RunEvent; setRunEvents((current) => current.some((item) => item.id === next.id) ? current : [...current, next]); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); };
+    source.addEventListener("complete", () => { source.close(); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); });
+    return () => source.close();
+  }, [run?.id, active?.id, queryClient]);
 
   async function createSession(event: FormEvent) {
     event.preventDefault();
@@ -297,16 +320,23 @@ export function Home() {
   }
   async function send(text = prompt) {
     if (!active || !text.trim() || working) return;
-    if (sandbox === "stopped") {
+    if (!sandboxRunning) {
       setNotice(
-        "This sandbox has been stopped. Archive the session or create a new workspace.",
+        "This sandbox is not running. Start a new workspace to continue.",
       );
       return;
     }
     setPrompt("");
     setNotice("");
-    await sendMessage({ text: text.trim() });
+    try {
+      const response = await fetch(`${API}/sessions/${active.id}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text.trim() }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.message);
+      setRunEvents([]); queryClient.invalidateQueries({ queryKey: ["runs", active.id] });
+    } catch (err) { setNotice(err instanceof Error ? err.message : "Could not start run."); }
   }
+  async function approveRun() { if (!run) return; const response = await fetch(`${API}/runs/${run.id}/approve`, { method: "POST" }); const data = await response.json(); if (!response.ok) setNotice(data.message); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); }
+  async function cancelRun() { if (!run) return; await fetch(`${API}/runs/${run.id}/cancel`, { method: "POST" }); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); }
+  async function loadRunDiff() { if (!run) return; const response = await fetch(`${API}/runs/${run.id}/diff`); const data = await response.json(); if (response.ok) setRunDiff(data.diff || ""); else setNotice(data.message); }
   const loadDiff = useCallback(async () => {
     if (!active) return;
     setDiffLoading(true);
@@ -339,6 +369,7 @@ export function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message);
       setSandbox("stopped");
+      setView("chat");
       queryClient.setQueryData<Session[]>(["sessions"], (all = []) =>
         all.map((s) => (s.id === active.id ? { ...s, status: "stopped" } : s)),
       );
@@ -374,16 +405,18 @@ export function Home() {
   useEffect(() => {
     if (active && view === "diff") window.setTimeout(() => void loadDiff(), 0);
   }, [active, view, loadDiff]);
-  const tabs: { id: View; label: string; icon: typeof MessageSquareText }[] = [
-    { id: "chat", label: "Chat", icon: MessageSquareText },
-    { id: "diff", label: "Changes", icon: FileDiff },
-    { id: "terminal", label: "Terminal", icon: TerminalIcon },
+  const tabs: { id: View; label: string; icon: typeof MessageSquareText; requiresSandbox?: boolean }[] = [
+    { id: "chat", label: "Conversation", icon: MessageSquareText },
+    { id: "activity", label: "Activity", icon: TerminalIcon },
+    { id: "review", label: "Review", icon: FileDiff },
+    { id: "diff", label: "Changes", icon: FileDiff, requiresSandbox: true },
+    { id: "terminal", label: "Terminal", icon: TerminalIcon, requiresSandbox: true },
   ];
 
   return (
     <main className="flex h-screen bg-background">
-      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_-20%,color-mix(in_oklab,var(--muted)_55%,transparent),transparent_48%)]">
-        <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background/80 px-3 backdrop-blur-md sm:px-5">
+      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background px-3 sm:px-5">
           <Tooltip>
             <TooltipTrigger render={<SidebarTrigger />} />
             <TooltipContent>Toggle sidebar</TooltipContent>
@@ -391,7 +424,7 @@ export function Home() {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {active && (
               <div className="flex w-fit items-center gap-2 font-medium text-foreground">
-                <span className="grid size-6 place-items-center rounded-md border bg-card shadow-sm">
+                <span className="grid size-6 place-items-center rounded-md border bg-card">
                   <Globe className="size-3" />
                 </span>
                 <span className="max-w-40 truncate">{repoName}</span>
@@ -433,7 +466,7 @@ export function Home() {
                       variant="ghost"
                       size="icon-sm"
                       aria-label="Stop sandbox"
-                      disabled={sandbox === "stopped"}
+                      disabled={!sandboxRunning || working}
                       onClick={stopSandbox}>
                       <Power />
                     </Button>
@@ -460,11 +493,11 @@ export function Home() {
         </header>
         {!active ? (
           <section className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-5 py-16 sm:px-10">
-            <div className="mb-6 flex w-fit items-center gap-2 rounded-full border border-foreground/10 bg-card/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] shadow-sm">
-              <span className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)]" />
+            <div className="mb-6 flex w-fit items-center gap-2 rounded-full border border-foreground/10 bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
+              <span className="size-1.5 rounded-full bg-emerald-500" />
               Autonomous development
             </div>
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-6xl">
+            <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
               Give your codebase
               <span className="block text-muted-foreground">a second set of hands.</span>
             </h1>
@@ -474,7 +507,7 @@ export function Home() {
             </p>
             <form
               onSubmit={createSession}
-              className="mt-10 max-w-2xl rounded-2xl border bg-card/90 p-3 shadow-[0_16px_50px_-24px_hsl(var(--foreground)/.35)] ring-1 ring-foreground/5">
+              className="mt-10 max-w-2xl rounded-lg border bg-card p-3">
               <label
                 htmlFor="repository"
                 className="mb-2 block px-1 text-xs font-medium">
@@ -509,12 +542,13 @@ export function Home() {
         ) : (
           <section className="flex min-h-0 w-full flex-1 flex-col">
             <div className="flex h-9 items-center border-b px-4 sm:px-6">
-              {tabs.map(({ id, label, icon: Icon }) => (
+              {tabs.map(({ id, label, icon: Icon, requiresSandbox }) => (
                 <button
                   key={id}
+                  disabled={Boolean(requiresSandbox && sandboxUnavailable)}
                   onClick={() => setView(id)}
                   className={cn(
-                    "flex items-center gap-2 border-b-2 px-2 h-full text-xs font-medium text-muted-foreground",
+                    "flex h-full items-center gap-2 border-b-2 border-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35",
                     view === id && "border-foreground text-foreground",
                   )}>
                   <Icon className="size-4" />
@@ -528,7 +562,7 @@ export function Home() {
                   <div className="mx-auto max-w-4xl space-y-8 px-4 py-8 sm:px-8">
                     {messages.length === 0 && (
                       <div className="mx-auto mt-[12vh] max-w-md text-center">
-                        <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-foreground text-background shadow-lg shadow-foreground/10">
+                        <div className="mx-auto grid size-14 place-items-center rounded-lg bg-foreground text-background">
                           <Code2 className="size-6" />
                         </div>
                         <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Workspace ready</p>
@@ -562,11 +596,11 @@ export function Home() {
                     <div ref={bottom} />
                   </div>
                 </div>
-                <div className="border-t bg-background/80 px-4 pb-4 pt-3 backdrop-blur-md sm:px-8">
-                  <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border bg-card p-2 shadow-[0_12px_35px_-20px_hsl(var(--foreground)/.4)] ring-1 ring-foreground/5">
+                <div className="border-t bg-background px-4 pb-4 pt-3 sm:px-8">
+                  <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-lg border bg-card p-2">
                   <Textarea
                     value={prompt}
-                    disabled={sandbox === "stopped"}
+                    disabled={sandboxUnavailable || Boolean(runWorking)}
                     onChange={(e) => setPrompt(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
@@ -575,8 +609,8 @@ export function Home() {
                       }
                     }}
                     placeholder={
-                      sandbox === "stopped"
-                        ? "Sandbox stopped"
+                      sandboxUnavailable
+                        ? "Sandbox unavailable"
                         : "Ask OpenDevin to investigate, build, or fix…"
                     }
                     rows={1}
@@ -587,14 +621,14 @@ export function Home() {
                       render={
                         <Button
                           size="icon"
-                          aria-label={working ? "Stop response" : "Send message"}
-                          className="size-9 rounded-xl"
-                          onClick={() => (working ? stop() : send())}
+                          aria-label={runWorking ? "Stop run" : "Start run"}
+                          className="size-9 rounded-md"
+                          onClick={() => (runWorking ? cancelRun() : send())}
                     disabled={
-                      !working && (!prompt.trim() || sandbox === "stopped")
+                      !runWorking && (!prompt.trim() || sandboxUnavailable)
                     }
-                    variant={working ? "destructive" : "default"}>
-                          {working ? <CircleStop /> : <SendHorizontal />}
+                    variant={runWorking ? "destructive" : "default"}>
+                          {runWorking ? <CircleStop /> : <SendHorizontal />}
                         </Button>
                       }
                     />
@@ -605,6 +639,31 @@ export function Home() {
                 </div>
               </>
             )}
+            {view === "activity" && (
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
+                <div className="mx-auto max-w-4xl">
+                  <div className="mb-5 flex items-center justify-between">
+                    <div><h2 className="text-lg font-semibold">Run activity</h2><p className="text-sm text-muted-foreground">{run ? `${run.status.replaceAll("_", " ")} · ${run.prompt}` : "Start a task to see durable activity."}</p></div>
+                    {runWorking && <Button variant="destructive" size="sm" onClick={cancelRun}><CircleStop />Stop</Button>}
+                  </div>
+                  <div className="space-y-3 border-l pl-5">
+                    {runEvents.map((event) => <article key={event.id} className="relative rounded-lg border bg-card p-3 text-sm"><span className="absolute -left-[1.72rem] top-4 size-2.5 rounded-full bg-emerald-500" /><div className="flex justify-between gap-4"><span className="font-medium">{event.message}</span><span className="shrink-0 text-xs text-muted-foreground">{event.status || event.type}</span></div></article>)}
+                    {!runEvents.length && <p className="text-sm text-muted-foreground">Waiting for activity…</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+            {view === "review" && (
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8"><div className="mx-auto max-w-4xl space-y-5">
+                {!run ? <p className="text-sm text-muted-foreground">No autonomous run has been started in this workspace.</p> : <>
+                  <section className="rounded-xl border bg-card p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Run status</p><h2 className="mt-1 text-xl font-semibold capitalize">{run.status.replaceAll("_", " ")}</h2></div>{run.status === "awaiting_approval" && <Button onClick={approveRun} disabled={sandboxUnavailable}>Approve plan</Button>}{runWorking && <Button variant="destructive" onClick={cancelRun}><CircleStop />Stop</Button>}</div>
+                    {run.branch && <p className="mt-4 font-mono text-xs">{run.branch} <span className="text-muted-foreground">from {run.baseBranch}</span></p>}</section>
+                  {run.status === "awaiting_approval" && <section className="rounded-xl border bg-card p-5"><h3 className="font-semibold">Proposed plan</h3><pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">{JSON.stringify(run.plan, null, 2)}</pre></section>}
+                  <section className="rounded-xl border bg-card p-5"><div className="flex items-center justify-between"><h3 className="font-semibold">Review evidence</h3><Button variant="outline" size="sm" onClick={loadRunDiff} disabled={sandboxUnavailable}><RefreshCw />Load diff</Button></div>{runDiff ? <div className="mt-4 overflow-hidden rounded border text-xs"><PatchDiff patch={runDiff} disableWorkerPool /></div> : <p className="mt-3 text-sm text-muted-foreground">Diff is available after execution completes.</p>}</section>
+                  {run.summary && <section className="rounded-xl border bg-card p-5"><h3 className="font-semibold">Handoff</h3><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{run.summary}</p><p className="mt-4 text-sm"><strong>PR title:</strong> {run.prTitle}</p><pre className="mt-2 whitespace-pre-wrap rounded bg-muted p-3 text-xs">{run.prBody}</pre></section>}
+                </>}
+              </div></div>
+            )}
             {view === "diff" && (
               <div className="min-h-0 flex-1 px-4 py-4 sm:px-6">
                 <div className="mb-3 flex items-center justify-between">
@@ -613,7 +672,7 @@ export function Home() {
                     variant="outline"
                     size="sm"
                     onClick={loadDiff}
-                    disabled={diffLoading}>
+                    disabled={diffLoading || sandboxUnavailable}>
                     {diffLoading ? (
                       <LoaderCircle className="animate-spin" />
                     ) : (
@@ -647,7 +706,7 @@ export function Home() {
                   </h2>
                   <span className="text-[10px] text-emerald-600">LIVE / WS</span>
                 </div>
-                <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-[#101311] shadow-sm">
+                <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-[#101311]">
                   <TerminalPane
                     sessionId={active.id}
                     onError={setNotice}

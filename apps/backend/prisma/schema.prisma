@@ -26,4 +26,57 @@ model Sessions {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  runs      AgentRun[]
+}
+
+model AgentRun {
+  id               String        @id @default(cuid())
+  sessionId        String
+  prompt           String
+  status           String
+  planJson         String        @default("{}")
+  summary          String?
+  branch           String?
+  baseBranch       String?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  cancelledAt      DateTime?
+  validationStatus String?
+  prTitle          String?
+  prBody           String?
+  session          Sessions      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  events           RunEvent[]
+  artifacts        RunArtifact[]
+
+  @@index([sessionId, createdAt])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RunEvent {
+  id          String   @id @default(cuid())
+  runId       String
+  sequence    Int
+  type        String
+  status      String?
+  message     String
+  payloadJson String   @default("{}")
+  createdAt   DateTime @default(now())
+  run         AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId, createdAt])
+}
+
+model RunArtifact {
+  id        String   @id @default(cuid())
+  runId     String
+  kind      String
+  path      String?
+  content   String
+  truncated Boolean  @default(false)
+  createdAt DateTime @default(now())
+  run       AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, kind])
 }
