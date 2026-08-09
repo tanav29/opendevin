@@ -7,7 +7,5 @@ dist
 .env.*
 !.env.example
 generated
-migrations
-!apps/backend/prisma/migrations/
-!apps/backend/prisma/migrations/**
+/apps/backend/prisma/migrations/**
 .turbo
