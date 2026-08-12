@@ -27,7 +27,7 @@ Already working:
 - Read-only planning followed by explicit approval
 - Repository tools: read, edit, write, command, Git inspection
 - SSE run activity streaming
-- Prisma persistence for sessions, runs, events, and artifacts
+- Convex persistence for sessions, runs, events, and artifacts
 - Per-run branches
 - Validation commands and limited recovery attempts
 - Diff/review UI
@@ -43,7 +43,7 @@ Important current limitations:
 - No cost/token accounting
 - No robust session timeout/cleanup worker
 - API and terminal routes are effectively unauthenticated
-- SQLite/local development storage only
+- Convex-backed persistence
 
 ## Product decisions
 
@@ -207,7 +207,7 @@ Add:
 - `Invite`
 - OAuth account/token records
 
-Migrate production storage from SQLite to PostgreSQL while retaining SQLite for local development if useful.
+Use Convex as the single production and local persistence layer.
 
 ### Authorization rules
 
@@ -240,7 +240,7 @@ Replace ad-hoc repository startup with an explicit project setup flow.
 - Framework/runtime version
 - Install/build/start commands
 - Required ports
-- Required services such as Postgres or Redis
+- Required external services
 - Safe environment variables/secrets
 - Agent context instructions
 - Allowed file patterns
@@ -378,7 +378,7 @@ Add end-to-end coverage for:
 
 ### Deployment
 
-- PostgreSQL
+- Convex
 - Redis/job queue if workers are used
 - Managed frontend
 - API service

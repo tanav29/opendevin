@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ConvexProvider } from "convex/react";
+import { convex } from "@/lib/convex";
 
 export type Session = {
   id: string;
@@ -10,6 +12,8 @@ export type Session = {
   archived: boolean;
   createdAt: string;
   updatedAt: string;
+  sandbox?: string;
+  cwd?: string;
 };
 
 export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -23,11 +27,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
   const [activeSessionId, selectSession] = useState<string | null>(null);
   return (
+    <ConvexProvider client={convex}>
     <QueryClientProvider client={queryClient}>
       <SessionSelectionContext.Provider value={{ activeSessionId, selectSession }}>
         {children}
       </SessionSelectionContext.Provider>
     </QueryClientProvider>
+    </ConvexProvider>
   );
 }
 

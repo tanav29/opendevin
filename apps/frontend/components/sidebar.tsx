@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
@@ -10,7 +10,7 @@ import {
   LoaderCircle,
   Plus,
 } from "lucide-react";
-import { API, type Session, useSessionSelection } from "@/components/providers";
+import { type Session, useSessionSelection } from "@/components/providers";
 import {
   Sidebar,
   SidebarContent,
@@ -23,37 +23,32 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { api } from "@convex/_generated/api";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-async function getSessions(): Promise<Session[]> {
-  const response = await fetch(`${API}/sessions`);
-  if (!response.ok) throw new Error("Could not load sessions");
-  return response.json();
-}
-
 function sessionName(session: Session) {
   return (
     session.git
       .split("/")
       .pop()
-      ?.replace(/\.git$/, "") || "Untitled workspace"
+      ?.replace(/\.git$/, "") || (session.sandbox ? "Untitled workspace" : "Chat session")
   );
 }
 
 export function AppSidebar() {
-  const {
-    data: sessions = [],
-    isLoading,
-    isError,
-  } = useQuery({
-    queryKey: ["sessions"],
-    queryFn: getSessions,
-    refetchInterval: 5000,
-  });
+  const sessionsResult = useConvexQuery(api.sessions.list, {});
+  const sessions = ((sessionsResult ?? []) as unknown as Array<Record<string, unknown>>).map((session) => ({
+    ...session,
+    id: String(session.id ?? session._id),
+    createdAt: new Date(Number(session.createdAt)).toISOString(),
+    updatedAt: new Date(Number(session.updatedAt)).toISOString(),
+  })) as Session[];
+  const isLoading = sessionsResult === undefined;
+  const isError = false;
   const { activeSessionId, selectSession } = useSessionSelection();
   const router = useRouter();
   const workingCount = sessions.filter((session) =>

@@ -1,0 +1,8 @@
+import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+
+const fields = { sessionId: v.id("sessions"), prompt: v.string(), status: v.string(), planJson: v.optional(v.string()), summary: v.optional(v.string()), branch: v.optional(v.string()), baseBranch: v.optional(v.string()), startedAt: v.optional(v.number()), finishedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), validationStatus: v.optional(v.string()), prTitle: v.optional(v.string()), prBody: v.optional(v.string()) };
+export const list = query({ args: { sessionId: v.id("sessions") }, handler: ({ db }, { sessionId }) => db.query("runs").withIndex("by_session", q => q.eq("sessionId", sessionId)).order("desc").take(20) });
+export const get = query({ args: { id: v.id("runs") }, handler: ({ db }, { id }) => db.get(id) });
+export const create = mutation({ args: fields, handler: async ({ db }, args) => { const now = Date.now(); const id = await db.insert("runs", { ...args, planJson: args.planJson ?? "{}", createdAt: now, updatedAt: now }); return db.get(id); } });
+export const update = mutation({ args: { id: v.id("runs"), status: v.optional(v.string()), planJson: v.optional(v.string()), summary: v.optional(v.string()), branch: v.optional(v.string()), baseBranch: v.optional(v.string()), startedAt: v.optional(v.number()), finishedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), validationStatus: v.optional(v.string()), prTitle: v.optional(v.string()), prBody: v.optional(v.string()) }, handler: async ({ db }, { id, ...changes }) => { const data = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined)); await db.patch(id, { ...data, updatedAt: Date.now() }); return db.get(id); } });

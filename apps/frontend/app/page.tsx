@@ -9,7 +9,8 @@ import {
   useState,
 } from "react";
 import { useChat } from "@ai-sdk/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
@@ -28,6 +29,7 @@ import {
   Power,
   RefreshCw,
   SendHorizontal,
+  Sparkles,
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -42,9 +44,18 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { API, type Session, useSessionSelection } from "@/components/providers";
-type View = "chat" | "activity" | "review" | "diff" | "terminal";
+import { api } from "@convex/_generated/api";
+type View = "chat" | "diff" | "terminal";
 type AgentRun = { id: string; status: string; prompt: string; plan: Record<string, unknown>; branch?: string; baseBranch?: string; summary?: string; validationStatus?: string; prTitle?: string; prBody?: string };
-type RunEvent = { id: string; sequence: number; type: string; status?: string; message: string; createdAt: string };
+
+function parsePlan(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 const suggestions = [
   "Map the architecture and key risks",
@@ -61,16 +72,42 @@ type ToolPart = {
   errorText?: string;
 };
 
+const TOOL_DONE_STATES = new Set([
+  "output-available",
+  "output-denied",
+  "successful-parse",
+  "complete",
+  "done",
+]);
+const TOOL_ERROR_STATES = new Set([
+  "output-error",
+  "failed-parse",
+  "error",
+]);
+
 function ToolCall({ part }: { part: ToolPart }) {
   const name =
     part.toolName ||
     (part.type.startsWith("tool-") ? part.type.slice(5) : "tool");
+  const state = part.state?.replaceAll("-", " ") || "in progress";
+  const done = Boolean(part.state && TOOL_DONE_STATES.has(part.state));
+  const error = Boolean(part.state && TOOL_ERROR_STATES.has(part.state));
   return (
-    <div className="flex list-none items-center gap-2 font-medium">
-      <TerminalIcon className="size-3.5 text-muted-foreground" />
-      <span>{name}</span>
-      <span className="ml-auto text-[10px] font-normal text-muted-foreground">
-        {part.state?.replaceAll("-", " ") || "calling"}
+    <div className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/60 px-3 py-2">
+      <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <code className="min-w-0 truncate font-mono text-xs">{name}</code>
+      <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide">
+        <span
+          className={cn(
+            "size-1.5 rounded-full",
+            error
+              ? "bg-destructive"
+              : done
+                ? "bg-emerald-500"
+                : "animate-pulse bg-amber-500",
+          )}
+        />
+        <span className={cn(error && "text-destructive")}>{state}</span>
       </span>
     </div>
   );
@@ -83,22 +120,28 @@ function Message({
   message: UIMessage;
   streaming: boolean;
 }) {
-  const user = message.role === "user";
-  return (
-    <article className={cn("flex gap-3", user ? "justify-end" : "items-start")}>
-      {!user && (
-        <div className="mt-1 grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-background">
-          <Code2 className="size-3.5" />
+  if (message.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[min(85%,34rem)] rounded-2xl rounded-br-md bg-foreground px-4 py-2.5 text-sm leading-6 text-background">
+          {message.parts.map((part, i) =>
+            part.type === "text" ? <p key={`${message.id}-${i}`}>{part.text}</p> : null,
+          )}
         </div>
-      )}
-      <div className={cn("min-w-0", user ? "max-w-[min(80%,42rem)]" : "max-w-3xl flex-1")}>
-        <p className={cn("mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground", user && "text-right")}>
-          {user ? "You" : streaming ? "OpenDevin · Working" : "OpenDevin"}
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-3">
+      <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-card shadow-sm">
+        <Code2 className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {streaming && <LoaderCircle className="size-3 animate-spin" />}
+          OpenDevin
         </p>
-        <div className={cn(
-          "text-sm leading-7",
-          user && "rounded-lg rounded-tr-sm bg-foreground px-4 py-2.5 leading-6 text-background",
-        )}>
+        <div className="text-sm leading-7">
           {message.parts.map((part, i) => {
             if (part.type === "text")
               return (
@@ -117,7 +160,7 @@ function Message({
           })}
         </div>
       </div>
-    </article>
+    </div>
   );
 }
 
@@ -159,12 +202,12 @@ function TerminalPane({
       const base = API.replace(/^http/, "ws");
       const ws = new WebSocket(`${base}/sessions/${sessionId}/terminal/ws`);
       socket.current = ws;
-      ws.onopen = () => instance.write("\\x1b[32m● connected\\x1b[0m\\r\\n");
+      ws.onopen = () => instance.write("\x1b[32m● connected\x1b[0m\r\n");
       ws.onmessage = (event) => instance.write(String(event.data));
       ws.onerror = () => onError("Terminal connection failed.");
       ws.onclose = () => {
         if (!closed) {
-          instance.write("\\r\\n\\x1b[33m● reconnecting…\\x1b[0m\\r\\n");
+          instance.write("\r\n\x1b[33m● reconnecting…\x1b[0m\r\n");
           reconnect = window.setTimeout(connect, 1200);
         }
       };
@@ -195,27 +238,24 @@ export function Home() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { activeSessionId, selectSession } = useSessionSelection();
-  const { data: sessions = [] } = useQuery<Session[]>({
-    queryKey: ["sessions"],
-    queryFn: async () => {
-      const response = await fetch(`${API}/sessions`);
-      if (!response.ok) throw new Error("Could not load sessions");
-      return response.json();
-    },
-    refetchInterval: 5000,
-  });
+  const sessions = ((useConvexQuery(api.sessions.list, {}) ?? []) as unknown as Array<Record<string, unknown>>).map((session) => ({
+    ...session,
+    id: String(session.id ?? session._id),
+    createdAt: new Date(Number(session.createdAt)).toISOString(),
+    updatedAt: new Date(Number(session.updatedAt)).toISOString(),
+  })) as Session[];
   const active =
     sessions.find((session) => session.id === activeSessionId) ?? null;
   const [repo, setRepo] = useState("");
   const [prompt, setPrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noSandbox, setNoSandbox] = useState(false);
   const [view, setView] = useState<View>("chat");
   const [sandbox, setSandbox] = useState("unknown");
   const [diff, setDiff] = useState("");
-  const [diffLoading, setDiffLoading] = useState(false);
-  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [runDiff, setRunDiff] = useState("");
+  const [diffLoading, setDiffLoading] = useState(false);
 
   const bottom = useRef<HTMLDivElement>(null);
   const transport = useMemo(
@@ -225,40 +265,36 @@ export function Home() {
       }),
     [active?.id],
   );
-  const { messages, setMessages, status, error } = useChat({
+  const { messages, setMessages, status, error, sendMessage, stop } = useChat({
     transport,
     throttle: 40,
   });
   const working = status === "submitted" || status === "streaming";
+  const chatOnly = Boolean(active && !active.sandbox);
   const sandboxRunning = sandbox === "running";
-  const sandboxUnavailable = !sandboxRunning;
+  const canChat = chatOnly || sandboxRunning;
+  const sandboxUnavailable = !chatOnly && !sandboxRunning;
   const repoName =
     active?.git.split("/").pop()?.replace(".git", "") || "workspace";
   const alert = notice || error?.message;
-  const runsQuery = useQuery<AgentRun[]>({
-    queryKey: ["runs", active?.id],
-    queryFn: async () => { const response = await fetch(`${API}/sessions/${active!.id}/runs`); if (!response.ok) throw new Error("Could not load runs."); return response.json(); },
-    enabled: Boolean(active), refetchInterval: 2000,
-  });
-  const run = runsQuery.data?.[0];
+  const runs = ((useConvexQuery(api.runs.list, active ? { sessionId: active.id as never } : "skip") ?? []) as unknown as Array<Record<string, unknown>>).map((item) => ({
+    ...item,
+    id: String(item.id ?? item._id),
+    plan: typeof item.planJson === "string" ? parsePlan(item.planJson) : item.plan,
+  })) as AgentRun[];
+  const run = runs[0] ?? null;
   const runWorking = run && ["planning", "running", "validating"].includes(run.status);
+  const runningLabel = run && runWorking ? run.status.replaceAll("_", " ") : "";
+  const chatStreaming = chatOnly && working;
 
-  const messagesQuery = useQuery<UIMessage[]>({
-    queryKey: ["messages", active?.id],
-    queryFn: async () => {
-      const response = await fetch(`${API}/sessions/${active!.id}/messages`);
-      if (!response.ok) throw new Error("Could not load workspace messages.");
-      return response.json();
-    },
-    enabled: Boolean(active),
-  });
+  const messagesData = useConvexQuery(api.sessions.messages, active ? { sessionId: active.id as never } : "skip") as UIMessage[] | undefined;
   useEffect(() => {
     setMessages(
-      (messagesQuery.data || []).filter(
+      (messagesData || []).filter(
         (m) => m.role === "user" || m.role === "assistant",
       ),
     );
-  }, [active?.id, messagesQuery.data, setMessages]);
+  }, [active?.id, messagesData, setMessages]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
@@ -269,16 +305,6 @@ export function Home() {
         .then((data) => setSandbox(data.status || "unknown"))
         .catch(() => setSandbox("unknown"));
   }, [active]);
-  useEffect(() => {
-    if (!run?.id) {
-      const reset = window.setTimeout(() => setRunEvents([]), 0);
-      return () => window.clearTimeout(reset);
-    }
-    const source = new EventSource(`${API}/runs/${run.id}/events`);
-    source.onmessage = (event) => { const next = JSON.parse(event.data) as RunEvent; setRunEvents((current) => current.some((item) => item.id === next.id) ? current : [...current, next]); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); };
-    source.addEventListener("complete", () => { source.close(); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); });
-    return () => source.close();
-  }, [run?.id, active?.id, queryClient]);
 
   async function createSession(event: FormEvent) {
     event.preventDefault();
@@ -291,6 +317,7 @@ export function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: prompt.trim(),
+          sandbox: !noSandbox,
           ...(repo.trim() ? { gitUrl: repo.trim() } : {}),
         }),
       });
@@ -324,6 +351,18 @@ export function Home() {
   }
   async function send(text = prompt) {
     if (!active || !text.trim() || working) return;
+    if (chatOnly) {
+      setPrompt("");
+      setNotice("");
+      try {
+        await sendMessage({ text: text.trim() });
+      } catch (err) {
+        setNotice(
+          err instanceof Error ? err.message : "Could not send message.",
+        );
+      }
+      return;
+    }
     if (!sandboxRunning) {
       setNotice(
         "This sandbox is not running. Start a new workspace to continue.",
@@ -335,12 +374,11 @@ export function Home() {
     try {
       const response = await fetch(`${API}/sessions/${active.id}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text.trim() }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.message);
-      setRunEvents([]); queryClient.invalidateQueries({ queryKey: ["runs", active.id] });
+      queryClient.invalidateQueries({ queryKey: ["runs", active.id] });
     } catch (err) { setNotice(err instanceof Error ? err.message : "Could not start run."); }
   }
-  async function approveRun() { if (!run) return; const response = await fetch(`${API}/runs/${run.id}/approve`, { method: "POST" }); const data = await response.json(); if (!response.ok) setNotice(data.message); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); }
   async function cancelRun() { if (!run) return; await fetch(`${API}/runs/${run.id}/cancel`, { method: "POST" }); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); }
-  async function loadRunDiff() { if (!run) return; const response = await fetch(`${API}/runs/${run.id}/diff`); const data = await response.json(); if (response.ok) setRunDiff(data.diff || ""); else setNotice(data.message); }
+  async function loadRunDiff() { if (!run) return; setDiffLoading(true); const response = await fetch(`${API}/runs/${run.id}/diff`); const data = await response.json(); if (response.ok) setRunDiff(data.diff || ""); else setNotice(data.message); setDiffLoading(false); }
   const loadDiff = useCallback(async () => {
     if (!active) return;
     setDiffLoading(true);
@@ -357,6 +395,9 @@ export function Home() {
       setDiffLoading(false);
     }
   }, [active]);
+  async function loadChanges() {
+    await Promise.all([loadDiff(), run ? loadRunDiff() : Promise.resolve()]);
+  }
   async function stopSandbox() {
     if (
       !active ||
@@ -407,12 +448,18 @@ export function Home() {
     }
   }
   useEffect(() => {
-    if (active && view === "diff") window.setTimeout(() => void loadDiff(), 0);
-  }, [active, view, loadDiff]);
+    if (active && view === "diff") {
+      const timer = window.setTimeout(() => {
+        void loadDiff();
+        const currentRun = run;
+        if (currentRun) void loadRunDiff();
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, view, run?.id]);
   const tabs: { id: View; label: string; icon: typeof MessageSquareText; requiresSandbox?: boolean }[] = [
     { id: "chat", label: "Conversation", icon: MessageSquareText },
-    { id: "activity", label: "Activity", icon: TerminalIcon },
-    { id: "review", label: "Review", icon: FileDiff },
     { id: "diff", label: "Changes", icon: FileDiff, requiresSandbox: true },
     { id: "terminal", label: "Terminal", icon: TerminalIcon, requiresSandbox: true },
   ];
@@ -429,29 +476,42 @@ export function Home() {
             {active && (
               <div className="flex w-fit items-center gap-2 font-medium text-foreground">
                 <span className="grid size-6 place-items-center rounded-md border bg-card">
-                  <Globe className="size-3" />
+                  {chatOnly ? (
+                    <MessageSquareText className="size-3" />
+                  ) : (
+                    <Globe className="size-3" />
+                  )}
                 </span>
-                <span className="max-w-40 truncate">{repoName}</span>
+                <span className="max-w-40 truncate">
+                  {chatOnly ? "Chat" : repoName}
+                </span>
               </div>
             )}
           </div>
           {active && (
             <div className="flex items-center gap-1">
-              <Badge
-                variant="outline"
-                className="hidden gap-1.5 font-normal sm:flex">
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    sandbox === "running"
-                      ? "bg-emerald-500"
-                      : sandbox === "stopped"
-                        ? "bg-muted-foreground"
-                        : "bg-amber-500",
-                  )}
-                />
-                Sandbox {sandbox}
-              </Badge>
+              {chatOnly ? (
+                <Badge className="gap-1.5 font-normal">
+                  <span className="size-1.5 rounded-full bg-sky-500" />
+                  Chat mode
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="hidden gap-1.5 font-normal sm:flex">
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      sandbox === "running"
+                        ? "bg-emerald-500"
+                        : sandbox === "stopped"
+                          ? "bg-muted-foreground"
+                          : "bg-amber-500",
+                    )}
+                  />
+                  Sandbox {sandbox}
+                </Badge>
+              )}
               <Badge className="gap-1.5 font-normal">
                 <span
                   className={cn(
@@ -463,21 +523,23 @@ export function Home() {
                 />
                 {working ? "Agent working" : "Ready"}
               </Badge>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Stop sandbox"
-                      disabled={!sandboxRunning || working}
-                      onClick={stopSandbox}>
-                      <Power />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Stop sandbox</TooltipContent>
-              </Tooltip>
+              {!chatOnly && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Stop sandbox"
+                        disabled={!sandboxRunning || working}
+                        onClick={stopSandbox}>
+                        <Power />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>Stop sandbox</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -497,26 +559,13 @@ export function Home() {
         </header>
         {!active ? (
           <section className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-5 py-16 sm:px-10">
-            <div className="mb-6 flex w-fit items-center gap-2 rounded-full border border-foreground/10 bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              Autonomous development
-            </div>
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-              Give your codebase
-              <span className="block text-muted-foreground">a second set of hands.</span>
+            <h1 className="flex max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
+              Open
+              <span className="block text-muted-foreground">devin.</span>
             </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-              Describe the outcome you want. Optionally attach a public Git
-              repository, and your agent will start working in a contained workspace.
-            </p>
             <form
               onSubmit={createSession}
               className="mt-10 max-w-2xl rounded-lg border bg-card p-3">
-              <label
-                htmlFor="session-prompt"
-                className="mb-2 block px-1 text-xs font-medium">
-                What should we work on?
-              </label>
               <Textarea
                 id="session-prompt"
                 value={prompt}
@@ -525,24 +574,56 @@ export function Home() {
                 rows={3}
                 className="resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
               />
-              <div className="mt-2 flex gap-2">
-                <div className="flex h-10 flex-1 items-center gap-2 rounded-lg border px-3">
-                  <GitFork className="size-4 text-muted-foreground" />
-                  <input
-                    id="repository"
-                    value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                    placeholder="Optional repository URL"
-                    className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                  />
-                </div>
-                <Button type="submit" disabled={creating || !prompt.trim()}>
+              <div className="flex gap-2 px-4">
+                {!noSandbox && (
+                  <div className="flex h-10 flex-1 items-center gap-2">
+                    <GitFork className="size-4 text-muted-foreground" />
+                    <input
+                      id="repository"
+                      value={repo}
+                      onChange={(e) => setRepo(e.target.value)}
+                      placeholder="Optional repository URL"
+                      className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                    />
+                  </div>
+                )}
+                <Button type="submit" disabled={creating || !prompt.trim()} variant={"ghost"}>
                   {creating ? (
                     <LoaderCircle className="animate-spin" />
+                  ) : noSandbox ? (
+                    "Start chat"
                   ) : (
                     "Start session"
                   )}
                 </Button>
+              </div>
+              <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-2">
+                <label className="flex cursor-pointer items-center gap-2 select-none text-xs text-muted-foreground">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={noSandbox}
+                    onClick={() => setNoSandbox((value) => !value)}
+                    className={cn(
+                      "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 outline-none",
+                      noSandbox
+                        ? "border-transparent bg-foreground"
+                        : "border-input bg-muted",
+                    )}>
+                    <span
+                      className={cn(
+                        "size-3 rounded-full bg-background shadow transition-transform",
+                        noSandbox ? "translate-x-3.5" : "translate-x-0.5",
+                      )}
+                    />
+                  </button>
+                  Chat without a sandbox
+                </label>
+                {noSandbox && (
+                  <span className="text-[10px] text-muted-foreground">
+                    No E2B sandbox · general assistant
+                  </span>
+                )}
               </div>
             </form>
             {alert && (
@@ -553,45 +634,54 @@ export function Home() {
           </section>
         ) : (
           <section className="flex min-h-0 w-full flex-1 flex-col">
-            <div className="flex h-9 items-center border-b px-4 sm:px-6">
-              {tabs.map(({ id, label, icon: Icon, requiresSandbox }) => (
-                <button
-                  key={id}
-                  disabled={Boolean(requiresSandbox && sandboxUnavailable)}
-                  onClick={() => setView(id)}
-                  className={cn(
-                    "flex h-full items-center gap-2 border-b-2 border-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35",
-                    view === id && "border-foreground text-foreground",
-                  )}>
-                  <Icon className="size-4" />
-                  {label}
-                </button>
-              ))}
+            <div className="flex h-12 shrink-0 items-center justify-center border-b px-4 sm:px-6">
+              <div className="inline-flex items-center gap-1 rounded-full border bg-muted/40 p-1">
+                {tabs
+                  .filter((tab) => !chatOnly || !tab.requiresSandbox)
+                  .map(({ id, label, icon: Icon, requiresSandbox }) => (
+                  <button
+                    key={id}
+                    disabled={Boolean(requiresSandbox && sandboxUnavailable)}
+                    onClick={() => setView(id)}
+                    className={cn(
+                      "flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35",
+                      view === id && "bg-foreground text-background shadow-sm",
+                    )}>
+                    <Icon className="size-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             {view === "chat" && (
-              <>
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div className="min-h-0 flex-1 w-full overflow-y-auto scrollbar-none">
-                  <div className="mx-auto max-w-4xl space-y-8 px-4 py-8 sm:px-8">
+                  <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-8">
                     {messages.length === 0 && (
-                      <div className="mx-auto mt-[12vh] max-w-md text-center">
-                        <div className="mx-auto grid size-14 place-items-center rounded-lg bg-foreground text-background">
-                          <Code2 className="size-6" />
+                      <div className="mx-auto mt-[8vh] max-w-md text-center">
+                        <div className="relative mx-auto grid size-16 place-items-center rounded-2xl bg-foreground text-background shadow-lg">
+                          <Code2 className="size-7" />
+                          <span className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border bg-background text-foreground">
+                            <Sparkles className="size-3" />
+                          </span>
                         </div>
                         <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Workspace ready</p>
-                        <h2 className="mt-2 text-xl font-semibold tracking-tight">
-                          What are we building?
+                        <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                          {chatOnly ? "What can I help with?" : "What are we building?"}
                         </h2>
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          Describe the outcome you want. The agent will inspect
-                          before it changes anything.
+                          {chatOnly
+                            ? "Ask about code, ideas, or refactors. No sandbox — just conversation and answers."
+                            : "Describe the outcome you want. The agent will inspect the repository before it changes anything."}
                         </p>
-                        <div className="mt-5 grid gap-2">
+                        <div className="mx-auto mt-6 grid max-w-sm gap-2">
                           {suggestions.map((s) => (
                             <Button
                               key={s}
                               variant="outline"
-                              size="sm"
+                              className="justify-start rounded-xl px-3.5 text-left"
                               onClick={() => send(s)}>
+                              <Sparkles className="size-3.5 text-muted-foreground" />
                               {s}
                             </Button>
                           ))}
@@ -608,82 +698,91 @@ export function Home() {
                     <div ref={bottom} />
                   </div>
                 </div>
-                <div className="border-t bg-background px-4 pb-4 pt-3 sm:px-8">
-                  <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-lg border bg-card p-2">
-                  <Textarea
-                    value={prompt}
-                    disabled={sandboxUnavailable || Boolean(runWorking)}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        send();
-                      }
-                    }}
-                    placeholder={
-                      sandboxUnavailable
-                        ? "Sandbox unavailable"
-                        : "Ask OpenDevin to investigate, build, or fix…"
-                    }
-                    rows={1}
-                    className="min-h-9 border-0 py-2 bg-transparent disabled:bg-transparent  shadow-none focus-visible:ring-0"
-                  />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="icon"
-                          aria-label={runWorking ? "Stop run" : "Start run"}
-                          className="size-9 rounded-md"
-                          onClick={() => (runWorking ? cancelRun() : send())}
-                    disabled={
-                      !runWorking && (!prompt.trim() || sandboxUnavailable)
-                    }
-                    variant={runWorking ? "destructive" : "default"}>
-                          {runWorking ? <CircleStop /> : <SendHorizontal />}
-                        </Button>
-                      }
-                    />
-                    <TooltipContent>{working ? "Stop response" : "Send message"}</TooltipContent>
-                  </Tooltip>
-                  </div>
-                  <p className="mx-auto mt-2 max-w-4xl px-1 text-[10px] text-muted-foreground">Enter to send · Shift + Enter for a new line</p>
-                </div>
-              </>
-            )}
-            {view === "activity" && (
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
-                <div className="mx-auto max-w-4xl">
-                  <div className="mb-5 flex items-center justify-between">
-                    <div><h2 className="text-lg font-semibold">Run activity</h2><p className="text-sm text-muted-foreground">{run ? `${run.status.replaceAll("_", " ")} · ${run.prompt}` : "Start a task to see durable activity."}</p></div>
-                    {runWorking && <Button variant="destructive" size="sm" onClick={cancelRun}><CircleStop />Stop</Button>}
-                  </div>
-                  <div className="space-y-3 border-l pl-5">
-                    {runEvents.map((event) => <article key={event.id} className="relative rounded-lg border bg-card p-3 text-sm"><span className="absolute -left-[1.72rem] top-4 size-2.5 rounded-full bg-emerald-500" /><div className="flex justify-between gap-4"><span className="font-medium">{event.message}</span><span className="shrink-0 text-xs text-muted-foreground">{event.status || event.type}</span></div></article>)}
-                    {!runEvents.length && <p className="text-sm text-muted-foreground">Waiting for activity…</p>}
+                <div className="border-t bg-background px-4 pb-4 pt-3 sm:px-6">
+                  <div className="mx-auto max-w-3xl">
+                    {runningLabel && (
+                      <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+                        <span className="size-1.5 animate-pulse rounded-full bg-foreground" />
+                        The agent is {runningLabel}…
+                      </p>
+                    )}
+                    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/40">
+                      <Textarea
+                        value={prompt}
+                        disabled={!canChat || Boolean(runWorking)}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            send();
+                          }
+                        }}
+                        placeholder={
+                          chatOnly
+                            ? "Ask OpenDevin anything…"
+                            : sandboxUnavailable
+                              ? "Sandbox unavailable"
+                              : "Ask OpenDevin to investigate, build, or fix…"
+                        }
+                        rows={1}
+                        className="min-h-9 resize-none border-0 bg-transparent py-2 shadow-none focus-visible:ring-0 disabled:bg-transparent"
+                      />
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              size="icon-lg"
+                              aria-label={
+                                runWorking || chatStreaming
+                                  ? "Stop"
+                                  : chatOnly
+                                    ? "Send message"
+                                    : "Start run"
+                              }
+                              className="size-9 rounded-xl"
+                              onClick={() => {
+                                if (runWorking) cancelRun();
+                                else if (chatStreaming) void stop();
+                                else send();
+                              }}
+                              disabled={
+                                !runWorking &&
+                                !chatStreaming &&
+                                (!prompt.trim() || sandboxUnavailable)
+                              }
+                              variant={
+                                runWorking || chatStreaming
+                                  ? "destructive"
+                                  : "default"
+                              }>
+                              {runWorking || chatStreaming ? (
+                                <CircleStop />
+                              ) : (
+                                <SendHorizontal />
+                              )}
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>
+                          {working ? "Stop response" : "Send message"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <p className="mt-2 px-1 text-center text-[10px] text-muted-foreground">
+                      Enter to send · Shift + Enter for a new line
+                    </p>
                   </div>
                 </div>
               </div>
             )}
-            {view === "review" && (
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8"><div className="mx-auto max-w-4xl space-y-5">
-                {!run ? <p className="text-sm text-muted-foreground">No autonomous run has been started in this workspace.</p> : <>
-                  <section className="rounded-xl border bg-card p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Run status</p><h2 className="mt-1 text-xl font-semibold capitalize">{run.status.replaceAll("_", " ")}</h2></div>{run.status === "awaiting_approval" && <Button onClick={approveRun} disabled={sandboxUnavailable}>Approve plan</Button>}{runWorking && <Button variant="destructive" onClick={cancelRun}><CircleStop />Stop</Button>}</div>
-                    {run.branch && <p className="mt-4 font-mono text-xs">{run.branch} <span className="text-muted-foreground">from {run.baseBranch}</span></p>}</section>
-                  {run.status === "awaiting_approval" && <section className="rounded-xl border bg-card p-5"><h3 className="font-semibold">Proposed plan</h3><pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">{JSON.stringify(run.plan, null, 2)}</pre></section>}
-                  <section className="rounded-xl border bg-card p-5"><div className="flex items-center justify-between"><h3 className="font-semibold">Review evidence</h3><Button variant="outline" size="sm" onClick={loadRunDiff} disabled={sandboxUnavailable}><RefreshCw />Load diff</Button></div>{runDiff ? <div className="mt-4 overflow-hidden rounded border text-xs"><PatchDiff patch={runDiff} disableWorkerPool /></div> : <p className="mt-3 text-sm text-muted-foreground">Diff is available after execution completes.</p>}</section>
-                  {run.summary && <section className="rounded-xl border bg-card p-5"><h3 className="font-semibold">Handoff</h3><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{run.summary}</p><p className="mt-4 text-sm"><strong>PR title:</strong> {run.prTitle}</p><pre className="mt-2 whitespace-pre-wrap rounded bg-muted p-3 text-xs">{run.prBody}</pre></section>}
-                </>}
-              </div></div>
-            )}
             {view === "diff" && (
-              <div className="min-h-0 flex-1 px-4 py-4 sm:px-6">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 py-4 sm:px-6">
                 <div className="mb-3 flex items-center justify-between">
                   <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Changes</h2>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={loadDiff}
+                    onClick={loadChanges}
                     disabled={diffLoading || sandboxUnavailable}>
                     {diffLoading ? (
                       <LoaderCircle className="animate-spin" />
@@ -695,16 +794,35 @@ export function Home() {
                 </div>
                 <ScrollArea
                   aria-label="Git changes"
-                  className="h-[calc(100vh-10.5rem)] overflow-hidden rounded-lg border bg-card text-xs">
+                  className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-card text-xs">
                   {diffLoading ? (
                     <p className="p-4 font-mono text-xs text-muted-foreground">
                       Loading changes…
                     </p>
-                  ) : diff ? (
-                    <PatchDiff patch={diff} disableWorkerPool />
+                  ) : runDiff || diff ? (
+                    <div className="divide-y">
+                      {runDiff && (
+                        <div>
+                          <div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            <GitFork className="size-3" />
+                            Run changes
+                          </div>
+                          <PatchDiff patch={runDiff} disableWorkerPool />
+                        </div>
+                      )}
+                      {diff && (
+                        <div>
+                          <div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            <Code2 className="size-3" />
+                            Workspace changes
+                          </div>
+                          <PatchDiff patch={diff} disableWorkerPool />
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <p className="p-4 text-sm text-muted-foreground">
-                      No uncommitted changes.
+                      No changes yet.
                     </p>
                   )}
                 </ScrollArea>
@@ -726,11 +844,11 @@ export function Home() {
                 </div>
               </div>
             )}
-            {/* {alert && (
-              <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {alert && (
+              <div className="mx-auto mt-2 mb-4 w-full max-w-3xl rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 {alert}
               </div>
-            )} */}
+            )}
           </section>
         )}
       </section>

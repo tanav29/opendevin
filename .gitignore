@@ -9,3 +9,6 @@ dist
 generated
 /apps/backend/prisma/migrations/**
 .turbo
+_generated
+.agents
+.claude

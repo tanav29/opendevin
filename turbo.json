@@ -17,9 +17,6 @@
     },
     "fmt:check": {
       "outputs": []
-    },
-    "db:generate": {
-      "outputs": ["src/generated/**"]
     }
   }
 }
