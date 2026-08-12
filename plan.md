@@ -136,6 +136,38 @@ Add:
 
 ---
 
+## Phase 1.5 — Browser inside the sandbox
+
+Give a sandbox an optional, session-scoped browser that the agent can control and the user can watch. Use an E2B desktop/browser-capable template with Chromium or Firefox and VNC streaming so the browser shares the sandbox lifecycle and can reach the app running on sandbox-local ports.
+
+### Design and implementation
+
+- Keep browser capability opt-in per session (`browser: true`) initially, so existing lightweight code sessions keep their current startup time and cost.
+- Add `apps/backend/src/services/sandbox-browser.ts` and `apps/backend/src/routes/browser.ts` for startup, navigation, screenshots, input actions, stream URLs, and shutdown.
+- Add agent tools for open, screenshot, click, type, keypress, scroll, and back.
+- Persist browser status, current URL, stream URL, last activity, and error on the session. Clean up browser processes and streams on stop, archive, timeout, and failure.
+- Add a `BrowserPane` with live view, URL/back/reload/stop controls, reconnect and screenshot fallback states, and a clear agent-control indicator.
+- Authorize every browser HTTP and WebSocket/stream request by session ownership. Treat URLs and page content as untrusted; bound loads/screenshots, redact cookies/tokens, and require approval for submissions, purchases, credential entry, or other irreversible actions.
+- Do not persist page contents, cookies, local storage, or screenshots by default.
+
+### Rollout and acceptance criteria
+
+1. Spike the E2B desktop/browser template and verify browser creation, screenshot, click/type, stream URL, and shutdown from the current backend.
+2. Add lifecycle and agent tools behind a feature flag; test reconnects and cleanup.
+3. Add the BrowserPane and approval UX, including prevention of silent agent/user control races.
+4. Enable it for sample projects and measure startup latency, sandbox minutes, bandwidth, and failure rate.
+
+Acceptance criteria:
+
+- A browser-enabled session opens a real browser inside its isolated sandbox.
+- The agent can navigate a public page, inspect it, and capture a screenshot.
+- The user can watch the same browser and recover after stream reconnect.
+- The browser can reach the app preview running in the same sandbox.
+- Stop, archive, timeout, and error paths leave no browser process or stream alive.
+- Secrets, cookies, page contents, and provider credentials never appear in logs, Convex, tool results, or UI messages.
+
+---
+
 ## Phase 2 — GitHub integration and delivery
 
 ### Authentication and repository access

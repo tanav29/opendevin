@@ -10,7 +10,11 @@ import {
   LoaderCircle,
   Plus,
 } from "lucide-react";
-import { type Session, useSessionSelection } from "@/components/providers";
+import {
+  sessionTitle,
+  type Session,
+  useSessionSelection,
+} from "@/components/providers";
 import {
   Sidebar,
   SidebarContent,
@@ -30,19 +34,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-function sessionName(session: Session) {
-  return (
-    session.git
-      .split("/")
-      .pop()
-      ?.replace(/\.git$/, "") || (session.sandbox ? "Untitled workspace" : "Chat")
-  );
-}
-
 function sessionStatus(session: Session) {
   if (session.archived) return "Archived";
   if (session.status === "running") return "working";
-  if (!session.sandbox) return "Chat";
   return session.status || "idle";
 }
 
@@ -74,7 +68,7 @@ export function AppSidebar() {
             selectSession(session.id);
             router.push(`/s/${session.id}`);
           }}
-          tooltip={sessionName(session)}
+          tooltip={sessionTitle(session)}
           className="h-fit">
           {session.archived ? (
             <Archive className="text-muted-foreground" />
@@ -86,7 +80,7 @@ export function AppSidebar() {
             <CheckCircle2 />
           )}
           <span className="min-w-0">
-            <span className="block truncate">{sessionName(session)}</span>
+            <span className="block truncate">{sessionTitle(session)}</span>
             <span className="block text-[10px] font-normal capitalize text-muted-foreground">
               {sessionStatus(session)}
             </span>

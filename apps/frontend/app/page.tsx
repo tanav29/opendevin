@@ -9,7 +9,6 @@ import {
   useState,
 } from "react";
 import { useChat } from "@ai-sdk/react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -44,7 +43,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { API, type Session, useSessionSelection } from "@/components/providers";
+import {
+  API,
+  sessionTitle,
+  type Session,
+  useSessionSelection,
+} from "@/components/providers";
 import { api } from "@convex/_generated/api";
 type View = "chat" | "diff" | "terminal";
 
@@ -80,11 +84,10 @@ function ToolCall({ part }: { part: ToolPart }) {
   const name =
     part.toolName ||
     (part.type.startsWith("tool-") ? part.type.slice(5) : "tool");
-  const state = part.state?.replaceAll("-", " ") || "in progress";
   const done = Boolean(part.state && TOOL_DONE_STATES.has(part.state));
   const error = Boolean(part.state && TOOL_ERROR_STATES.has(part.state));
   return (
-    <div className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/60 px-3 py-2">
+    <div className="mb-2 flex items-center gap-2">
       <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
       <code className="min-w-0 truncate font-mono text-xs">{name}</code>
       <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide">
@@ -98,7 +101,6 @@ function ToolCall({ part }: { part: ToolPart }) {
                 : "animate-pulse bg-amber-500",
           )}
         />
-        <span className={cn(error && "text-destructive")}>{state}</span>
       </span>
     </div>
   );
@@ -123,14 +125,10 @@ function Message({
     );
   }
   return (
-    <div className="flex gap-3">
-      <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-card shadow-sm">
-        <Code2 className="size-4" />
-      </div>
+    <div className="flex">
       <div className="min-w-0 flex-1">
         <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           {streaming && <LoaderCircle className="size-3 animate-spin" />}
-          OpenDevin
         </p>
         <div className="text-sm leading-7">
           {message.parts.map((part, i) => {
@@ -226,7 +224,6 @@ function TerminalPane({
 }
 
 export function Home() {
-  const queryClient = useQueryClient();
   const router = useRouter();
   const { activeSessionId, selectSession } = useSessionSelection();
   const sessions = ((useConvexQuery(api.sessions.list, {}) ?? []) as unknown as Array<Record<string, unknown>>).map((session) => ({
@@ -243,7 +240,6 @@ export function Home() {
   const [notice, setNotice] = useState("");
   const [noSandbox, setNoSandbox] = useState(false);
   const [view, setView] = useState<View>("chat");
-  const [sandbox, setSandbox] = useState("unknown");
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
 
@@ -261,22 +257,15 @@ export function Home() {
   });
   const working = status === "submitted" || status === "streaming";
   const chatOnly = Boolean(active && !active.sandbox);
-  const sandboxRunning = sandbox === "running";
-  const canChat = chatOnly || sandboxRunning;
-  const sandboxUnavailable = !chatOnly && !sandboxRunning;
+  const sessionStopped = active?.status === "stopped";
+  const canChat = Boolean(active) && !sessionStopped;
+  const sandboxUnavailable = !chatOnly && sessionStopped;
   const repoName =
     active?.git.split("/").pop()?.replace(".git", "") || "Workspace";
-  const sessionTitle = chatOnly ? "Chat" : repoName;
-  const sandboxDot =
-    sandbox === "running"
-      ? "bg-emerald-500"
-      : sandbox === "stopped"
-        ? "bg-muted-foreground"
-        : "bg-amber-500";
   const alert = notice || error?.message;
-  const busy = working;
-  const activityLabel = busy ? "Agent working" : "Ready";
-  const activityDot = busy ? "animate-pulse bg-foreground" : "bg-muted-foreground";
+  const busy = working || active?.status === "running";
+  const activityLabel = active?.status === "running" ? "Working" : active?.status ?? "Idle";
+  const activityDot = active?.status === "running" ? "animate-pulse bg-emerald-500" : "bg-muted-foreground";
 
   const messagesData = useConvexQuery(api.sessions.messages, active ? { sessionId: active.id as never } : "skip") as UIMessage[] | undefined;
   useEffect(() => {
@@ -289,40 +278,6 @@ export function Home() {
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
-
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const response = await fetch(`${API}/sessions/${active.id}/sandbox`);
-        const data = await response.json();
-        if (cancelled) return;
-        const next = data.status || "unknown";
-        setSandbox((prev) => {
-          if (prev !== next) {
-            if (next === "running")
-              toast.success("Sandbox is running", {
-                description: "The workspace is ready for the agent.",
-              });
-            else if (next === "stopped")
-              toast.warning("Sandbox stopped", {
-                description: "Start a new workspace to continue.",
-              });
-          }
-          return next;
-        });
-      } catch {
-        if (!cancelled) setSandbox("unknown");
-      }
-    };
-    check();
-    const timer = window.setInterval(check, 8000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [active]);
 
   async function createSession(event: FormEvent) {
     event.preventDefault();
@@ -355,10 +310,6 @@ export function Home() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      queryClient.setQueryData<Session[]>(["sessions"], (current = []) => [
-        next,
-        ...current,
-      ]);
       if (creatingToast)
         toast.success("Workspace started", {
           id: creatingToast,
@@ -380,9 +331,9 @@ export function Home() {
   }
   async function send(text = prompt) {
     if (!active || !text.trim() || working) return;
-    if (!chatOnly && !sandboxRunning) {
+    if (!canChat) {
       setNotice(
-        "This sandbox is not running. Start a new workspace to continue.",
+        "This session has been stopped. Start a new workspace to continue.",
       );
       return;
     }
@@ -415,7 +366,7 @@ export function Home() {
   async function stopSandbox() {
     if (
       !active ||
-      sandbox === "stopped" ||
+      sessionStopped ||
       !window.confirm(
         "Stop this sandbox? Its files and terminal will no longer be available.",
       )
@@ -427,11 +378,7 @@ export function Home() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message);
-      setSandbox("stopped");
       setView("chat");
-      queryClient.setQueryData<Session[]>(["sessions"], (all = []) =>
-        all.map((s) => (s.id === active.id ? { ...s, status: "stopped" } : s)),
-      );
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not stop sandbox.");
     }
@@ -450,9 +397,6 @@ export function Home() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message);
-      queryClient.setQueryData<Session[]>(["sessions"], (all = []) =>
-        all.filter((s) => s.id !== active.id),
-      );
       selectSession(null);
       setMessages([]);
     } catch (err) {
@@ -495,7 +439,7 @@ export function Home() {
                   )}
                 </span>
                 <span className="max-w-40 truncate">
-                  {sessionTitle}
+                  {sessionTitle(active)}
                 </span>
               </div>
             )}
@@ -506,13 +450,9 @@ export function Home() {
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    chatOnly ? "bg-sky-500" : sandboxDot,
+                    activityDot,
                   )}
                 />
-                {chatOnly ? "Chat" : `Sandbox ${sandbox}`}
-              </Badge>
-              <Badge variant="outline" className="gap-1.5 font-normal">
-                <span className={cn("size-1.5 rounded-full", activityDot)} />
                 {activityLabel}
               </Badge>
               {!chatOnly && (
@@ -523,7 +463,7 @@ export function Home() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Stop sandbox"
-                        disabled={!sandboxRunning || busy}
+                        disabled={sessionStopped || busy}
                         onClick={stopSandbox}>
                         <Power />
                       </Button>
@@ -692,9 +632,9 @@ export function Home() {
                     <div ref={bottom} />
                   </div>
                 </div>
-                <div className="border-t bg-background px-4 pb-4 pt-3 sm:px-6">
+                <div className="bg-background px-4 pb-4 sm:px-6">
                   <div className="mx-auto max-w-3xl">
-                    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/40">
+                    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2">
                       <Textarea
                         value={prompt}
                         disabled={!canChat || Boolean(busy)}

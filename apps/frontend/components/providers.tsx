@@ -14,8 +14,30 @@ export type Session = {
   updatedAt: string;
   sandbox?: string;
   cwd?: string;
-  activity?: string | null;
+  parts?: string;
 };
+
+type StoredMessagePart = { type?: string; text?: string };
+type StoredMessage = { role?: string; parts?: StoredMessagePart[] };
+
+export function sessionTitle(session: Session) {
+  try {
+    const messages = JSON.parse(session.parts ?? "[]") as StoredMessage[];
+    const firstUserMessage = messages.find((message) => message.role === "user");
+    const text = firstUserMessage?.parts
+      ?.filter((part) => part.type === "text")
+      .map((part) => part.text?.trim())
+      .find(Boolean);
+    if (text) return text;
+  } catch {
+    // A malformed stored transcript should not prevent the session list rendering.
+  }
+
+  return (
+    session.git.split("/").pop()?.replace(/\.git$/, "") ||
+    (session.sandbox ? "Untitled workspace" : "Chat")
+  );
+}
 
 export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 

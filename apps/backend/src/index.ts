@@ -380,35 +380,6 @@ app.post("/ai/:sessionId", async (req, res) => {
 
 const server = createServer(app);
 const terminalWss = new WebSocketServer({ noServer: true });
-// Short-lived sandbox status cache so the UI can poll without re-connecting
-// to E2B (and dialing the sandbox) on every tick.
-const sandboxStatusCache = new Map<string, { status: string; checkedAt: number }>();
-const SANDBOX_STATUS_TTL_MS = 10_000;
-async function sandboxStatus(sessionId: string) {
-  const session = await db.sessions.findUnique({ where: { id: sessionId } });
-  if (!session) return null;
-  if (!session.sandbox) return "chat";
-  if (session.status === "stopped") return "stopped";
-  const cached = sandboxStatusCache.get(sessionId);
-  if (cached && Date.now() - cached.checkedAt < SANDBOX_STATUS_TTL_MS)
-    return cached.status;
-  let status = "stopped";
-  try {
-    const sandbox = await Sandbox.connect(session.sandbox);
-    status = (await sandbox.isRunning()) ? "running" : "stopped";
-  } catch {
-    status = "stopped";
-  }
-  sandboxStatusCache.set(sessionId, { status, checkedAt: Date.now() });
-  return status;
-}
-
-app.get("/sessions/:sessionId/sandbox", async (req, res) => {
-  const status = await sandboxStatus(req.params.sessionId);
-  if (status === null) return res.status(404).json({ message: "Session not found" });
-  res.json({ status });
-});
-
 server.on("upgrade", (request, socket, head) => {
   const match = new URL(request.url ?? "", `http://${request.headers.host}`).pathname.match(
     /^\/sessions\/([^/]+)\/terminal\/ws$/,

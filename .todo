@@ -1,6 +1,1 @@
-[ ] better routes for backend
-[ ] comprehensive endpoind for more tasks
-
-FUTURE
-[ ] terminal suport with pty and xtermjs and ws
-[ ] snapshots for sandboxes to continue later on
+[ ] the view must be like twopanee iwth 3:2 for treminal/changes view (collapsable) and chat view
