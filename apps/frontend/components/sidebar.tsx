@@ -35,8 +35,15 @@ function sessionName(session: Session) {
     session.git
       .split("/")
       .pop()
-      ?.replace(/\.git$/, "") || (session.sandbox ? "Untitled workspace" : "Chat session")
+      ?.replace(/\.git$/, "") || (session.sandbox ? "Untitled workspace" : "Chat")
   );
+}
+
+function sessionStatus(session: Session) {
+  if (session.archived) return "Archived";
+  if (session.status === "running") return "working";
+  if (!session.sandbox) return "Chat";
+  return session.status || "idle";
 }
 
 export function AppSidebar() {
@@ -51,17 +58,14 @@ export function AppSidebar() {
   const isError = false;
   const { activeSessionId, selectSession } = useSessionSelection();
   const router = useRouter();
-  const workingCount = sessions.filter((session) =>
-    !session.archived &&
-    ["working", "running", "starting"].includes(session.status),
+  const workingCount = sessions.filter(
+    (session) => !session.archived && session.status === "running",
   ).length;
   const activeSessions = sessions.filter((session) => !session.archived);
   const archivedSessions = sessions.filter((session) => session.archived);
 
   function renderSession(session: Session) {
-    const working = ["working", "running", "starting"].includes(
-      session.status,
-    );
+    const working = session.status === "running";
     return (
       <SidebarMenuItem key={session.id}>
         <SidebarMenuButton
@@ -84,7 +88,7 @@ export function AppSidebar() {
           <span className="min-w-0">
             <span className="block truncate">{sessionName(session)}</span>
             <span className="block text-[10px] font-normal capitalize text-muted-foreground">
-              {session.archived ? "Archived" : session.status || "idle"}
+              {sessionStatus(session)}
             </span>
           </span>
         </SidebarMenuButton>
@@ -107,7 +111,7 @@ export function AppSidebar() {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="New workspace"
+                aria-label="New session"
                 onClick={() => {
                   selectSession(null);
                   router.push("/new");
@@ -116,13 +120,13 @@ export function AppSidebar() {
               </Button>
             }
           />
-          <TooltipContent>New workspace</TooltipContent>
+          <TooltipContent>New session</TooltipContent>
         </Tooltip>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <div className="flex items-center justify-between">
-            <SidebarGroupLabel>Workspaces</SidebarGroupLabel>
+            <SidebarGroupLabel>Sessions</SidebarGroupLabel>
             {workingCount > 0 && (
               <span className="mr-2 text-[10px] text-emerald-600">
                 {workingCount} active
@@ -151,7 +155,7 @@ export function AppSidebar() {
             {!isLoading && !isError && activeSessions.length === 0 && (
               <SidebarMenuItem>
                 <p className="px-2 py-2 text-xs text-sidebar-foreground/60">
-                  No active workspaces
+                  No active sessions
                 </p>
               </SidebarMenuItem>
             )}

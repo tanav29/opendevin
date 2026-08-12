@@ -14,6 +14,7 @@ export type Session = {
   updatedAt: string;
   sandbox?: string;
   cwd?: string;
+  activity?: string | null;
 };
 
 export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";

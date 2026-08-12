@@ -22,38 +22,44 @@ function safeCommand(command: string) {
     throw new Error("This command is prohibited by workspace guardrails.");
 }
 
-export type EventWriter = (type: string, message: string, payload?: unknown, status?: string) => Promise<unknown>;
+async function webSearch(query: string) {
+  const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; OpenDevin)" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`Web search failed with status ${response.status}.`);
+  const html = await response.text();
+  const results: { title: string; url: string; snippet: string }[] = [];
+  const blocks = html.split('<div class="result ');
+  for (const block of blocks.slice(1)) {
+    const title = block.match(/class="result__a"[^>]*>([^<]+)</)?.[1]?.trim();
+    const url = decodeURIComponent(block.match(/class="result__a"[^>]*href="([^"]+)"/)?.[1] ?? "");
+    const snippet = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/)?.[1]?.replace(/<[^>]+>/g, "").trim();
+    if (title && url) results.push({ title, url, snippet: snippet ?? "" });
+    if (results.length >= 5) break;
+  }
+  return { query, results };
+}
 
-export function sandboxTools(sandbox: Sandbox, cwd: string, options?: { mutate?: boolean; event?: EventWriter; signal?: AbortSignal }) {
-  const event = options?.event ?? (async () => undefined);
-  const mutate = Boolean(options?.mutate);
+export function sandboxTools(sandbox: Sandbox, cwd: string) {
   const command = async (value: string) => {
     safeCommand(value);
-    await event("command_started", value);
     const result = await sandbox.commands.run(value, { cwd, timeoutMs: 120_000 });
-    const output = { exitCode: result.exitCode, stdout: bounded(result.stdout), stderr: bounded(result.stderr), error: result.error };
-    await event("command_completed", value, output, result.exitCode === 0 ? "passed" : "failed");
-    return output;
+    return { exitCode: result.exitCode, stdout: bounded(result.stdout), stderr: bounded(result.stderr), error: result.error };
   };
   return {
-    run_command: tool({ description: "Run a safe command in the repository.", inputSchema: z.object({ command: z.string().min(1) }), execute: ({ command: value }) => command(value) }),
+    run_command: tool({ description: "Run a command in the repository.", inputSchema: z.object({ command: z.string().min(1) }), execute: ({ command: value }) => command(value) }),
     read_file: tool({ description: "Read a repository-relative text file.", inputSchema: z.object({ path: z.string().min(1) }), execute: async ({ path }) => {
-      const relative = safePath(cwd, path); const value = await sandbox.files.read(relative); const result = { path, ...bounded(value) };
-      await event("file_read", path, result); return result;
+      const relative = safePath(cwd, path); const value = await sandbox.files.read(relative); return { path, ...bounded(value) };
     }}),
-    git_status: tool({ description: "Inspect git status.", inputSchema: z.object({}), execute: () => command("git status --short --branch") }),
-    git_diff: tool({ description: "Inspect the current git diff.", inputSchema: z.object({}), execute: () => command("git diff --no-ext-diff --unified=3") }),
-    git_changed_files: tool({ description: "List changed files.", inputSchema: z.object({}), execute: () => command("git diff --name-status") }),
-    ...(mutate ? {
-      edit_file: tool({ description: "Replace one exact string in a repository-relative file.", inputSchema: z.object({ path: z.string().min(1), oldText: z.string().min(1), newText: z.string() }), execute: async ({ path, oldText, newText }) => {
-        const fullPath = safePath(cwd, path); const current = await sandbox.files.read(fullPath); const occurrences = current.split(oldText).length - 1;
-        if (occurrences !== 1) throw new Error(`Expected oldText once in ${path}, found ${occurrences}.`);
-        await sandbox.files.write(fullPath, current.replace(oldText, newText)); await event("file_edited", path, { path }); return { path, ok: true };
-      }}),
-      write_file: tool({ description: "Write a repository-relative text file.", inputSchema: z.object({ path: z.string().min(1), content: z.string() }), execute: async ({ path, content }) => {
-        const fullPath = safePath(cwd, path); await sandbox.files.write(fullPath, content); await event("file_written", path, { path, bytes: Buffer.byteLength(content) }); return { path, ok: true };
-      }}),
-      git_branch_create: tool({ description: "Create and switch to the approved task branch.", inputSchema: z.object({ branch: z.string().regex(/^opendevin\/[A-Za-z0-9_-]+\/[a-z0-9-]+$/) }), execute: ({ branch }) => command(`git switch -c ${branch}`) }),
-    } : {}),
+    edit_file: tool({ description: "Replace one exact string in a repository-relative file.", inputSchema: z.object({ path: z.string().min(1), oldText: z.string().min(1), newText: z.string() }), execute: async ({ path, oldText, newText }) => {
+      const fullPath = safePath(cwd, path); const current = await sandbox.files.read(fullPath); const occurrences = current.split(oldText).length - 1;
+      if (occurrences !== 1) throw new Error(`Expected oldText once in ${path}, found ${occurrences}.`);
+      await sandbox.files.write(fullPath, current.replace(oldText, newText)); return { path, ok: true };
+    }}),
+    write_file: tool({ description: "Write a repository-relative text file.", inputSchema: z.object({ path: z.string().min(1), content: z.string() }), execute: async ({ path, content }) => {
+      const fullPath = safePath(cwd, path); await sandbox.files.write(fullPath, content); return { path, ok: true, bytes: Buffer.byteLength(content) };
+    }}),
+    web_search: tool({ description: "Search the web for up-to-date information and return the top result titles, URLs, and snippets.", inputSchema: z.object({ query: z.string().min(1) }), execute: ({ query }) => webSearch(query) }),
   };
 }

@@ -12,6 +12,7 @@ import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -46,16 +47,6 @@ import {
 import { API, type Session, useSessionSelection } from "@/components/providers";
 import { api } from "@convex/_generated/api";
 type View = "chat" | "diff" | "terminal";
-type AgentRun = { id: string; status: string; prompt: string; plan: Record<string, unknown>; branch?: string; baseBranch?: string; summary?: string; validationStatus?: string; prTitle?: string; prBody?: string };
-
-function parsePlan(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
 
 const suggestions = [
   "Map the architecture and key risks",
@@ -254,7 +245,6 @@ export function Home() {
   const [view, setView] = useState<View>("chat");
   const [sandbox, setSandbox] = useState("unknown");
   const [diff, setDiff] = useState("");
-  const [runDiff, setRunDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
 
   const bottom = useRef<HTMLDivElement>(null);
@@ -275,17 +265,18 @@ export function Home() {
   const canChat = chatOnly || sandboxRunning;
   const sandboxUnavailable = !chatOnly && !sandboxRunning;
   const repoName =
-    active?.git.split("/").pop()?.replace(".git", "") || "workspace";
+    active?.git.split("/").pop()?.replace(".git", "") || "Workspace";
+  const sessionTitle = chatOnly ? "Chat" : repoName;
+  const sandboxDot =
+    sandbox === "running"
+      ? "bg-emerald-500"
+      : sandbox === "stopped"
+        ? "bg-muted-foreground"
+        : "bg-amber-500";
   const alert = notice || error?.message;
-  const runs = ((useConvexQuery(api.runs.list, active ? { sessionId: active.id as never } : "skip") ?? []) as unknown as Array<Record<string, unknown>>).map((item) => ({
-    ...item,
-    id: String(item.id ?? item._id),
-    plan: typeof item.planJson === "string" ? parsePlan(item.planJson) : item.plan,
-  })) as AgentRun[];
-  const run = runs[0] ?? null;
-  const runWorking = run && ["planning", "running", "validating"].includes(run.status);
-  const runningLabel = run && runWorking ? run.status.replaceAll("_", " ") : "";
-  const chatStreaming = chatOnly && working;
+  const busy = working;
+  const activityLabel = busy ? "Agent working" : "Ready";
+  const activityDot = busy ? "animate-pulse bg-foreground" : "bg-muted-foreground";
 
   const messagesData = useConvexQuery(api.sessions.messages, active ? { sessionId: active.id as never } : "skip") as UIMessage[] | undefined;
   useEffect(() => {
@@ -298,12 +289,39 @@ export function Home() {
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
+
   useEffect(() => {
-    if (active)
-      fetch(`${API}/sessions/${active.id}/sandbox`)
-        .then((r) => r.json())
-        .then((data) => setSandbox(data.status || "unknown"))
-        .catch(() => setSandbox("unknown"));
+    if (!active) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const response = await fetch(`${API}/sessions/${active.id}/sandbox`);
+        const data = await response.json();
+        if (cancelled) return;
+        const next = data.status || "unknown";
+        setSandbox((prev) => {
+          if (prev !== next) {
+            if (next === "running")
+              toast.success("Sandbox is running", {
+                description: "The workspace is ready for the agent.",
+              });
+            else if (next === "stopped")
+              toast.warning("Sandbox stopped", {
+                description: "Start a new workspace to continue.",
+              });
+          }
+          return next;
+        });
+      } catch {
+        if (!cancelled) setSandbox("unknown");
+      }
+    };
+    check();
+    const timer = window.setInterval(check, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [active]);
 
   async function createSession(event: FormEvent) {
@@ -311,6 +329,11 @@ export function Home() {
     if (!prompt.trim()) return;
     setCreating(true);
     setNotice("");
+    const creatingToast = noSandbox
+      ? undefined
+      : toast.loading("Starting sandbox…", {
+          description: "Spinning up an isolated workspace.",
+        });
     try {
       const response = await fetch(`${API}/new`, {
         method: "POST",
@@ -336,34 +359,28 @@ export function Home() {
         next,
         ...current,
       ]);
+      if (creatingToast)
+        toast.success("Workspace started", {
+          id: creatingToast,
+          description: noSandbox ? "Chat session created." : "Sandbox is provisioning.",
+        });
       selectSession(next.id);
       router.push(`/s/${next.id}`);
       setMessages([]);
       setRepo("");
       setPrompt("");
     } catch (err) {
-      setNotice(
-        err instanceof Error ? err.message : "Could not create session",
-      );
+      const message =
+        err instanceof Error ? err.message : "Could not create session";
+      if (creatingToast) toast.error(message, { id: creatingToast });
+      setNotice(message);
     } finally {
       setCreating(false);
     }
   }
   async function send(text = prompt) {
     if (!active || !text.trim() || working) return;
-    if (chatOnly) {
-      setPrompt("");
-      setNotice("");
-      try {
-        await sendMessage({ text: text.trim() });
-      } catch (err) {
-        setNotice(
-          err instanceof Error ? err.message : "Could not send message.",
-        );
-      }
-      return;
-    }
-    if (!sandboxRunning) {
+    if (!chatOnly && !sandboxRunning) {
       setNotice(
         "This sandbox is not running. Start a new workspace to continue.",
       );
@@ -372,13 +389,13 @@ export function Home() {
     setPrompt("");
     setNotice("");
     try {
-      const response = await fetch(`${API}/sessions/${active.id}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text.trim() }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.message);
-      queryClient.invalidateQueries({ queryKey: ["runs", active.id] });
-    } catch (err) { setNotice(err instanceof Error ? err.message : "Could not start run."); }
+      await sendMessage({ text: text.trim() });
+    } catch (err) {
+      setNotice(
+        err instanceof Error ? err.message : "Could not send message.",
+      );
+    }
   }
-  async function cancelRun() { if (!run) return; await fetch(`${API}/runs/${run.id}/cancel`, { method: "POST" }); queryClient.invalidateQueries({ queryKey: ["runs", active?.id] }); }
-  async function loadRunDiff() { if (!run) return; setDiffLoading(true); const response = await fetch(`${API}/runs/${run.id}/diff`); const data = await response.json(); if (response.ok) setRunDiff(data.diff || ""); else setNotice(data.message); setDiffLoading(false); }
   const loadDiff = useCallback(async () => {
     if (!active) return;
     setDiffLoading(true);
@@ -395,9 +412,6 @@ export function Home() {
       setDiffLoading(false);
     }
   }, [active]);
-  async function loadChanges() {
-    await Promise.all([loadDiff(), run ? loadRunDiff() : Promise.resolve()]);
-  }
   async function stopSandbox() {
     if (
       !active ||
@@ -451,13 +465,11 @@ export function Home() {
     if (active && view === "diff") {
       const timer = window.setTimeout(() => {
         void loadDiff();
-        const currentRun = run;
-        if (currentRun) void loadRunDiff();
       }, 0);
       return () => window.clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, view, run?.id]);
+  }, [active, view]);
   const tabs: { id: View; label: string; icon: typeof MessageSquareText; requiresSandbox?: boolean }[] = [
     { id: "chat", label: "Conversation", icon: MessageSquareText },
     { id: "diff", label: "Changes", icon: FileDiff, requiresSandbox: true },
@@ -483,45 +495,25 @@ export function Home() {
                   )}
                 </span>
                 <span className="max-w-40 truncate">
-                  {chatOnly ? "Chat" : repoName}
+                  {sessionTitle}
                 </span>
               </div>
             )}
           </div>
           {active && (
             <div className="flex items-center gap-1">
-              {chatOnly ? (
-                <Badge className="gap-1.5 font-normal">
-                  <span className="size-1.5 rounded-full bg-sky-500" />
-                  Chat mode
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className="hidden gap-1.5 font-normal sm:flex">
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      sandbox === "running"
-                        ? "bg-emerald-500"
-                        : sandbox === "stopped"
-                          ? "bg-muted-foreground"
-                          : "bg-amber-500",
-                    )}
-                  />
-                  Sandbox {sandbox}
-                </Badge>
-              )}
-              <Badge className="gap-1.5 font-normal">
+              <Badge variant="outline" className="gap-1.5 font-normal">
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    working
-                      ? "animate-pulse bg-foreground"
-                      : "bg-muted-foreground",
+                    chatOnly ? "bg-sky-500" : sandboxDot,
                   )}
                 />
-                {working ? "Agent working" : "Ready"}
+                {chatOnly ? "Chat" : `Sandbox ${sandbox}`}
+              </Badge>
+              <Badge variant="outline" className="gap-1.5 font-normal">
+                <span className={cn("size-1.5 rounded-full", activityDot)} />
+                {activityLabel}
               </Badge>
               {!chatOnly && (
                 <Tooltip>
@@ -531,7 +523,7 @@ export function Home() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Stop sandbox"
-                        disabled={!sandboxRunning || working}
+                        disabled={!sandboxRunning || busy}
                         onClick={stopSandbox}>
                         <Power />
                       </Button>
@@ -593,7 +585,7 @@ export function Home() {
                   ) : noSandbox ? (
                     "Start chat"
                   ) : (
-                    "Start session"
+                    "Start workspace"
                   )}
                 </Button>
               </div>
@@ -665,14 +657,16 @@ export function Home() {
                             <Sparkles className="size-3" />
                           </span>
                         </div>
-                        <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Workspace ready</p>
+                        <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                          {chatOnly ? "Chat ready" : "Workspace ready"}
+                        </p>
                         <h2 className="mt-2 text-2xl font-semibold tracking-tight">
                           {chatOnly ? "What can I help with?" : "What are we building?"}
                         </h2>
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">
                           {chatOnly
                             ? "Ask about code, ideas, or refactors. No sandbox — just conversation and answers."
-                            : "Describe the outcome you want. The agent will inspect the repository before it changes anything."}
+                            : "Describe the outcome you want. The agent will inspect the repository and make the changes directly."}
                         </p>
                         <div className="mx-auto mt-6 grid max-w-sm gap-2">
                           {suggestions.map((s) => (
@@ -700,16 +694,10 @@ export function Home() {
                 </div>
                 <div className="border-t bg-background px-4 pb-4 pt-3 sm:px-6">
                   <div className="mx-auto max-w-3xl">
-                    {runningLabel && (
-                      <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
-                        <span className="size-1.5 animate-pulse rounded-full bg-foreground" />
-                        The agent is {runningLabel}…
-                      </p>
-                    )}
                     <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/40">
                       <Textarea
                         value={prompt}
-                        disabled={!canChat || Boolean(runWorking)}
+                        disabled={!canChat || Boolean(busy)}
                         onChange={(e) => setPrompt(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.shiftKey) {
@@ -732,39 +720,22 @@ export function Home() {
                           render={
                             <Button
                               size="icon-lg"
-                              aria-label={
-                                runWorking || chatStreaming
-                                  ? "Stop"
-                                  : chatOnly
-                                    ? "Send message"
-                                    : "Start run"
-                              }
+                              aria-label={busy ? "Stop" : "Send message"}
                               className="size-9 rounded-xl"
                               onClick={() => {
-                                if (runWorking) cancelRun();
-                                else if (chatStreaming) void stop();
+                                if (busy) void stop();
                                 else send();
                               }}
                               disabled={
-                                !runWorking &&
-                                !chatStreaming &&
-                                (!prompt.trim() || sandboxUnavailable)
+                                !busy && (!prompt.trim() || sandboxUnavailable)
                               }
-                              variant={
-                                runWorking || chatStreaming
-                                  ? "destructive"
-                                  : "default"
-                              }>
-                              {runWorking || chatStreaming ? (
-                                <CircleStop />
-                              ) : (
-                                <SendHorizontal />
-                              )}
+                              variant={busy ? "destructive" : "default"}>
+                              {busy ? <CircleStop /> : <SendHorizontal />}
                             </Button>
                           }
                         />
                         <TooltipContent>
-                          {working ? "Stop response" : "Send message"}
+                          {busy ? "Stop" : "Send message"}
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -782,7 +753,7 @@ export function Home() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={loadChanges}
+                    onClick={loadDiff}
                     disabled={diffLoading || sandboxUnavailable}>
                     {diffLoading ? (
                       <LoaderCircle className="animate-spin" />
@@ -799,26 +770,15 @@ export function Home() {
                     <p className="p-4 font-mono text-xs text-muted-foreground">
                       Loading changes…
                     </p>
-                  ) : runDiff || diff ? (
+                  ) : diff ? (
                     <div className="divide-y">
-                      {runDiff && (
-                        <div>
-                          <div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            <GitFork className="size-3" />
-                            Run changes
-                          </div>
-                          <PatchDiff patch={runDiff} disableWorkerPool />
+                      <div>
+                        <div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          <Code2 className="size-3" />
+                          Workspace changes
                         </div>
-                      )}
-                      {diff && (
-                        <div>
-                          <div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            <Code2 className="size-3" />
-                            Workspace changes
-                          </div>
-                          <PatchDiff patch={diff} disableWorkerPool />
-                        </div>
-                      )}
+                        <PatchDiff patch={diff} disableWorkerPool />
+                      </div>
                     </div>
                   ) : (
                     <p className="p-4 text-sm text-muted-foreground">
