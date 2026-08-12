@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@e2b/code-interpreter": "^2.7.0",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "@prisma/adapter-better-sqlite3": "^7.9.1",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",

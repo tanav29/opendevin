@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { Sandbox } from "@e2b/code-interpreter";
 import { ollama } from "ollama-ai-provider-v2";
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import {
   convertToModelMessages,
   pipeUIMessageStreamToResponse,
@@ -14,6 +15,7 @@ import {
 } from "ai";
 import { prisma } from "./lib/db";
 import { sandboxTools } from "./lib/ai";
+import { create } from "node:domain";
 
 const runControllers = new Map<string, AbortController>();
 const eventChains = new Map<string, Promise<unknown>>();
@@ -247,15 +249,15 @@ app.get("/sessions/:sessionId/runs", async (req, res) => {
 });
 
 app.post("/new", async (req, res) => {
-  const { prompt, gitUrl } = req.body as { prompt?: string; gitUrl?: string };
-  if (
-    !gitUrl ||
-    typeof gitUrl !== "string" ||
-    !/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//i.test(gitUrl)
-  ) {
-    return res
-      .status(400)
-      .json({ message: "Enter a valid public Git repository URL" });
+  const body = req.body as { prompt?: string; gitUrl?: string };
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) return res.status(400).json({ message: "A task prompt is required" });
+
+  // A repository can be supplied separately or pasted into the task prompt.
+  const mentionedRepo = prompt.match(/https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^\s)]+/i)?.[0]?.replace(/[.,;!?]+$/, "");
+  const gitUrl = (typeof body.gitUrl === "string" && body.gitUrl.trim()) || mentionedRepo || "";
+  if (gitUrl && !/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/[^\s/]+\/[^\s/]+/i.test(gitUrl)) {
+    return res.status(400).json({ message: "Enter a valid public Git repository URL" });
   }
   try {
     const sandbox = await Sandbox.create({
@@ -264,29 +266,38 @@ app.post("/new", async (req, res) => {
         onTimeout: "pause", // don't kill
       },
     });
-    const repoName =
-      gitUrl
-        .split("/")
-        .pop()
-        ?.replace(/\.git$/, "") || "repository";
-    const clone = await sandbox.git.clone(gitUrl);
-    if (clone.exitCode !== 0)
-      return res
-        .status(502)
-        .json({ message: "Could not clone repository", stderr: clone.stderr });
+    const repoName = gitUrl
+      ? gitUrl.split("/").pop()?.replace(/\.git$/, "").replace(/[^a-zA-Z0-9._-]/g, "-") || "repository"
+      : "workspace";
+    let cwd = `/home/user/${repoName}`;
+    if (gitUrl) {
+      const clone = await sandbox.git.clone(gitUrl);
+      if (clone.exitCode !== 0)
+        return res.status(502).json({ message: "Could not clone repository", stderr: clone.stderr });
+    } else {
+      cwd = "/home/user/workspace";
+      const initialized = await sandbox.commands.run("mkdir -p /home/user/workspace && git init", { cwd: "/home/user" });
+      if (initialized.exitCode !== 0)
+        return res.status(502).json({ message: "Could not initialize workspace", stderr: initialized.stderr });
+    }
     const session = await prisma.sessions.create({
       data: {
         git: gitUrl,
         sandbox: sandbox.sandboxId,
-        cwd: `/home/user/${repoName}`,
+        cwd,
         status: "idle",
       },
     });
+    const run = await prisma.agentRun.create({ data: { sessionId: session.id, prompt, status: "planning" } });
+    await recordEvent(run.id, "run_created", "Run created and queued for workspace inspection.", { prompt: run.prompt }, "planning");
+    void planRun(run.id, session, run.prompt);
     res.status(201).json({
       message: "Session created",
       sessionId: session.id,
       sandboxId: sandbox.sandboxId,
-      prompt,
+      prompt: run.prompt,
+      gitUrl,
+      runId: run.id,
     });
   } catch (error) {
     console.error("create session failed", error);
@@ -480,8 +491,13 @@ app.post("/ai/:sessionId", async (req, res) => {
     const messages = incoming.length
       ? await convertToModelMessages(incoming as never[])
       : undefined;
+
+    const op = createOpenRouter({
+      apiKey: process.env.OPENROUTER_API_KEY
+    })
+
     const result = streamText({
-      model: ollama(process.env.OLLAMA_MODEL ?? "qwen3.5:4b"),
+      model: op.chat(process.env.MODEL!),
       abortSignal: abortController.signal,
       ...(messages ? { messages } : { prompt: body.prompt as string }),
       system: `You are OpenDevin, an autonomous coding agent. Working in the attached sandbox. Inspect before editing, use tools for repository actions, run relevant tests, and report exactly what changed. Never claim a command ran unless its tool result confirms it. The repository directory is ${session.cwd}. Your major text response will be in the last part for user and can do all processing on the above parts.`,

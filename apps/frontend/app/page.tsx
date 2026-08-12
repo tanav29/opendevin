@@ -282,21 +282,24 @@ export function Home() {
 
   async function createSession(event: FormEvent) {
     event.preventDefault();
-    if (!repo.trim()) return;
+    if (!prompt.trim()) return;
     setCreating(true);
     setNotice("");
     try {
       const response = await fetch(`${API}/new`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gitUrl: repo.trim() }),
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          ...(repo.trim() ? { gitUrl: repo.trim() } : {}),
+        }),
       });
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.message || "Could not create session");
       const next: Session = {
         id: data.sessionId,
-        git: repo.trim(),
+        git: data.gitUrl || repo.trim(),
         status: "idle",
         archived: false,
         createdAt: new Date().toISOString(),
@@ -310,6 +313,7 @@ export function Home() {
       router.push(`/s/${next.id}`);
       setMessages([]);
       setRepo("");
+      setPrompt("");
     } catch (err) {
       setNotice(
         err instanceof Error ? err.message : "Could not create session",
@@ -502,33 +506,41 @@ export function Home() {
               <span className="block text-muted-foreground">a second set of hands.</span>
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-              Connect a repository, describe the outcome, and follow every step
-              your agent takes in a contained workspace.
+              Describe the outcome you want. Optionally attach a public Git
+              repository, and your agent will start working in a contained workspace.
             </p>
             <form
               onSubmit={createSession}
               className="mt-10 max-w-2xl rounded-lg border bg-card p-3">
               <label
-                htmlFor="repository"
+                htmlFor="session-prompt"
                 className="mb-2 block px-1 text-xs font-medium">
-                Repository URL
+                What should we work on?
               </label>
-              <div className="flex gap-2">
+              <Textarea
+                id="session-prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Describe the change, question, or task…"
+                rows={3}
+                className="resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+              />
+              <div className="mt-2 flex gap-2">
                 <div className="flex h-10 flex-1 items-center gap-2 rounded-lg border px-3">
                   <GitFork className="size-4 text-muted-foreground" />
                   <input
                     id="repository"
                     value={repo}
                     onChange={(e) => setRepo(e.target.value)}
-                    placeholder="https://github.com/owner/repository"
+                    placeholder="Optional repository URL"
                     className="min-w-0 flex-1 bg-transparent text-sm outline-none"
                   />
                 </div>
-                <Button type="submit" disabled={creating || !repo.trim()}>
+                <Button type="submit" disabled={creating || !prompt.trim()}>
                   {creating ? (
                     <LoaderCircle className="animate-spin" />
                   ) : (
-                    "Connect"
+                    "Start session"
                   )}
                 </Button>
               </div>
