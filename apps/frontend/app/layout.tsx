@@ -36,7 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 {children}
               </main>
             </SidebarProvider>
-            <Toaster position="bottom-left" richColors />
+            <Toaster position="bottom-left" />
           </TooltipProvider>
         </AppProviders>
       </body>

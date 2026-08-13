@@ -114,12 +114,12 @@ export function AppSidebar() {
       <SidebarMenuItem key={session.id}>
         <SidebarMenuButton
           isActive={activeSessionId === session.id}
+          size="sm"
           onClick={() => {
             selectSession(session.id);
             router.push(`/s/${session.id}`);
           }}
-          tooltip={sessionTitle(session)}
-          className="h-fit">
+          tooltip={`${sessionTitle(session)} · ${sessionStatus(session)}`}>
           {session.archived ? (
             <Archive className="text-muted-foreground" />
           ) : working ? (
@@ -129,12 +129,7 @@ export function AppSidebar() {
           ) : (
             <CheckCircle2 />
           )}
-          <span className="min-w-0">
-            <span className="block truncate">{sessionTitle(session)}</span>
-            <span className="block text-[10px] font-normal capitalize text-muted-foreground">
-              {sessionStatus(session)}
-            </span>
-          </span>
+          <span className="truncate">{sessionTitle(session)}</span>
         </SidebarMenuButton>
         {!session.archived ? (
           <SidebarMenuAction
@@ -174,11 +169,11 @@ export function AppSidebar() {
   }
 
   return (
-    <Sidebar className="border-black/10 bg-[#eef1f3] text-[#172027]">
-      <SidebarHeader className="flex w-full flex-row items-center justify-between gap-2">
+    <Sidebar className="border-r bg-sidebar text-sidebar-foreground">
+      <SidebarHeader className="flex h-10 w-full flex-row items-center justify-between gap-2 border-b px-2 py-0">
         <div className="flex items-center gap-2">
-          <Command className="size-7 rounded-md bg-primary p-1.5 text-primary-foreground" />
-          <span className="text-sm font-semibold tracking-tight">
+          <Command className="size-5 rounded-sm bg-primary p-1 text-primary-foreground" />
+          <span className="text-sm font-medium tracking-tight">
             OpenDevin
           </span>
         </div>
@@ -205,7 +200,7 @@ export function AppSidebar() {
           <div className="flex items-center justify-between">
             <SidebarGroupLabel>Sessions</SidebarGroupLabel>
             {workingCount > 0 && (
-              <span className="mr-2 text-[10px] text-emerald-600">
+              <span className="mr-2 text-[11px] text-muted-foreground">
                 {workingCount} active
               </span>
             )}
@@ -239,8 +234,8 @@ export function AppSidebar() {
             {activeSessions.map(renderSession)}
           </SidebarMenu>
           {archivedSessions.length > 0 && (
-            <div className="mt-5 border-t border-sidebar-border/70 pt-4">
-              <SidebarGroupLabel className="h-7 text-[10px] uppercase tracking-[0.16em]">
+            <div className="mt-3 border-t pt-2">
+              <SidebarGroupLabel className="h-6 text-[11px]">
                 Archived · {archivedSessions.length}
               </SidebarGroupLabel>
               <SidebarMenu>{archivedSessions.map(renderSession)}</SidebarMenu>

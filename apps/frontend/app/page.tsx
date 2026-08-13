@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useChat } from "@ai-sdk/react";
 import { useQuery as useConvexQuery } from "convex/react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
@@ -20,22 +21,19 @@ import Markdown from 'react-markdown'
 import {
   Archive,
   CircleStop,
-  Code2,
   FileDiff,
   LoaderCircle,
   MonitorPlay,
-  MessageSquareText,
   PanelRightClose,
   PanelRightOpen,
   Power,
   RefreshCw,
   SendHorizontal,
-  Sparkles,
   ChevronDown,
   ChevronUp,
   Terminal as TerminalIcon,
+  type LucideIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -100,20 +98,20 @@ function ToolCall({ part }: { part: ToolPart }) {
   const verb = name === "run_command" ? "Running command" : `Using ${name}`;
 
   return (
-    <details className="group mb-3 overflow-hidden rounded-xl border border-black/10 bg-white/70 text-xs" open={!done && !error}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 hover:bg-black/[.03]">
-        <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    <details className="group mb-2 overflow-hidden rounded-md border text-xs" open={!done && !error}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 hover:bg-muted/60">
+        <TerminalIcon className="size-3 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{verb}</span>
         <code className="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:block">{name}</code>
-        <span className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
-          <span className={cn("size-1.5 rounded-full", error ? "bg-destructive" : done ? "bg-emerald-500" : "animate-pulse bg-amber-500")} />
+        <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+          <span className={cn("size-1.5 rounded-full", error ? "bg-destructive" : done ? "bg-emerald-500" : "bg-amber-500")} />
           {status}
         </span>
       </summary>
       {(input || output) && (
-        <div className="space-y-2 border-t border-black/10 px-3 py-2 text-[11px]">
-          {input && <div><p className="mb-1 font-semibold uppercase tracking-wider text-muted-foreground">Input</p><pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/[.04] p-2 font-mono">{input}</pre></div>}
-          {output && <div><p className={cn("mb-1 font-semibold uppercase tracking-wider", error ? "text-destructive" : "text-muted-foreground")}>{error ? "Error" : "Result"}</p><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/[.04] p-2 font-mono">{output}</pre></div>}
+        <div className="space-y-1.5 border-t px-2.5 py-1.5 text-[11px]">
+          {input && <div><p className="mb-1 text-muted-foreground">Input</p><pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-muted/70 p-1.5 font-mono">{input}</pre></div>}
+          {output && <div><p className={cn("mb-1", error ? "text-destructive" : "text-muted-foreground")}>{error ? "Error" : "Result"}</p><pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-muted/70 p-1.5 font-mono">{output}</pre></div>}
         </div>
       )}
     </details>
@@ -127,7 +125,7 @@ function Message({
   message: UIMessage;
   streaming: boolean;
 }) {
-  const startedAt = useRef(Date.now());
+  const startedAt = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [showWorkDetails, setShowWorkDetails] = useState(false);
   const lastTextIndex = message.parts.reduce(
@@ -139,12 +137,14 @@ function Message({
   );
 
   useEffect(() => {
+    const beganAt = startedAt.current ?? Date.now();
+    startedAt.current = beganAt;
     if (!streaming) {
-      setElapsed(Math.max(0, Date.now() - startedAt.current));
+      setElapsed(Math.max(0, Date.now() - beganAt));
       return;
     }
     const timer = window.setInterval(
-      () => setElapsed(Date.now() - startedAt.current),
+      () => setElapsed(Date.now() - beganAt),
       250,
     );
     return () => window.clearInterval(timer);
@@ -153,7 +153,7 @@ function Message({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[min(85%,34rem)] rounded-2xl rounded-br-md bg-foreground/5 px-4 py-2.5 text-sm leading-6 text-primary">
+        <div className="max-w-[min(85%,34rem)] rounded-md bg-muted px-3 py-1.5 text-sm leading-5">
           {message.parts.map((part, i) =>
             part.type === "text" ? <p key={`${message.id}-${i}`}>{part.text}</p> : null,
           )}
@@ -164,7 +164,7 @@ function Message({
   return (
     <div className="flex">
       <div className="min-w-0 flex-1">
-        <div className="text-sm leading-7">
+        <div className="text-sm leading-6">
           {message.parts.map((part, i) => {
             // Once the turn is complete, keep the final answer readable and
             // replace the verbose tool trace above it with one compact summary.
@@ -173,8 +173,8 @@ function Message({
                 <button
                   type="button"
                   onClick={() => setShowWorkDetails((value) => !value)}
-                  className="mb-3 flex w-full items-center gap-2 py-1 text-left text-md text-muted-foreground transition-colors hover:text-foreground">
-                  <span className="flex-1">Worked for few sec</span>
+                  className="mb-2 flex w-full items-center gap-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground">
+                  <span className="flex-1">Worked for {Math.max(1, Math.round(elapsed / 1000))} sec</span>
                   {showWorkDetails ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
                 </button>
               );
@@ -210,9 +210,11 @@ function Message({
             return null;
           })}
         </div>
-        <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          {streaming && <LoaderCircle className="size-3 animate-spin" />}
-        </p>
+        {streaming && (
+          <p className="mt-1 flex items-center text-muted-foreground">
+            <LoaderCircle className="size-3 animate-spin" />
+          </p>
+        )}
       </div>
     </div>
   );
@@ -231,15 +233,15 @@ function BrowserPane({ sandboxId }: { sandboxId: string }) {
     setAddress(next);
   };
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
-      <form onSubmit={submit} className="flex border-b p-2">
-        <div className="border flex px-3 w-full rounded-xl items-center text-md font-mono">
-          <IconWorld className="w-4 h-4 shrink-0 mr-2 text-muted-foreground" />
-          <p className="select-none text-muted-foreground">http://localhost:</p>
-          <input value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))} inputMode="numeric" className="w-[4.2ch] outline-none" placeholder="port" />
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <form onSubmit={submit} className="flex border-b px-2 py-1.5">
+        <div className="flex h-7 w-full items-center rounded-md border px-2 font-mono text-xs">
+          <IconWorld className="mr-1.5 size-3.5 shrink-0 text-muted-foreground" />
+          <p className="select-none text-muted-foreground">localhost:</p>
+          <input value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))} inputMode="numeric" className="w-[4.2ch] bg-transparent outline-none" placeholder="port" />
           <p className="select-none text-muted-foreground">/</p>
-          <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="home" className="outline-none w-full" />
-        <Button type="submit" variant="link">GO</Button>
+          <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="home" className="w-full bg-transparent outline-none" />
+        <Button type="submit" variant="ghost" size="xs" className="ml-1 h-5 px-1.5 text-[10px]">Go</Button>
         {/*<a href={address} target="_blank" rel="noreferrer" aria-label="Open preview in new tab" className="rounded p-1.5 text-[#879099] hover:bg-black/5"><ExternalLink className="size-3.5" /></a>*/}
         </div>
       </form>
@@ -260,13 +262,17 @@ function TerminalPane({
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<XTerm | null>(null);
   const socket = useRef<WebSocket | null>(null);
+  const connectRef = useRef<() => void>(() => undefined);
+  const reconnectTimer = useRef<number | undefined>(undefined);
+  const manualReconnect = useRef(false);
+  const [connection, setConnection] = useState<"connecting" | "connected" | "disconnected">("connecting");
 
   useEffect(() => {
     if (!host.current) return;
     const instance = new XTerm({
       cursorBlink: true,
       convertEol: true,
-      fontSize: 15,
+      fontSize: 13,
     });
     const fit = new FitAddon();
     instance.loadAddon(fit);
@@ -275,42 +281,82 @@ function TerminalPane({
     terminal.current = instance;
 
     let closed = false;
-    let reconnect: number | undefined;
     const connect = () => {
       if (closed) return;
+      setConnection("connecting");
       const base = API.replace(/^http/, "ws");
       const ws = new WebSocket(`${base}/sessions/${sessionId}/terminal/ws`);
       socket.current = ws;
       ws.onopen = () => instance.write("\x1b[32m● connected\x1b[0m\r\n");
+      ws.onopen = () => {
+        instance.reset();
+        setConnection("connected");
+      };
       ws.onmessage = (event) => instance.write(String(event.data));
-      ws.onerror = () => onError("Terminal connection failed.");
+      ws.onerror = () => {
+        setConnection("disconnected");
+        onError("Terminal connection failed.");
+      };
       ws.onclose = () => {
         if (!closed) {
+          setConnection("disconnected");
           instance.write("\r\n\x1b[33m● reconnecting…\x1b[0m\r\n");
-          reconnect = window.setTimeout(connect, 1200);
+          reconnectTimer.current = window.setTimeout(
+            connect,
+            manualReconnect.current ? 0 : 1200,
+          );
+          manualReconnect.current = false;
         }
       };
     };
+    connectRef.current = connect;
     const send = (data: string) => {
       if (socket.current?.readyState === WebSocket.OPEN)
         socket.current.send(JSON.stringify({ type: "input", data }));
     };
     const input = instance.onData(send);
     const resize = () => fit.fit();
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(host.current);
     window.addEventListener("resize", resize);
     connect();
     return () => {
       closed = true;
-      if (reconnect) window.clearTimeout(reconnect);
+      if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", resize);
       input.dispose();
       socket.current?.close();
+      connectRef.current = () => undefined;
       instance.dispose();
       terminal.current = null;
     };
   }, [sessionId, onError]);
 
-  return <div ref={host} className="h-full w-full" aria-label="Terminal" />;
+  const reconnect = () => {
+    if (socket.current?.readyState === WebSocket.CONNECTING) return;
+    if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+    manualReconnect.current = true;
+    if (socket.current && socket.current.readyState !== WebSocket.CLOSED)
+      socket.current.close();
+    else connectRef.current();
+  };
+
+  return (
+    <div className="relative h-full w-full">
+      <div ref={host} className="h-full w-full pt-7" aria-label="Terminal" />
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={reconnect}
+        disabled={connection === "connecting"}
+        className="absolute right-1.5 top-1 h-6 px-1.5">
+        <RefreshCw className={cn("size-3", connection === "connecting" && "animate-spin")} />
+        Reconnect
+      </Button>
+    </div>
+  );
 }
 
 export function Home() {
@@ -327,11 +373,23 @@ export function Home() {
   const [prompt, setPrompt] = useState("");
   const [notice, setNotice] = useState("");
   const [view, setView] = useState<View>("preview");
-  const [diff, setDiff] = useState("");
-  const [diffLoading, setDiffLoading] = useState(false);
   const [collapsedPane, setCollapsedPane] = useState(false);
   const [paneWidth, setPaneWidth] = useState(40);
   const resizing = useRef(false);
+  const diffQuery = useQuery({
+    queryKey: ["session-diff", activeId],
+    enabled: Boolean(activeId && view === "diff"),
+    staleTime: 5_000,
+    queryFn: async () => {
+      const response = await fetch(`${API}/sessions/${activeId}/diff`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not load Git diff.");
+      return String(data.diff || "");
+    },
+  });
+  const diff = diffQuery.data ?? "";
+  const diffLoading = diffQuery.isFetching;
+  const { refetch: refetchDiff } = diffQuery;
   const diffFiles = useMemo(
     () => (diff ? diff.split(/(?=^diff --git )/m).filter(Boolean) : []),
     [diff],
@@ -355,7 +413,7 @@ export function Home() {
   const sandboxUnavailable = !chatOnly && sessionStopped;
   const busy = working || active?.status === "running";
   const activityLabel = active?.status === "running" ? "Working" : active?.status ?? "Idle";
-  const activityDot = active?.status === "running" ? "animate-pulse bg-emerald-500" : "bg-muted-foreground";
+  const activityDot = active?.status === "running" ? "bg-emerald-500" : "bg-muted-foreground";
 
   const messagesData = useConvexQuery(api.sessions.messages, active ? { sessionId: active.id as never } : "skip") as UIMessage[] | undefined;
   useEffect(() => {
@@ -378,7 +436,7 @@ export function Home() {
     toast.error(error.message);
   }, [error?.message]);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
+    bottom.current?.scrollIntoView({ behavior: "auto" });
   }, [messages, status]);
 
   async function stopAgent() {
@@ -423,21 +481,12 @@ export function Home() {
     queueMicrotask(() => void send(initialPrompt));
   }, [active, active?.id, send, working]);
   const loadDiff = useCallback(async () => {
-    if (!activeId) return;
-    setDiffLoading(true);
-    try {
-      const response = await fetch(`${API}/sessions/${activeId}/diff`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message);
-      setDiff(data.diff || "");
-    } catch (err) {
+    const result = await refetchDiff();
+    if (result.error)
       setNotice(
-        err instanceof Error ? err.message : "Could not load Git diff.",
+        result.error instanceof Error ? result.error.message : "Could not load Git diff.",
       );
-    } finally {
-      setDiffLoading(false);
-    }
-  }, [activeId]);
+  }, [refetchDiff]);
   async function stopSandbox() {
     if (
       !active ||
@@ -500,12 +549,7 @@ export function Home() {
       );
     }
   }
-  useEffect(() => {
-    if (activeId && view === "diff") {
-      queueMicrotask(() => void loadDiff());
-    }
-  }, [activeId, loadDiff, view]);
-  const tabs: { id: View; label: string; icon: typeof MessageSquareText; requiresSandbox?: boolean }[] = [
+  const tabs: { id: View; label: string; icon: LucideIcon; requiresSandbox?: boolean }[] = [
     { id: "preview", label: "Browser", icon: MonitorPlay, requiresSandbox: true },
     { id: "terminal", label: "Terminal", icon: TerminalIcon, requiresSandbox: true },
     { id: "diff", label: "Diffs", icon: FileDiff, requiresSandbox: true },
@@ -527,12 +571,12 @@ export function Home() {
   return (
     <main className="flex h-screen overflow-hidden">
       <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-black/10 bg-white px-3 sm:px-5">
+        <header className="z-10 flex h-10 shrink-0 items-center justify-between border-b px-2 sm:px-3">
           <Tooltip>
             <TooltipTrigger render={<SidebarTrigger />} />
             <TooltipContent>Toggle sidebar</TooltipContent>
           </Tooltip>
-          <div className="flex items-center gap-2 text-md font-medium">
+          <div className="flex items-center gap-2 text-sm font-medium">
             {active && (
                 <span className="max-w-64 truncate">
                   {sessionTitle(active)}
@@ -540,16 +584,11 @@ export function Home() {
             )}
           </div>
           {active && (
-            <div className="flex items-center gap-1">
-              <Badge variant="outline" className="gap-1.5 font-normal">
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    activityDot,
-                  )}
-                />
+            <div className="flex items-center gap-0.5">
+              <span className="mr-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className={cn("size-1.5 rounded-full", activityDot)} />
                 {activityLabel}
-              </Badge>
+              </span>
               {!chatOnly && (sessionStopped ? (
                 <Tooltip>
                   <TooltipTrigger
@@ -599,30 +638,31 @@ export function Home() {
             </div>
           )}
         </header>
+        {!active && (
+          <div className="flex flex-1 items-center justify-center px-6">
+            <div className="max-w-sm text-center">
+              <h1 className="text-sm font-medium">No session selected</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Choose a session in the sidebar, or start a new one.
+              </p>
+            </div>
+          </div>
+        )}
         {active && (
           <section className="flex min-h-0 w-full flex-1 flex-col">
             <div className="flex min-h-0 flex-1">
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-black/10">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r">
                 <div className="min-h-0 flex-1 w-full overflow-y-auto scrollbar-none">
-                  <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-8">
+                  <div className="mx-auto max-w-2xl space-y-4 px-4 py-4 sm:px-6">
                     {messages.length === 0 && (
-                      <div className="mx-auto mt-[8vh] max-w-md text-center">
-                        <div className="relative mx-auto grid size-16 place-items-center rounded-2xl bg-[#b9ea73] text-[#1d2915] shadow-[0_0_48px_rgba(120,180,60,.18)]">
-                          <Code2 className="size-7" />
-                          <span className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border bg-background text-foreground">
-                            <Sparkles className="size-3" />
-                          </span>
-                        </div>
-                        <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                          {chatOnly ? "Chat ready" : "Workspace ready"}
-                        </p>
-                        <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                      <div className="pt-8">
+                        <h2 className="text-base font-medium tracking-tight">
                           {chatOnly ? "What can I help with?" : "What are we building?"}
                         </h2>
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        <p className="mt-1 text-sm leading-5 text-muted-foreground">
                           {chatOnly
-                            ? "Ask about code, ideas, or refactors. No sandbox — just conversation and answers."
-                            : "Describe the outcome you want. The agent will inspect the repository and make the changes directly."}
+                            ? "Ask about code, ideas, or refactors. Conversation only, no sandbox."
+                            : "Describe the outcome. The agent inspects the repository and makes the changes."}
                         </p>
                       </div>
                     )}
@@ -636,9 +676,9 @@ export function Home() {
                     <div ref={bottom} />
                   </div>
                 </div>
-                <div className="bg-[#f6f7f8] px-4 pb-4 sm:px-6">
-                  <div className="mx-auto max-w-3xl">
-                    <div className="flex items-end gap-2 rounded-2xl border border-black/10 bg-white p-2">
+                <div className="border-t px-3 py-2 sm:px-4">
+                  <div className="mx-auto max-w-2xl">
+                    <div className="flex items-end gap-1.5 rounded-md border bg-background p-1.5">
                       <Textarea
                         value={prompt}
                         disabled={!canChat || Boolean(busy)}
@@ -657,15 +697,15 @@ export function Home() {
                               : "Ask OpenDevin to investigate, build, or fix…"
                         }
                         rows={1}
-                        className="min-h-9 resize-none border-0 bg-transparent py-2 shadow-none focus-visible:ring-0 disabled:bg-transparent"
+                        className="min-h-8 resize-none border-0 bg-transparent py-1.5 shadow-none focus-visible:ring-0 disabled:bg-transparent"
                       />
                       <Tooltip>
                         <TooltipTrigger
                           render={
                             <Button
-                              size="icon-lg"
+                              size="icon-sm"
                               aria-label={busy ? "Stop" : "Send message"}
-                              className="size-9 rounded-xl"
+                              className="size-7"
                               onClick={() => {
                                 if (busy) void stopAgent();
                                 else send();
@@ -683,9 +723,6 @@ export function Home() {
                         </TooltipContent>
                       </Tooltip>
                     </div>
-                    <p className="mt-2 px-1 text-center text-[10px] text-muted-foreground">
-                      Enter to send · Shift + Enter for a new line
-                    </p>
                   </div>
                 </div>
               </div>
@@ -697,13 +734,13 @@ export function Home() {
                   onPointerDown={beginResize}
                   onPointerMove={resizePane}
                   onPointerUp={endResize}
-                  className="w-1 shrink-0 cursor-col-resize bg-black/10 transition-colors hover:bg-primary/50"
+                  className="w-px shrink-0 cursor-col-resize bg-border hover:bg-foreground/30"
                 />
               )}
               {!chatOnly && <aside
-                style={{ width: collapsedPane ? "3.25rem" : `${paneWidth}%` }}
-                className="flex min-h-0 min-w-0 shrink-0 flex-col bg-[#f1f3f4]">
-                <div className="flex h-11 shrink-0 items-center gap-1 border-b border-black/10 px-2">
+                style={{ width: collapsedPane ? "2.5rem" : `${paneWidth}%` }}
+                className="flex min-h-0 min-w-0 shrink-0 flex-col bg-background">
+                <div className="flex h-9 shrink-0 items-center gap-0.5 border-b px-1">
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -720,21 +757,30 @@ export function Home() {
                   </Tooltip>
                   {!collapsedPane && <>
                   {tabs.filter((tab) => !chatOnly || !tab.requiresSandbox).map(({ id, label, icon: Icon, requiresSandbox }) => (
-                    <Button key={id} variant={view === id ? "outline" : "ghost"} disabled={Boolean(requiresSandbox && sandboxUnavailable)} onClick={() => setView(id)}>
+                    <Button key={id} size="sm" variant={view === id ? "outline" : "ghost"} disabled={Boolean(requiresSandbox && sandboxUnavailable)} onClick={() => setView(id)}>
                       <Icon className="size-3.5" />{label}
                     </Button>
                   ))}
                   </>}
                 </div>
-                {!collapsedPane && view === "preview" && active && !sandboxUnavailable && (
-                  <BrowserPane sandboxId={active.sandbox ?? ""} />
+                {active && !sandboxUnavailable && (
+                  <div
+                    className={cn(
+                      "min-h-0 min-w-0 flex-1 flex-col",
+                      !collapsedPane && view === "preview" ? "flex" : "hidden",
+                    )}>
+                    <BrowserPane sandboxId={active.sandbox ?? ""} />
+                  </div>
                 )}
-                {!collapsedPane && view === "diff" && (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <div className="m-2 flex items-center justify-end">
+                <div
+                  className={cn(
+                    "min-h-0 min-w-0 flex-1 flex-col",
+                    !collapsedPane && view === "diff" ? "flex" : "hidden",
+                  )}>
+                <div className="flex items-center justify-end px-1.5 py-1">
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon-xs"
                     onClick={loadDiff}
                     disabled={diffLoading || sandboxUnavailable}>
                     {diffLoading ? (
@@ -748,7 +794,7 @@ export function Home() {
                   aria-label="Git changes"
                   className="min-h-0 flex-1">
                   {diffLoading ? (
-                    <p className="p-4 text-sm text-muted-foreground">
+                    <p className="p-3 text-sm text-muted-foreground">
                       Loading…
                     </p>
                   ) : diff ? (
@@ -756,8 +802,8 @@ export function Home() {
                       {diffFiles.map((filePatch, index) => {
                         const fileName = filePatch.match(/^diff --git a\/(.*?) b\//m)?.[1] ?? `Changed file ${index + 1}`;
                         return (
-                          <details key={`${fileName}-${index}`} open className="border-b border-black/10">
-                            <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground">
+                          <details key={`${fileName}-${index}`} open className="border-b">
+                            <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-muted-foreground">
                               {fileName}
                             </summary>
                             <PatchDiff patch={filePatch} disableWorkerPool />
@@ -766,20 +812,23 @@ export function Home() {
                       })}
                     </div>
                   ) : (
-                    <p className="p-4 text-sm text-muted-foreground">
+                    <p className="p-3 text-sm text-muted-foreground">
                       No changes yet.
                     </p>
                   )}
                 </ScrollArea>
               </div>
-                )}
-                {!collapsedPane && view === "terminal" && !sandboxUnavailable && (
-              <div className="flex min-h-0 flex-1 flex-col">
+                {active && !sandboxUnavailable && (
+                  <div
+                    className={cn(
+                      "min-h-0 min-w-0 flex-1 flex-col",
+                      !collapsedPane && view === "terminal" ? "flex" : "hidden",
+                    )}>
                   <TerminalPane
                     sessionId={active.id}
                     onError={setNotice}
                   />
-              </div>
+                  </div>
                 )}
               </aside>}
             </div>
