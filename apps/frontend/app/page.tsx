@@ -7,10 +7,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useChat } from "@ai-sdk/react";
 import { useQuery as useConvexQuery } from "convex/react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
@@ -21,13 +21,12 @@ import {
   Archive,
   CircleStop,
   Code2,
-  ExternalLink,
   FileDiff,
-  GitFork,
-  Globe,
   LoaderCircle,
   MonitorPlay,
   MessageSquareText,
+  PanelRightClose,
+  PanelRightOpen,
   Power,
   RefreshCw,
   SendHorizontal,
@@ -54,12 +53,6 @@ import {
 } from "@/components/providers";
 import { api } from "@convex/_generated/api";
 type View = "preview" | "diff" | "terminal";
-
-const suggestions = [
-  "Map the architecture and key risks",
-  "Add coverage for the authentication flow",
-  "Find and fix the failing build",
-];
 
 type ToolPart = {
   type: string;
@@ -137,7 +130,7 @@ function Message({
                 <Streamdown
                   key={`${message.id}-${i}`}
                   mode={streaming ? "streaming" : "static"}
-                  animate={streaming}
+                  animated={streaming}
                   className="typeset typeset-docs">
                   {part.text}
                 </Streamdown>
@@ -162,14 +155,12 @@ function BrowserPane({ sandboxId }: { sandboxId: string }) {
   const [path, setPath] = useState("");
   const initial = `https://3000-${sandboxId}.e2b.app/`;
   const [address, setAddress] = useState(initial);
-  const [draft, setDraft] = useState(initial);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const value = path.trim();
     const normalizedPath = value ? (value.startsWith("/") ? value : `/${value}`) : "/";
     const next = `https://${port.trim() || "3000"}-${sandboxId}.e2b.app/${normalizedPath}`;
     setAddress(next);
-    setDraft(next);
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
@@ -180,7 +171,7 @@ function BrowserPane({ sandboxId }: { sandboxId: string }) {
           <input value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))} inputMode="numeric" className="w-[4.2ch] outline-none" placeholder="port" />
           <p className="select-none text-muted-foreground">/</p>
           <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="home" className="outline-none w-full" />
-        <Button type="submit" variant="link ">GO</Button>
+        <Button type="submit" variant="link">GO</Button>
         {/*<a href={address} target="_blank" rel="noreferrer" aria-label="Open preview in new tab" className="rounded p-1.5 text-[#879099] hover:bg-black/5"><ExternalLink className="size-3.5" /></a>*/}
         </div>
       </form>
@@ -255,7 +246,6 @@ function TerminalPane({
 }
 
 export function Home() {
-  const router = useRouter();
   const { activeSessionId, selectSession } = useSessionSelection();
   const sessions = ((useConvexQuery(api.sessions.list, {}) ?? []) as unknown as Array<Record<string, unknown>>).map((session) => ({
     ...session,
@@ -266,14 +256,14 @@ export function Home() {
   const active =
     sessions.find((session) => session.id === activeSessionId) ?? null;
   const activeId = active?.id;
-  const [repo, setRepo] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
-  const [noSandbox, setNoSandbox] = useState(false);
   const [view, setView] = useState<View>("preview");
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
+  const [collapsedPane, setCollapsedPane] = useState(false);
+  const [paneWidth, setPaneWidth] = useState(40);
+  const resizing = useRef(false);
   const diffFiles = useMemo(
     () => (diff ? diff.split(/(?=^diff --git )/m).filter(Boolean) : []),
     [diff],
@@ -295,76 +285,51 @@ export function Home() {
   const sessionStopped = active?.status === "stopped";
   const canChat = Boolean(active) && !sessionStopped;
   const sandboxUnavailable = !chatOnly && sessionStopped;
-  const repoName =
-    active?.git.split("/").pop()?.replace(".git", "") || "Workspace";
-  const alert = notice || error?.message;
   const busy = working || active?.status === "running";
   const activityLabel = active?.status === "running" ? "Working" : active?.status ?? "Idle";
   const activityDot = active?.status === "running" ? "animate-pulse bg-emerald-500" : "bg-muted-foreground";
 
   const messagesData = useConvexQuery(api.sessions.messages, active ? { sessionId: active.id as never } : "skip") as UIMessage[] | undefined;
   useEffect(() => {
+    // Convex contains the last completed transcript. Never let its reactive
+    // update replace the message currently being streamed by useChat.
+    if (working || active?.status === "running" || !messagesData) return;
     setMessages(
-      (messagesData || []).filter(
+      messagesData.filter(
         (m) => m.role === "user" || m.role === "assistant",
       ),
     );
-  }, [active?.id, messagesData, setMessages]);
+  }, [active?.id, active?.status, messagesData, setMessages, working]);
+  useEffect(() => {
+    if (!notice) return;
+    toast.error(notice);
+    queueMicrotask(() => setNotice(""));
+  }, [notice]);
+  useEffect(() => {
+    if (!error?.message) return;
+    toast.error(error.message);
+  }, [error?.message]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
 
-  async function createSession(event: FormEvent) {
-    event.preventDefault();
-    if (!prompt.trim()) return;
-    setCreating(true);
-    setNotice("");
-    const creatingToast = noSandbox
-      ? undefined
-      : toast.loading("Starting sandbox…", {
-          description: "Spinning up an isolated workspace.",
-        });
+  async function stopAgent() {
+    if (!active) return;
+    // Close the SSE stream immediately, then tell the backend to abort the
+    // model/tool loop that may still be running server-side.
+    stop();
     try {
-      const response = await fetch(`${API}/new`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          sandbox: !noSandbox,
-          ...(repo.trim() ? { gitUrl: repo.trim() } : {}),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.message || "Could not create session");
-      const next: Session = {
-        id: data.sessionId,
-        git: data.gitUrl || repo.trim(),
-        status: "idle",
-        archived: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      if (creatingToast)
-        toast.success("Workspace started", {
-          id: creatingToast,
-          description: noSandbox ? "Chat session created." : "Sandbox is provisioning.",
-        });
-      selectSession(next.id);
-      router.push(`/s/${next.id}`);
-      setMessages([]);
-      setRepo("");
-      setPrompt("");
+      const response = await fetch(`${API}/sessions/${active.id}/stop`, { method: "POST" });
+      if (!response.ok && !(chatOnly && response.status === 409)) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "Could not stop the agent.");
+      }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Could not create session";
-      if (creatingToast) toast.error(message, { id: creatingToast });
-      setNotice(message);
-    } finally {
-      setCreating(false);
+      setNotice(err instanceof Error ? err.message : "Could not stop the agent.");
     }
   }
-  async function send(text = prompt) {
+
+  const send = useCallback(async (text = prompt) => {
     if (!active || !text.trim() || working) return;
     if (!canChat) {
       setNotice(
@@ -381,7 +346,14 @@ export function Home() {
         err instanceof Error ? err.message : "Could not send message.",
       );
     }
-  }
+  }, [active, canChat, prompt, sendMessage, working]);
+  useEffect(() => {
+    if (!active || working) return;
+    const initialPrompt = window.sessionStorage.getItem("opendevin:initial-prompt");
+    if (!initialPrompt) return;
+    window.sessionStorage.removeItem("opendevin:initial-prompt");
+    queueMicrotask(() => void send(initialPrompt));
+  }, [active, active?.id, send, working]);
   const loadDiff = useCallback(async () => {
     if (!activeId) return;
     setDiffLoading(true);
@@ -418,10 +390,30 @@ export function Home() {
       setNotice(err instanceof Error ? err.message : "Could not stop sandbox.");
     }
   }
+  async function restartSandbox() {
+    if (!active || !sessionStopped) return;
+    try {
+      const response = await fetch(`${API}/sessions/${active.id}/restart`, {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message);
+      toast.success("Sandbox restarted", {
+        description: "A fresh workspace is ready from the repository source.",
+      });
+      setView("preview");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not restart sandbox.");
+    }
+  }
   async function archiveSession() {
     if (
       !active ||
-      !window.confirm("Archive this session? Its sandbox will be stopped.")
+      !window.confirm(
+        chatOnly
+          ? "Archive this chat?"
+          : "Archive this session? Its sandbox will be stopped.",
+      )
     )
       return;
     try {
@@ -442,7 +434,7 @@ export function Home() {
   }
   useEffect(() => {
     if (activeId && view === "diff") {
-      void loadDiff();
+      queueMicrotask(() => void loadDiff());
     }
   }, [activeId, loadDiff, view]);
   const tabs: { id: View; label: string; icon: typeof MessageSquareText; requiresSandbox?: boolean }[] = [
@@ -450,6 +442,19 @@ export function Home() {
     { id: "terminal", label: "Terminal", icon: TerminalIcon, requiresSandbox: true },
     { id: "diff", label: "Diffs", icon: FileDiff, requiresSandbox: true },
   ];
+  const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (collapsedPane) return;
+    resizing.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const resizePane = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!resizing.current) return;
+    const next = ((window.innerWidth - event.clientX) / window.innerWidth) * 100;
+    setPaneWidth(Math.min(60, Math.max(25, next)));
+  };
+  const endResize = () => {
+    resizing.current = false;
+  };
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#f6f7f8] text-[#172027]">
@@ -477,7 +482,22 @@ export function Home() {
                 />
                 {activityLabel}
               </Badge>
-              {!chatOnly && (
+              {!chatOnly && (sessionStopped ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Restart sandbox"
+                        onClick={restartSandbox}>
+                        <RefreshCw />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>Restart sandbox</TooltipContent>
+                </Tooltip>
+              ) : (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -493,20 +513,20 @@ export function Home() {
                   />
                   <TooltipContent>Stop sandbox</TooltipContent>
                 </Tooltip>
-              )}
+              ))}
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label="Archive session"
+                      aria-label={chatOnly ? "Archive chat" : "Archive session"}
                       onClick={archiveSession}>
                       <Archive />
                     </Button>
                   }
                 />
-                <TooltipContent>Archive session</TooltipContent>
+                <TooltipContent>{chatOnly ? "Archive chat" : "Archive session"}</TooltipContent>
               </Tooltip>
             </div>
           )}
@@ -542,7 +562,7 @@ export function Home() {
                       <Message
                         key={`${m.id || "message"}-${index}`}
                         message={m}
-                        streaming={working && m.id === messages.at(-1)?.id}
+                        streaming={(working || active?.status === "running") && m.id === messages.at(-1)?.id}
                       />
                     ))}
                     <div ref={bottom} />
@@ -579,7 +599,7 @@ export function Home() {
                               aria-label={busy ? "Stop" : "Send message"}
                               className="size-9 rounded-xl"
                               onClick={() => {
-                                if (busy) void stop();
+                                if (busy) void stopAgent();
                                 else send();
                               }}
                               disabled={
@@ -601,18 +621,47 @@ export function Home() {
                   </div>
                 </div>
               </div>
-              <aside className="flex min-h-0 w-[min(44vw,620px)] min-w-[360px] flex-col bg-[#f1f3f4]">
+              {!chatOnly && !collapsedPane && (
+                <div
+                  role="separator"
+                  aria-label="Resize workspace pane"
+                  aria-orientation="vertical"
+                  onPointerDown={beginResize}
+                  onPointerMove={resizePane}
+                  onPointerUp={endResize}
+                  className="w-1 shrink-0 cursor-col-resize bg-black/10 transition-colors hover:bg-primary/50"
+                />
+              )}
+              {!chatOnly && <aside
+                style={{ width: collapsedPane ? "3.25rem" : `${paneWidth}%` }}
+                className="flex min-h-0 min-w-0 shrink-0 flex-col bg-[#f1f3f4]">
                 <div className="flex h-11 shrink-0 items-center gap-1 border-b border-black/10 px-2">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={collapsedPane ? "Expand workspace pane" : "Collapse workspace pane"}
+                          onClick={() => setCollapsedPane((value) => !value)}>
+                          {collapsedPane ? <PanelRightOpen /> : <PanelRightClose />}
+                        </Button>
+                      }
+                    />
+                    <TooltipContent>{collapsedPane ? "Expand panel" : "Collapse panel"}</TooltipContent>
+                  </Tooltip>
+                  {!collapsedPane && <>
                   {tabs.filter((tab) => !chatOnly || !tab.requiresSandbox).map(({ id, label, icon: Icon, requiresSandbox }) => (
                     <Button key={id} variant={view === id ? "outline" : "ghost"} disabled={Boolean(requiresSandbox && sandboxUnavailable)} onClick={() => setView(id)}>
                       <Icon className="size-3.5" />{label}
                     </Button>
                   ))}
+                  </>}
                 </div>
-                {view === "preview" && active && (
+                {!collapsedPane && view === "preview" && active && !sandboxUnavailable && (
                   <BrowserPane sandboxId={active.sandbox ?? ""} />
                 )}
-                {view === "diff" && (
+                {!collapsedPane && view === "diff" && (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div className="m-2 flex items-center justify-end">
                   <Button
@@ -639,13 +688,12 @@ export function Home() {
                       {diffFiles.map((filePatch, index) => {
                         const fileName = filePatch.match(/^diff --git a\/(.*?) b\//m)?.[1] ?? `Changed file ${index + 1}`;
                         return (
-                          <div key={`${fileName}-${index}`}>
-                            {/*<div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                              <Code2 className="size-3" />
+                          <details key={`${fileName}-${index}`} open className="border-b border-black/10">
+                            <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground">
                               {fileName}
-                            </div>*/}
-                            <PatchDiff fontFamily={"GeistMono"} patch={filePatch} disableWorkerPool />
-                          </div>
+                            </summary>
+                            <PatchDiff patch={filePatch} disableWorkerPool />
+                          </details>
                         );
                       })}
                     </div>
@@ -657,7 +705,7 @@ export function Home() {
                 </ScrollArea>
               </div>
                 )}
-                {view === "terminal" && (
+                {!collapsedPane && view === "terminal" && !sandboxUnavailable && (
               <div className="flex min-h-0 flex-1 flex-col">
                   <TerminalPane
                     sessionId={active.id}
@@ -665,7 +713,7 @@ export function Home() {
                   />
               </div>
                 )}
-              </aside>
+              </aside>}
             </div>
 
 {/*

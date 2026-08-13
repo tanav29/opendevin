@@ -24,11 +24,11 @@ function safeCommand(command: string) {
 
 const shellArg = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-async function browserCommand(sandbox: Sandbox, args: string[]) {
+async function browserCommand(sandbox: Sandbox, args: string[], signal?: AbortSignal) {
   // agent-browser keeps a named daemon alive in the sandbox, so the agent and
   // the browser panel share the same tabs and cookies.
   const command = `npx --yes agent-browser --session opendevin ${args.map(shellArg).join(" ")}`;
-  const result = await sandbox.commands.run(command, { timeoutMs: 120_000 });
+  const result = await sandbox.commands.run(command, { timeoutMs: 120_000, signal });
   return {
     exitCode: result.exitCode,
     stdout: bounded(result.stdout),
@@ -56,10 +56,10 @@ async function webSearch(query: string) {
   return { query, results };
 }
 
-export function sandboxTools(sandbox: Sandbox, cwd: string) {
+export function sandboxTools(sandbox: Sandbox, cwd: string, signal?: AbortSignal) {
   const command = async (value: string) => {
     safeCommand(value);
-    const result = await sandbox.commands.run(value, { cwd, timeoutMs: 120_000 });
+    const result = await sandbox.commands.run(value, { cwd, timeoutMs: 120_000, signal });
     return { exitCode: result.exitCode, stdout: bounded(result.stdout), stderr: bounded(result.stderr), error: result.error };
   };
   return {
@@ -101,7 +101,7 @@ export function sandboxTools(sandbox: Sandbox, cwd: string) {
         } else if (action === "screenshot") {
           args.push("/tmp/opendevin-browser.png");
         }
-        return browserCommand(sandbox, args);
+        return browserCommand(sandbox, args, signal);
       },
     }),
   };

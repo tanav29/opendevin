@@ -21,6 +21,7 @@
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "ai": "^7.0.52",
     "convex": "^1.43.0",
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "e2b": "^2.38.0",
     "express": "^5.2.1",
@@ -30,6 +31,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.2",
     "@types/ws": "^8.18.1",

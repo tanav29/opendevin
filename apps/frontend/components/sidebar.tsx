@@ -4,13 +4,16 @@ import { useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
+  ArchiveRestore,
   CheckCircle2,
   CircleDashed,
   Command,
   LoaderCircle,
   Plus,
+  Trash2,
 } from "lucide-react";
 import {
+  API,
   sessionTitle,
   type Session,
   useSessionSelection,
@@ -23,6 +26,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -58,6 +62,52 @@ export function AppSidebar() {
   const activeSessions = sessions.filter((session) => !session.archived);
   const archivedSessions = sessions.filter((session) => session.archived);
 
+  async function archiveSession(session: Session) {
+    const message = session.sandbox
+      ? "Archive this session? Its sandbox will be stopped."
+      : "Archive this chat?";
+    if (!window.confirm(message)) return;
+
+    try {
+      const response = await fetch(`${API}/sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not archive session.");
+      if (activeSessionId === session.id) selectSession(null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not archive session.");
+    }
+  }
+
+  async function unarchiveSession(session: Session) {
+    try {
+      const response = await fetch(`${API}/sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not unarchive session.");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not unarchive session.");
+    }
+  }
+
+  async function deleteSession(session: Session) {
+    if (!window.confirm("Delete this archived chat permanently? This cannot be undone.")) return;
+    try {
+      const response = await fetch(`${API}/sessions/${session.id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not delete session.");
+      if (activeSessionId === session.id) selectSession(null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not delete session.");
+    }
+  }
+
   function renderSession(session: Session) {
     const working = session.status === "running";
     return (
@@ -86,6 +136,39 @@ export function AppSidebar() {
             </span>
           </span>
         </SidebarMenuButton>
+        {!session.archived ? (
+          <SidebarMenuAction
+            showOnHover
+            aria-label={`Archive ${session.sandbox ? "session" : "chat"}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void archiveSession(session);
+            }}>
+            <Archive />
+          </SidebarMenuAction>
+        ) : (
+          <>
+            <SidebarMenuAction
+              showOnHover
+              className="right-7"
+              aria-label="Unarchive chat"
+              onClick={(event) => {
+                event.stopPropagation();
+                void unarchiveSession(session);
+              }}>
+              <ArchiveRestore />
+            </SidebarMenuAction>
+            <SidebarMenuAction
+              showOnHover
+              aria-label="Delete archived chat"
+              onClick={(event) => {
+                event.stopPropagation();
+                void deleteSession(session);
+              }}>
+              <Trash2 />
+            </SidebarMenuAction>
+          </>
+        )}
       </SidebarMenuItem>
     );
   }
