@@ -28,7 +28,7 @@ async function browserCommand(sandbox: Sandbox, args: string[], signal?: AbortSi
   // agent-browser keeps a named daemon alive in the sandbox, so the agent and
   // the browser panel share the same tabs and cookies.
   const command = `npx --yes agent-browser --session opendevin ${args.map(shellArg).join(" ")}`;
-  const result = await sandbox.commands.run(command, { timeoutMs: 120_000, signal });
+  const result = await sandbox.commands.run(command, { timeoutMs: 45_000, signal });
   return {
     exitCode: result.exitCode,
     stdout: bounded(result.stdout),
@@ -37,10 +37,10 @@ async function browserCommand(sandbox: Sandbox, args: string[], signal?: AbortSi
   };
 }
 
-async function webSearch(query: string) {
+async function webSearch(query: string, signal?: AbortSignal) {
   const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
     headers: { "User-Agent": "Mozilla/5.0 (compatible; OpenDevin)" },
-    signal: AbortSignal.timeout(15_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Web search failed with status ${response.status}.`);
   const html = await response.text();
@@ -59,7 +59,7 @@ async function webSearch(query: string) {
 export function sandboxTools(sandbox: Sandbox, cwd: string, signal?: AbortSignal) {
   const command = async (value: string) => {
     safeCommand(value);
-    const result = await sandbox.commands.run(value, { cwd, timeoutMs: 120_000, signal });
+    const result = await sandbox.commands.run(value, { cwd, timeoutMs: 90_000, signal });
     return { exitCode: result.exitCode, stdout: bounded(result.stdout), stderr: bounded(result.stderr), error: result.error };
   };
   return {
@@ -75,7 +75,7 @@ export function sandboxTools(sandbox: Sandbox, cwd: string, signal?: AbortSignal
     write_file: tool({ description: "Write a repository-relative text file.", inputSchema: z.object({ path: z.string().min(1), content: z.string() }), execute: async ({ path, content }) => {
       const fullPath = safePath(cwd, path); await sandbox.files.write(fullPath, content); return { path, ok: true, bytes: Buffer.byteLength(content) };
     }}),
-    web_search: tool({ description: "Search the web for up-to-date information and return the top result titles, URLs, and snippets.", inputSchema: z.object({ query: z.string().min(1) }), execute: ({ query }) => webSearch(query) }),
+    web_search: tool({ description: "Search the web for up-to-date information and return the top result titles, URLs, and snippets.", inputSchema: z.object({ query: z.string().min(1) }), execute: ({ query }) => webSearch(query, signal) }),
     browser: tool({
       description: "Control the session's visible agent-browser. Use open first, then snapshot before interacting. Actions: open (url), snapshot, click (ref), fill (ref and value), type (ref and value), screenshot, get_url.",
       inputSchema: z.object({

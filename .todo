@@ -1,9 +1,4 @@
-[x] the view must be like twopanee iwth 3:2 for treminal/changes view (collapsable) and chat view
-[x] right pane should be resizable and collapsable
-[x] terminal and browser should be disbled when sandbox is stopped/killed
-[x] make the terminal work so user can use it
-[x] make the diffs fills collapsable,
-[x] bring back the new session page /new
-[x] a option to restart sandbox if it can
-[x] show error with sonner small toast in botton left
-[x] update the db after every 1 sec ith streaming (convex)
+[ ] for right panel dont reloade the panel that is open just hide and stuffs, for fast app
+[ ] where you are just featching from api use caching like tanstack query
+[ ] make the ws terminal optimize and a button to just reconnect the terminal
+[ ] make the ui ccompact and vercel like https://vercel.com/design.md, remove huge animations

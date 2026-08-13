@@ -16,7 +16,7 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { Streamdown } from "streamdown";
+import Markdown from 'react-markdown'
 import {
   Archive,
   CircleStop,
@@ -31,6 +31,8 @@ import {
   RefreshCw,
   SendHorizontal,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +65,16 @@ type ToolPart = {
   errorText?: string;
 };
 
+function toolValue(value: unknown) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 const TOOL_DONE_STATES = new Set([
   "output-available",
   "output-denied",
@@ -82,23 +94,29 @@ function ToolCall({ part }: { part: ToolPart }) {
     (part.type.startsWith("tool-") ? part.type.slice(5) : "tool");
   const done = Boolean(part.state && TOOL_DONE_STATES.has(part.state));
   const error = Boolean(part.state && TOOL_ERROR_STATES.has(part.state));
+  const status = error ? "Failed" : done ? "Completed" : "Running";
+  const input = toolValue(part.input);
+  const output = toolValue(part.errorText ?? part.output);
+  const verb = name === "run_command" ? "Running command" : `Using ${name}`;
+
   return (
-    <div className="mb-2 flex items-center gap-2">
-      <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
-      <code className="min-w-0 truncate font-mono text-xs">{name}</code>
-      <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide">
-        <span
-          className={cn(
-            "size-1.5 rounded-full",
-            error
-              ? "bg-destructive"
-              : done
-                ? "bg-emerald-500"
-                : "animate-pulse bg-amber-500",
-          )}
-        />
-      </span>
-    </div>
+    <details className="group mb-3 overflow-hidden rounded-xl border border-black/10 bg-white/70 text-xs" open={!done && !error}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 hover:bg-black/[.03]">
+        <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate font-medium">{verb}</span>
+        <code className="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:block">{name}</code>
+        <span className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
+          <span className={cn("size-1.5 rounded-full", error ? "bg-destructive" : done ? "bg-emerald-500" : "animate-pulse bg-amber-500")} />
+          {status}
+        </span>
+      </summary>
+      {(input || output) && (
+        <div className="space-y-2 border-t border-black/10 px-3 py-2 text-[11px]">
+          {input && <div><p className="mb-1 font-semibold uppercase tracking-wider text-muted-foreground">Input</p><pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/[.04] p-2 font-mono">{input}</pre></div>}
+          {output && <div><p className={cn("mb-1 font-semibold uppercase tracking-wider", error ? "text-destructive" : "text-muted-foreground")}>{error ? "Error" : "Result"}</p><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/[.04] p-2 font-mono">{output}</pre></div>}
+        </div>
+      )}
+    </details>
   );
 }
 
@@ -109,6 +127,29 @@ function Message({
   message: UIMessage;
   streaming: boolean;
 }) {
+  const startedAt = useRef(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+  const [showWorkDetails, setShowWorkDetails] = useState(false);
+  const lastTextIndex = message.parts.reduce(
+    (last, part, index) => (part.type === "text" ? index : last),
+    -1,
+  );
+  const hasToolParts = message.parts.some(
+    (part) => part.type.startsWith("tool-") || part.type === "dynamic-tool",
+  );
+
+  useEffect(() => {
+    if (!streaming) {
+      setElapsed(Math.max(0, Date.now() - startedAt.current));
+      return;
+    }
+    const timer = window.setInterval(
+      () => setElapsed(Date.now() - startedAt.current),
+      250,
+    );
+    return () => window.clearInterval(timer);
+  }, [streaming]);
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -125,15 +166,42 @@ function Message({
       <div className="min-w-0 flex-1">
         <div className="text-sm leading-7">
           {message.parts.map((part, i) => {
+            // Once the turn is complete, keep the final answer readable and
+            // replace the verbose tool trace above it with one compact summary.
+            if (!streaming && hasToolParts && i === 0) {
+              const summary = (
+                <button
+                  type="button"
+                  onClick={() => setShowWorkDetails((value) => !value)}
+                  className="mb-3 flex w-full items-center gap-2 py-1 text-left text-md text-muted-foreground transition-colors hover:text-foreground">
+                  <span className="flex-1">Worked for few sec</span>
+                  {showWorkDetails ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                </button>
+              );
+              if (!showWorkDetails) return summary;
+              return (
+                <div key={`${message.id}-${i}`}>
+                  {summary}
+                  {part.type === "text" ? (
+                    <div className="typeset typeset-chat">{part.text}</div>
+                  ) : part.type.startsWith("tool-") || part.type === "dynamic-tool" ? (
+                    <ToolCall part={part as ToolPart} />
+                  ) : null}
+                </div>
+              );
+            }
+            if (!streaming && hasToolParts && !showWorkDetails && i < lastTextIndex) {
+              return null;
+            }
             if (part.type === "text")
               return (
-                <Streamdown
+                <div
                   key={`${message.id}-${i}`}
-                  mode={streaming ? "streaming" : "static"}
-                  animated={streaming}
-                  className="typeset typeset-docs">
-                  {part.text}
-                </Streamdown>
+                  className="typeset typeset-chat">
+                  <Markdown>
+                    {part.text}
+                  </Markdown>
+                </div>
               );
             if (part.type.startsWith("tool-") || part.type === "dynamic-tool")
               return (
@@ -457,8 +525,8 @@ export function Home() {
   };
 
   return (
-    <main className="flex h-screen overflow-hidden bg-[#f6f7f8] text-[#172027]">
-      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[#f6f7f8]">
+    <main className="flex h-screen overflow-hidden">
+      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-black/10 bg-white px-3 sm:px-5">
           <Tooltip>
             <TooltipTrigger render={<SidebarTrigger />} />
