@@ -91,7 +91,7 @@ export function AppSidebar() {
   }
 
   return (
-    <Sidebar>
+    <Sidebar className="border-black/10 bg-[#eef1f3] text-[#172027]">
       <SidebarHeader className="flex w-full flex-row items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Command className="size-7 rounded-md bg-primary p-1.5 text-primary-foreground" />

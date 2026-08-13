@@ -21,10 +21,12 @@ import {
   Archive,
   CircleStop,
   Code2,
+  ExternalLink,
   FileDiff,
   GitFork,
   Globe,
   LoaderCircle,
+  MonitorPlay,
   MessageSquareText,
   Power,
   RefreshCw,
@@ -38,6 +40,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { IconWorld } from '@tabler/icons-react';
 import {
   Tooltip,
   TooltipContent,
@@ -50,7 +53,7 @@ import {
   useSessionSelection,
 } from "@/components/providers";
 import { api } from "@convex/_generated/api";
-type View = "chat" | "diff" | "terminal";
+type View = "preview" | "diff" | "terminal";
 
 const suggestions = [
   "Map the architecture and key risks",
@@ -116,7 +119,7 @@ function Message({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[min(85%,34rem)] rounded-2xl rounded-br-md bg-foreground px-4 py-2.5 text-sm leading-6 text-background">
+        <div className="max-w-[min(85%,34rem)] rounded-2xl rounded-br-md bg-foreground/5 px-4 py-2.5 text-sm leading-6 text-primary">
           {message.parts.map((part, i) =>
             part.type === "text" ? <p key={`${message.id}-${i}`}>{part.text}</p> : null,
           )}
@@ -127,9 +130,6 @@ function Message({
   return (
     <div className="flex">
       <div className="min-w-0 flex-1">
-        <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          {streaming && <LoaderCircle className="size-3 animate-spin" />}
-        </p>
         <div className="text-sm leading-7">
           {message.parts.map((part, i) => {
             if (part.type === "text")
@@ -137,6 +137,7 @@ function Message({
                 <Streamdown
                   key={`${message.id}-${i}`}
                   mode={streaming ? "streaming" : "static"}
+                  animate={streaming}
                   className="typeset typeset-docs">
                   {part.text}
                 </Streamdown>
@@ -148,6 +149,43 @@ function Message({
             return null;
           })}
         </div>
+        <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {streaming && <LoaderCircle className="size-3 animate-spin" />}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function BrowserPane({ sandboxId }: { sandboxId: string }) {
+  const [port, setPort] = useState("3000");
+  const [path, setPath] = useState("");
+  const initial = `https://3000-${sandboxId}.e2b.app/`;
+  const [address, setAddress] = useState(initial);
+  const [draft, setDraft] = useState(initial);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const value = path.trim();
+    const normalizedPath = value ? (value.startsWith("/") ? value : `/${value}`) : "/";
+    const next = `https://${port.trim() || "3000"}-${sandboxId}.e2b.app/${normalizedPath}`;
+    setAddress(next);
+    setDraft(next);
+  };
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-white">
+      <form onSubmit={submit} className="flex border-b p-2">
+        <div className="border flex px-3 w-full rounded-xl items-center text-md font-mono">
+          <IconWorld className="w-4 h-4 shrink-0 mr-2 text-muted-foreground" />
+          <p className="select-none text-muted-foreground">http://localhost:</p>
+          <input value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))} inputMode="numeric" className="w-[4.2ch] outline-none" placeholder="port" />
+          <p className="select-none text-muted-foreground">/</p>
+          <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="home" className="outline-none w-full" />
+        <Button type="submit" variant="link ">GO</Button>
+        {/*<a href={address} target="_blank" rel="noreferrer" aria-label="Open preview in new tab" className="rounded p-1.5 text-[#879099] hover:bg-black/5"><ExternalLink className="size-3.5" /></a>*/}
+        </div>
+      </form>
+      <div className="min-h-0 flex-1">
+        <iframe key={address} src={address} title="Sandbox web preview" className="h-full w-full" />
       </div>
     </div>
   );
@@ -169,14 +207,7 @@ function TerminalPane({
     const instance = new XTerm({
       cursorBlink: true,
       convertEol: true,
-      fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-      fontSize: 13,
-      theme: {
-        background: "#101311",
-        foreground: "#e7e5e4",
-        cursor: "#34d399",
-        selectionBackground: "#365314",
-      },
+      fontSize: 15,
     });
     const fit = new FitAddon();
     instance.loadAddon(fit);
@@ -220,7 +251,7 @@ function TerminalPane({
     };
   }, [sessionId, onError]);
 
-  return <div ref={host} className="h-full w-full p-3" aria-label="Terminal" />;
+  return <div ref={host} className="h-full w-full" aria-label="Terminal" />;
 }
 
 export function Home() {
@@ -234,15 +265,19 @@ export function Home() {
   })) as Session[];
   const active =
     sessions.find((session) => session.id === activeSessionId) ?? null;
+  const activeId = active?.id;
   const [repo, setRepo] = useState("");
   const [prompt, setPrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
   const [noSandbox, setNoSandbox] = useState(false);
-  const [view, setView] = useState<View>("chat");
+  const [view, setView] = useState<View>("preview");
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
-
+  const diffFiles = useMemo(
+    () => (diff ? diff.split(/(?=^diff --git )/m).filter(Boolean) : []),
+    [diff],
+  );
   const bottom = useRef<HTMLDivElement>(null);
   const transport = useMemo(
     () =>
@@ -348,10 +383,10 @@ export function Home() {
     }
   }
   const loadDiff = useCallback(async () => {
-    if (!active) return;
+    if (!activeId) return;
     setDiffLoading(true);
     try {
-      const response = await fetch(`${API}/sessions/${active.id}/diff`);
+      const response = await fetch(`${API}/sessions/${activeId}/diff`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message);
       setDiff(data.diff || "");
@@ -362,7 +397,7 @@ export function Home() {
     } finally {
       setDiffLoading(false);
     }
-  }, [active]);
+  }, [activeId]);
   async function stopSandbox() {
     if (
       !active ||
@@ -378,7 +413,7 @@ export function Home() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message);
-      setView("chat");
+      setView("preview");
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not stop sandbox.");
     }
@@ -406,42 +441,29 @@ export function Home() {
     }
   }
   useEffect(() => {
-    if (active && view === "diff") {
-      const timer = window.setTimeout(() => {
-        void loadDiff();
-      }, 0);
-      return () => window.clearTimeout(timer);
+    if (activeId && view === "diff") {
+      void loadDiff();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, view]);
+  }, [activeId, loadDiff, view]);
   const tabs: { id: View; label: string; icon: typeof MessageSquareText; requiresSandbox?: boolean }[] = [
-    { id: "chat", label: "Conversation", icon: MessageSquareText },
-    { id: "diff", label: "Changes", icon: FileDiff, requiresSandbox: true },
+    { id: "preview", label: "Browser", icon: MonitorPlay, requiresSandbox: true },
     { id: "terminal", label: "Terminal", icon: TerminalIcon, requiresSandbox: true },
+    { id: "diff", label: "Diffs", icon: FileDiff, requiresSandbox: true },
   ];
 
   return (
-    <main className="flex h-screen bg-background">
-      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background px-3 sm:px-5">
+    <main className="flex h-screen overflow-hidden bg-[#f6f7f8] text-[#172027]">
+      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[#f6f7f8]">
+        <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-black/10 bg-white px-3 sm:px-5">
           <Tooltip>
             <TooltipTrigger render={<SidebarTrigger />} />
             <TooltipContent>Toggle sidebar</TooltipContent>
           </Tooltip>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-md font-medium">
             {active && (
-              <div className="flex w-fit items-center gap-2 font-medium text-foreground">
-                <span className="grid size-6 place-items-center rounded-md border bg-card">
-                  {chatOnly ? (
-                    <MessageSquareText className="size-3" />
-                  ) : (
-                    <Globe className="size-3" />
-                  )}
-                </span>
-                <span className="max-w-40 truncate">
+                <span className="max-w-64 truncate">
                   {sessionTitle(active)}
                 </span>
-              </div>
             )}
           </div>
           {active && (
@@ -489,109 +511,15 @@ export function Home() {
             </div>
           )}
         </header>
-        {!active ? (
-          <section className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-5 py-16 sm:px-10">
-            <h1 className="flex max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-              Open
-              <span className="block text-muted-foreground">devin.</span>
-            </h1>
-            <form
-              onSubmit={createSession}
-              className="mt-10 max-w-2xl rounded-lg border bg-card p-3">
-              <Textarea
-                id="session-prompt"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe the change, question, or task…"
-                rows={3}
-                className="resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
-              />
-              <div className="flex gap-2 px-4">
-                {!noSandbox && (
-                  <div className="flex h-10 flex-1 items-center gap-2">
-                    <GitFork className="size-4 text-muted-foreground" />
-                    <input
-                      id="repository"
-                      value={repo}
-                      onChange={(e) => setRepo(e.target.value)}
-                      placeholder="Optional repository URL"
-                      className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                    />
-                  </div>
-                )}
-                <Button type="submit" disabled={creating || !prompt.trim()} variant={"ghost"}>
-                  {creating ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : noSandbox ? (
-                    "Start chat"
-                  ) : (
-                    "Start workspace"
-                  )}
-                </Button>
-              </div>
-              <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-2">
-                <label className="flex cursor-pointer items-center gap-2 select-none text-xs text-muted-foreground">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={noSandbox}
-                    onClick={() => setNoSandbox((value) => !value)}
-                    className={cn(
-                      "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 outline-none",
-                      noSandbox
-                        ? "border-transparent bg-foreground"
-                        : "border-input bg-muted",
-                    )}>
-                    <span
-                      className={cn(
-                        "size-3 rounded-full bg-background shadow transition-transform",
-                        noSandbox ? "translate-x-3.5" : "translate-x-0.5",
-                      )}
-                    />
-                  </button>
-                  Chat without a sandbox
-                </label>
-                {noSandbox && (
-                  <span className="text-[10px] text-muted-foreground">
-                    No E2B sandbox · general assistant
-                  </span>
-                )}
-              </div>
-            </form>
-            {alert && (
-              <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {alert}
-              </div>
-            )}
-          </section>
-        ) : (
+        {active && (
           <section className="flex min-h-0 w-full flex-1 flex-col">
-            <div className="flex h-12 shrink-0 items-center justify-center border-b px-4 sm:px-6">
-              <div className="inline-flex items-center gap-1 rounded-full border bg-muted/40 p-1">
-                {tabs
-                  .filter((tab) => !chatOnly || !tab.requiresSandbox)
-                  .map(({ id, label, icon: Icon, requiresSandbox }) => (
-                  <button
-                    key={id}
-                    disabled={Boolean(requiresSandbox && sandboxUnavailable)}
-                    onClick={() => setView(id)}
-                    className={cn(
-                      "flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35",
-                      view === id && "bg-foreground text-background shadow-sm",
-                    )}>
-                    <Icon className="size-3.5" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {view === "chat" && (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-black/10">
                 <div className="min-h-0 flex-1 w-full overflow-y-auto scrollbar-none">
                   <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-8">
                     {messages.length === 0 && (
                       <div className="mx-auto mt-[8vh] max-w-md text-center">
-                        <div className="relative mx-auto grid size-16 place-items-center rounded-2xl bg-foreground text-background shadow-lg">
+                        <div className="relative mx-auto grid size-16 place-items-center rounded-2xl bg-[#b9ea73] text-[#1d2915] shadow-[0_0_48px_rgba(120,180,60,.18)]">
                           <Code2 className="size-7" />
                           <span className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border bg-background text-foreground">
                             <Sparkles className="size-3" />
@@ -608,23 +536,11 @@ export function Home() {
                             ? "Ask about code, ideas, or refactors. No sandbox — just conversation and answers."
                             : "Describe the outcome you want. The agent will inspect the repository and make the changes directly."}
                         </p>
-                        <div className="mx-auto mt-6 grid max-w-sm gap-2">
-                          {suggestions.map((s) => (
-                            <Button
-                              key={s}
-                              variant="outline"
-                              className="justify-start rounded-xl px-3.5 text-left"
-                              onClick={() => send(s)}>
-                              <Sparkles className="size-3.5 text-muted-foreground" />
-                              {s}
-                            </Button>
-                          ))}
-                        </div>
                       </div>
                     )}
-                    {messages.map((m) => (
+                    {messages.map((m, index) => (
                       <Message
-                        key={m.id}
+                        key={`${m.id || "message"}-${index}`}
                         message={m}
                         streaming={working && m.id === messages.at(-1)?.id}
                       />
@@ -632,9 +548,9 @@ export function Home() {
                     <div ref={bottom} />
                   </div>
                 </div>
-                <div className="bg-background px-4 pb-4 sm:px-6">
+                <div className="bg-[#f6f7f8] px-4 pb-4 sm:px-6">
                   <div className="mx-auto max-w-3xl">
-                    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2">
+                    <div className="flex items-end gap-2 rounded-2xl border border-black/10 bg-white p-2">
                       <Textarea
                         value={prompt}
                         disabled={!canChat || Boolean(busy)}
@@ -685,13 +601,22 @@ export function Home() {
                   </div>
                 </div>
               </div>
-            )}
-            {view === "diff" && (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 py-4 sm:px-6">
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Changes</h2>
+              <aside className="flex min-h-0 w-[min(44vw,620px)] min-w-[360px] flex-col bg-[#f1f3f4]">
+                <div className="flex h-11 shrink-0 items-center gap-1 border-b border-black/10 px-2">
+                  {tabs.filter((tab) => !chatOnly || !tab.requiresSandbox).map(({ id, label, icon: Icon, requiresSandbox }) => (
+                    <Button key={id} variant={view === id ? "outline" : "ghost"} disabled={Boolean(requiresSandbox && sandboxUnavailable)} onClick={() => setView(id)}>
+                      <Icon className="size-3.5" />{label}
+                    </Button>
+                  ))}
+                </div>
+                {view === "preview" && active && (
+                  <BrowserPane sandboxId={active.sandbox ?? ""} />
+                )}
+                {view === "diff" && (
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <div className="m-2 flex items-center justify-end">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
                     onClick={loadDiff}
                     disabled={diffLoading || sandboxUnavailable}>
@@ -700,25 +625,29 @@ export function Home() {
                     ) : (
                       <RefreshCw />
                     )}
-                    Refresh
                   </Button>
                 </div>
                 <ScrollArea
                   aria-label="Git changes"
-                  className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-card text-xs">
+                  className="min-h-0 flex-1">
                   {diffLoading ? (
-                    <p className="p-4 font-mono text-xs text-muted-foreground">
-                      Loading changes…
+                    <p className="p-4 text-sm text-muted-foreground">
+                      Loading…
                     </p>
                   ) : diff ? (
-                    <div className="divide-y">
-                      <div>
-                        <div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          <Code2 className="size-3" />
-                          Workspace changes
-                        </div>
-                        <PatchDiff patch={diff} disableWorkerPool />
-                      </div>
+                    <div className="">
+                      {diffFiles.map((filePatch, index) => {
+                        const fileName = filePatch.match(/^diff --git a\/(.*?) b\//m)?.[1] ?? `Changed file ${index + 1}`;
+                        return (
+                          <div key={`${fileName}-${index}`}>
+                            {/*<div className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                              <Code2 className="size-3" />
+                              {fileName}
+                            </div>*/}
+                            <PatchDiff fontFamily={"GeistMono"} patch={filePatch} disableWorkerPool />
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="p-4 text-sm text-muted-foreground">
@@ -727,28 +656,25 @@ export function Home() {
                   )}
                 </ScrollArea>
               </div>
-            )}
-            {view === "terminal" && (
-              <div className="flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6">
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Terminal · {repoName}
-                  </h2>
-                  <span className="text-[10px] text-emerald-600">LIVE / WS</span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-[#101311]">
+                )}
+                {view === "terminal" && (
+              <div className="flex min-h-0 flex-1 flex-col">
                   <TerminalPane
                     sessionId={active.id}
                     onError={setNotice}
                   />
-                </div>
               </div>
-            )}
-            {alert && (
+                )}
+              </aside>
+            </div>
+
+{/*
+              sonner for alerts fucker
+              {alert && (
               <div className="mx-auto mt-2 mb-4 w-full max-w-3xl rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 {alert}
               </div>
-            )}
+            )}*/}
           </section>
         )}
       </section>

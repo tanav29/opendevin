@@ -22,6 +22,21 @@ function safeCommand(command: string) {
     throw new Error("This command is prohibited by workspace guardrails.");
 }
 
+const shellArg = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+async function browserCommand(sandbox: Sandbox, args: string[]) {
+  // agent-browser keeps a named daemon alive in the sandbox, so the agent and
+  // the browser panel share the same tabs and cookies.
+  const command = `npx --yes agent-browser --session opendevin ${args.map(shellArg).join(" ")}`;
+  const result = await sandbox.commands.run(command, { timeoutMs: 120_000 });
+  return {
+    exitCode: result.exitCode,
+    stdout: bounded(result.stdout),
+    stderr: bounded(result.stderr),
+    error: result.error,
+  };
+}
+
 async function webSearch(query: string) {
   const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
     headers: { "User-Agent": "Mozilla/5.0 (compatible; OpenDevin)" },
@@ -61,5 +76,33 @@ export function sandboxTools(sandbox: Sandbox, cwd: string) {
       const fullPath = safePath(cwd, path); await sandbox.files.write(fullPath, content); return { path, ok: true, bytes: Buffer.byteLength(content) };
     }}),
     web_search: tool({ description: "Search the web for up-to-date information and return the top result titles, URLs, and snippets.", inputSchema: z.object({ query: z.string().min(1) }), execute: ({ query }) => webSearch(query) }),
+    browser: tool({
+      description: "Control the session's visible agent-browser. Use open first, then snapshot before interacting. Actions: open (url), snapshot, click (ref), fill (ref and value), type (ref and value), screenshot, get_url.",
+      inputSchema: z.object({
+        action: z.enum(["open", "snapshot", "click", "fill", "type", "screenshot", "get_url"]),
+        url: z.string().optional(),
+        ref: z.string().optional(),
+        value: z.string().optional(),
+      }),
+      execute: async ({ action, url, ref, value }) => {
+        const args: string[] = [action];
+        if (action === "open") {
+          if (!url) throw new Error("browser open requires url");
+          args.push(url);
+        } else if (["click", "fill", "type"].includes(action)) {
+          if (!ref) throw new Error(`browser ${action} requires ref`);
+          args.push(ref);
+          if (action !== "click") {
+            if (value === undefined) throw new Error(`browser ${action} requires value`);
+            args.push(value);
+          }
+        } else if (action === "snapshot") {
+          args.push("-i");
+        } else if (action === "screenshot") {
+          args.push("/tmp/opendevin-browser.png");
+        }
+        return browserCommand(sandbox, args);
+      },
+    }),
   };
 }
