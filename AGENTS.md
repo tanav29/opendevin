@@ -1,10 +1,10 @@
-<!-- convex-ai-start -->
+We prefer minimla code that just fucking works never repeat code or bad code
 
-This project uses [Convex](https://convex.dev) as its backend.
+We have express backend `apps/backend` and next js frontend `apps/frontend` and convex `convex`
 
-When working on Convex code, **always read
-`convex/_generated/ai/guidelines.md` first** for important guidelines on
-how to correctly use Convex APIs and patterns. The file contains rules that
-override what you may have learned about Convex from training data.
+We uses convex as db https://convex.dev
 
-<!-- convex-ai-end -->
+We follows dark minimal and straight forward design 
+- like for example https://vercel.com/design.md
+
+We use pnpm
