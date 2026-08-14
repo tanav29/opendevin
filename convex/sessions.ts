@@ -14,8 +14,20 @@ export const list = query({
 export const get = query({ args: { id: v.id("sessions") }, handler: ({ db }, { id }) => db.get(id) });
 
 export const create = mutation({
-  args: { git: v.string(), sandbox: v.string(), cwd: v.string(), status: v.optional(v.string()) },
+  args: { projectId: v.optional(v.id("projects")), git: v.string(), sandbox: v.string(), cwd: v.string(), status: v.optional(v.string()) },
   handler: async ({ db }, args) => { const now = Date.now(); const id = await db.insert("sessions", { ...args, status: args.status ?? "idle", parts: "[]", archived: false, createdAt: now, updatedAt: now }); return db.get(id); },
+});
+
+export const byProject = query({
+  args: { projectId: v.id("projects") },
+  handler: (ctx, { projectId }) =>
+    ctx.db
+      .query("sessions")
+      .withIndex("by_projectId_and_archived_and_updatedAt", (q) =>
+        q.eq("projectId", projectId).eq("archived", false),
+      )
+      .order("desc")
+      .take(100),
 });
 
 export const remove = mutation({

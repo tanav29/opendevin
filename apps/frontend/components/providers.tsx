@@ -15,6 +15,15 @@ export type Session = {
   sandbox?: string;
   cwd?: string;
   parts?: string;
+  projectId?: string;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  git: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type StoredMessagePart = { type?: string; text?: string };
@@ -35,11 +44,33 @@ export function sessionTitle(session: Session) {
 
   return (
     session.git.split("/").pop()?.replace(/\.git$/, "") ||
-    (session.sandbox ? "Untitled workspace" : "Chat")
+    "Untitled session"
   );
 }
 
 export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+function normalizeRecord(value: Record<string, unknown>, fallbackId: string) {
+  const id = String(value.id ?? value._id ?? fallbackId);
+  return {
+    ...value,
+    id,
+    createdAt: new Date(Number(value.createdAt)).toISOString(),
+    updatedAt: new Date(Number(value.updatedAt)).toISOString(),
+  };
+}
+
+export function mapSessions(raw: unknown[] | undefined): Session[] {
+  return (raw ?? []).map((session, index) =>
+    normalizeRecord(session as Record<string, unknown>, `s-${index}`),
+  ) as Session[];
+}
+
+export function mapProjects(raw: unknown[] | undefined): Project[] {
+  return (raw ?? []).map((project, index) =>
+    normalizeRecord(project as Record<string, unknown>, `p-${index}`),
+  ) as Project[];
+}
 
 const SessionSelectionContext = createContext<{
   activeSessionId: string | null;

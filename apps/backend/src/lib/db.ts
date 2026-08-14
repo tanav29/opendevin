@@ -31,6 +31,30 @@ function defined<T extends SessionData>(data: T) {
 }
 
 export const db = {
+  projects: {
+    async findUnique({ where }: { where: { id: string } }): Promise<any> {
+      try {
+        return normalize(
+          (await convex.query(api.projects.get, { id: where.id as never })) as unknown as Session | null,
+        );
+      } catch {
+        return null;
+      }
+    },
+
+    async findByGit(git: string): Promise<any> {
+      const projects = await convex.query(api.projects.list, {});
+      const match = projects.find((value) => (value as { git?: string }).git === git);
+      return match ? normalize(match as unknown as Session) : null;
+    },
+
+    async create({ data }: { data: SessionData }): Promise<any> {
+      return normalize(
+        (await convex.mutation(api.projects.create, data as never)) as unknown as Session,
+      );
+    },
+  },
+
   sessions: {
     async findUnique({ where, select }: FindArgs): Promise<any> {
       const session = normalize(

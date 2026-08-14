@@ -91,33 +91,19 @@ app.get("/", (_req, res) =>
 );
 
 app.post("/new", async (req, res) => {
-  // TLDR : removes prompt bc now it will only open a session
+  // Creates a project (folder) for the repository plus its first sandboxed session.
   const body = req.body as {
     prompt?: unknown;
     gitUrl?: unknown;
-    sandbox?: unknown;
   };
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt)
     return res.status(400).json({ message: "A task prompt is required" });
 
-  // `sandbox: false` opts out of the E2B sandbox for a chat-only session.
-  const chatOnly = body.sandbox === false;
-
-  // A repository can be supplied separately or pasted into the task prompt.
-  const mentionedRepo = prompt
-    .match(
-      /https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^\s)]+/i,
-    )?.[0]
-    ?.replace(/[.,;!?]+$/, "");
-  const gitUrl = chatOnly
-    ? ""
-    : (typeof body.gitUrl === "string" && body.gitUrl.trim()) ||
-      mentionedRepo ||
-      "";
+  const gitUrl = typeof body.gitUrl === "string" ? body.gitUrl.trim() : "";
+  if (!gitUrl)
+    return res.status(400).json({ message: "A Git repository URL is required" });
   if (
-    !chatOnly &&
-    gitUrl &&
     !/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/[^\s/]+\/[^\s/]+/i.test(
       gitUrl,
     )
@@ -127,21 +113,22 @@ app.post("/new", async (req, res) => {
       .json({ message: "Enter a valid public Git repository URL" });
   }
   try {
-    if (chatOnly) {
-      const session = await db.sessions.create({
-        data: { git: "", sandbox: "", cwd: "", status: "idle" },
-      });
-      return res.status(201).json({
-        message: "Chat session created",
-        sessionId: session.id,
-        sandboxId: null,
-        prompt,
-        gitUrl: "",
+    const { sandbox, cwd } = await createWorkspace(gitUrl);
+    let project = await db.projects.findByGit(gitUrl);
+    if (!project) {
+      const repoName =
+        gitUrl
+          .split("/")
+          .pop()
+          ?.replace(/\.git$/, "")
+          .replace(/[^a-zA-Z0-9._-]/g, "-") || "repository";
+      project = await db.projects.create({
+        data: { git: gitUrl, name: repoName },
       });
     }
-    const { sandbox, cwd } = await createWorkspace(gitUrl);
     const session = await db.sessions.create({
       data: {
+        projectId: project.id,
         git: gitUrl,
         sandbox: sandbox.sandboxId,
         cwd,
@@ -151,9 +138,49 @@ app.post("/new", async (req, res) => {
     res.status(201).json({
       message: "Session created",
       sessionId: session.id,
+      projectId: project.id,
       sandboxId: sandbox.sandboxId,
       prompt,
       gitUrl,
+    });
+  } catch (error) {
+    console.error("create session failed", error);
+    res.status(500).json({
+      message:
+        "Could not create session. Check E2B_API_KEY and repository access.",
+    });
+  }
+});
+
+// Creates a new sandboxed session inside an existing project, reusing the
+// project's repository for the sandbox checkout.
+app.post("/projects/:projectId/sessions", async (req, res) => {
+  const project = await db.projects.findUnique({
+    where: { id: req.params.projectId },
+  });
+  if (!project) return res.status(404).json({ message: "Project not found" });
+  const body = req.body as { prompt?: unknown };
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt)
+    return res.status(400).json({ message: "A task prompt is required" });
+  try {
+    const { sandbox, cwd } = await createWorkspace(project.git);
+    const session = await db.sessions.create({
+      data: {
+        projectId: project.id,
+        git: project.git,
+        sandbox: sandbox.sandboxId,
+        cwd,
+        status: "idle",
+      },
+    });
+    res.status(201).json({
+      message: "Session created",
+      sessionId: session.id,
+      projectId: project.id,
+      sandboxId: sandbox.sandboxId,
+      prompt,
+      gitUrl: project.git,
     });
   } catch (error) {
     console.error("create session failed", error);

@@ -47,8 +47,8 @@ import {
 } from "@/components/ui/tooltip";
 import {
   API,
+  mapSessions,
   sessionTitle,
-  type Session,
   useSessionSelection,
 } from "@/components/providers";
 import { api } from "@convex/_generated/api";
@@ -361,12 +361,9 @@ function TerminalPane({
 
 export function Home() {
   const { activeSessionId, selectSession } = useSessionSelection();
-  const sessions = ((useConvexQuery(api.sessions.list, {}) ?? []) as unknown as Array<Record<string, unknown>>).map((session) => ({
-    ...session,
-    id: String(session.id ?? session._id),
-    createdAt: new Date(Number(session.createdAt)).toISOString(),
-    updatedAt: new Date(Number(session.updatedAt)).toISOString(),
-  })) as Session[];
+  const sessions = mapSessions(
+    useConvexQuery(api.sessions.list, {}) as unknown[] | undefined,
+  );
   const active =
     sessions.find((session) => session.id === activeSessionId) ?? null;
   const activeId = active?.id;
@@ -407,10 +404,9 @@ export function Home() {
     throttle: 40,
   });
   const working = status === "submitted" || status === "streaming";
-  const chatOnly = Boolean(active && !active.sandbox);
   const sessionStopped = active?.status === "stopped";
   const canChat = Boolean(active) && !sessionStopped;
-  const sandboxUnavailable = !chatOnly && sessionStopped;
+  const sandboxUnavailable = sessionStopped;
   const busy = working || active?.status === "running";
   const activityLabel = active?.status === "running" ? "Working" : active?.status ?? "Idle";
   const activityDot = active?.status === "running" ? "bg-emerald-500" : "bg-muted-foreground";
@@ -446,7 +442,7 @@ export function Home() {
     stop();
     try {
       const response = await fetch(`${API}/sessions/${active.id}/stop`, { method: "POST" });
-      if (!response.ok && !(chatOnly && response.status === 409)) {
+      if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.message || "Could not stop the agent.");
       }
@@ -526,11 +522,7 @@ export function Home() {
   async function archiveSession() {
     if (
       !active ||
-      !window.confirm(
-        chatOnly
-          ? "Archive this chat?"
-          : "Archive this session? Its sandbox will be stopped.",
-      )
+      !window.confirm("Archive this session? Its sandbox will be stopped.")
     )
       return;
     try {
@@ -589,7 +581,7 @@ export function Home() {
                 <span className={cn("size-1.5 rounded-full", activityDot)} />
                 {activityLabel}
               </span>
-              {!chatOnly && (sessionStopped ? (
+              {sessionStopped ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -620,20 +612,20 @@ export function Home() {
                   />
                   <TooltipContent>Stop sandbox</TooltipContent>
                 </Tooltip>
-              ))}
+              )}
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={chatOnly ? "Archive chat" : "Archive session"}
+                      aria-label="Archive session"
                       onClick={archiveSession}>
                       <Archive />
                     </Button>
                   }
                 />
-                <TooltipContent>{chatOnly ? "Archive chat" : "Archive session"}</TooltipContent>
+                <TooltipContent>Archive session</TooltipContent>
               </Tooltip>
             </div>
           )}
@@ -657,12 +649,10 @@ export function Home() {
                     {messages.length === 0 && (
                       <div className="pt-8">
                         <h2 className="text-base font-medium tracking-tight">
-                          {chatOnly ? "What can I help with?" : "What are we building?"}
+                          What are we building?
                         </h2>
                         <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                          {chatOnly
-                            ? "Ask about code, ideas, or refactors. Conversation only, no sandbox."
-                            : "Describe the outcome. The agent inspects the repository and makes the changes."}
+                          Describe the outcome. The agent inspects the repository and makes the changes.
                         </p>
                       </div>
                     )}
@@ -690,11 +680,9 @@ export function Home() {
                           }
                         }}
                         placeholder={
-                          chatOnly
-                            ? "Ask OpenDevin anything…"
-                            : sandboxUnavailable
-                              ? "Sandbox unavailable"
-                              : "Ask OpenDevin to investigate, build, or fix…"
+                          sandboxUnavailable
+                            ? "Sandbox unavailable"
+                            : "Ask OpenDevin to investigate, build, or fix…"
                         }
                         rows={1}
                         className="min-h-8 resize-none border-0 bg-transparent py-1.5 shadow-none focus-visible:ring-0 disabled:bg-transparent"
@@ -726,7 +714,7 @@ export function Home() {
                   </div>
                 </div>
               </div>
-              {!chatOnly && !collapsedPane && (
+              {!collapsedPane && (
                 <div
                   role="separator"
                   aria-label="Resize workspace pane"
@@ -737,7 +725,7 @@ export function Home() {
                   className="w-px shrink-0 cursor-col-resize bg-border hover:bg-foreground/30"
                 />
               )}
-              {!chatOnly && <aside
+              <aside
                 style={{ width: collapsedPane ? "2.5rem" : `${paneWidth}%` }}
                 className="flex min-h-0 min-w-0 shrink-0 flex-col bg-background">
                 <div className="flex h-9 shrink-0 items-center gap-0.5 border-b px-1">
@@ -756,7 +744,7 @@ export function Home() {
                     <TooltipContent>{collapsedPane ? "Expand panel" : "Collapse panel"}</TooltipContent>
                   </Tooltip>
                   {!collapsedPane && <>
-                  {tabs.filter((tab) => !chatOnly || !tab.requiresSandbox).map(({ id, label, icon: Icon, requiresSandbox }) => (
+                  {tabs.map(({ id, label, icon: Icon, requiresSandbox }) => (
                     <Button key={id} size="sm" variant={view === id ? "outline" : "ghost"} disabled={Boolean(requiresSandbox && sandboxUnavailable)} onClick={() => setView(id)}>
                       <Icon className="size-3.5" />{label}
                     </Button>
@@ -830,7 +818,7 @@ export function Home() {
                   />
                   </div>
                 )}
-              </aside>}
+              </aside>
             </div>
 
 {/*
