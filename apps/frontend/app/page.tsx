@@ -12,6 +12,7 @@ import {
 import { useChat } from "@ai-sdk/react";
 import { useQuery as useConvexQuery } from "convex/react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
@@ -21,6 +22,7 @@ import Markdown from 'react-markdown'
 import {
   Archive,
   CircleStop,
+  Command,
   FileDiff,
   LoaderCircle,
   MonitorPlay,
@@ -211,8 +213,9 @@ function Message({
           })}
         </div>
         {streaming && (
-          <p className="mt-1 flex items-center text-muted-foreground">
+          <p className="mt-2 flex items-center gap-1.5 text-sidebar-foreground/60">
             <LoaderCircle className="size-3 animate-spin" />
+            <span className="text-xs">Working</span>
           </p>
         )}
       </div>
@@ -287,7 +290,6 @@ function TerminalPane({
       const base = API.replace(/^http/, "ws");
       const ws = new WebSocket(`${base}/sessions/${sessionId}/terminal/ws`);
       socket.current = ws;
-      ws.onopen = () => instance.write("\x1b[32m● connected\x1b[0m\r\n");
       ws.onopen = () => {
         instance.reset();
         setConnection("connected");
@@ -361,6 +363,7 @@ function TerminalPane({
 
 export function Home() {
   const { activeSessionId, selectSession } = useSessionSelection();
+  const router = useRouter();
   const sessions = mapSessions(
     useConvexQuery(api.sessions.list, {}) as unknown[] | undefined,
   );
@@ -631,13 +634,19 @@ export function Home() {
           )}
         </header>
         {!active && (
-          <div className="flex flex-1 items-center justify-center px-6">
+          <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6">
+            <span className="flex size-9 items-center justify-center rounded-lg border bg-background">
+              <Command className="size-4 text-muted-foreground" />
+            </span>
             <div className="max-w-sm text-center">
               <h1 className="text-sm font-medium">No session selected</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Choose a session in the sidebar, or start a new one.
+              <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                Select a session from the sidebar, or start a new project.
               </p>
             </div>
+            <Button variant="outline" size="sm" onClick={() => router.push("/new")}>
+              New project
+            </Button>
           </div>
         )}
         {active && (
@@ -821,13 +830,6 @@ export function Home() {
               </aside>
             </div>
 
-{/*
-              sonner for alerts fucker
-              {alert && (
-              <div className="mx-auto mt-2 mb-4 w-full max-w-3xl rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {alert}
-              </div>
-            )}*/}
           </section>
         )}
       </section>

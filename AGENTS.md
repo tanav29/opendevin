@@ -8,3 +8,5 @@ We follows dark minimal and straight forward design
 - like for example https://vercel.com/design.md
 
 We use pnpm
+
+We use agent-browser cli to debug the ui

@@ -90,6 +90,10 @@ app.get("/", (_req, res) =>
   res.json({ ok: true, service: "opendevin", version: "0.1.0" }),
 );
 
+app.get("/health", (_req, res) =>
+  res.json({ ok: true, service: "opendevin", version: "0.1.0" }),
+);
+
 app.post("/new", async (req, res) => {
   // Creates a project (folder) for the repository plus its first sandboxed session.
   const body = req.body as {

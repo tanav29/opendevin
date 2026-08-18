@@ -1,4 +1,4 @@
-[x] for right panel dont reloade the panel that is open just hide and stuffs, for fast app
-[x] where you are just featching from api use caching like tanstack query
-[x] make the ws terminal optimize and a button to just reconnect the terminal
-[x] make the ui compact and vercel like https://vercel.com/design.md, remove huge animations
+[ ] eve agent
+-- planned --
+[ ] github auth
+[ ] user can raise a pr from agent

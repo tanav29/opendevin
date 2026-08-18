@@ -209,10 +209,10 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r bg-sidebar text-sidebar-foreground">
-      <SidebarHeader className="flex h-10 w-full flex-row items-center justify-between gap-2 border-b px-2 py-0">
-        <div className="flex items-center gap-2">
-          <Command className="size-5 rounded-sm bg-primary p-1 text-primary-foreground" />
-          <span className="text-sm font-medium tracking-tight">
+      <SidebarHeader className="flex h-10 w-full flex-row items-center justify-between gap-2 border-b px-2.5 py-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <Command className="size-4 shrink-0" />
+          <span className="truncate text-[13px] font-medium tracking-tight">
             OpenDevin
           </span>
         </div>
