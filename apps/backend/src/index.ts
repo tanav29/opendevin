@@ -32,16 +32,6 @@ const activeRuns = new Map<string, AbortController>();
 const RUN_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_TOOL_STEPS = 24;
 
-function parseMessages(parts: string | null | undefined): UIMessage[] {
-  if (!parts) return [];
-  try {
-    const value: unknown = JSON.parse(parts);
-    return Array.isArray(value) ? (value as UIMessage[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 function abortActiveRun(sessionId: string) {
   const controller = activeRuns.get(sessionId);
   if (controller) controller.abort();
@@ -192,30 +182,6 @@ app.post("/projects/:projectId/sessions", async (req, res) => {
       message:
         "Could not create session. Check E2B_API_KEY and repository access.",
     });
-  }
-});
-
-app.get("/sessions", async (_req, res) => {
-  try {
-    const sessions = await db.sessions.findMany();
-    res.json(sessions);
-  } catch (error) {
-    console.error("list sessions failed", error);
-    res.status(500).json({ message: "Could not load sessions" });
-  }
-});
-
-// TODO: find a way with convex
-app.get("/sessions/:sessionId/messages", async (req, res) => {
-  try {
-    const session = await db.sessions.findUnique({
-      where: { id: req.params.sessionId },
-      select: { parts: true },
-    });
-    if (!session) return res.status(404).json({ message: "Session not found" });
-    res.json(parseMessages(session.parts));
-  } catch {
-    res.status(500).json({ message: "Could not load messages" });
   }
 });
 
@@ -401,24 +367,6 @@ app.post("/ai/:sessionId", async (req, res) => {
       where: { id: session.id },
       data: { parts: JSON.stringify(messages), status: "running" },
     });
-    // const abort = () => {
-    //   if (!res.writableFinished) abortController.abort();
-    // };
-    // req.once("aborted", abort);
-    // res.once("close", abort);
-    // const incoming = Array.isArray(body.messages)
-    //   ? (body.messages as StoredMessage[])
-    //   : [];
-    // Persist the complete UIMessage[] before starting generation so a disconnect never loses the user prompt.
-    // if (incoming.length) {
-    //   await db.sessions.update({
-    //     where: { id: session.id },
-    //     data: { parts: JSON.stringify(incoming) },
-    //   });
-    // }
-    // const messages = incoming.length
-    //   ? await convertToModelMessages(incoming as never[])
-    //   : undefined;
 
     const op = createOpenRouter({
       apiKey: process.env.OPENROUTER_API_KEY,
@@ -459,8 +407,6 @@ app.post("/ai/:sessionId", async (req, res) => {
       maxRetries: 2,
     });
 
-    // let latestMessages = incoming as UIMessage[];
-
     const stream = toUIMessageStream({
       stream: result.stream,
       // Keep the complete conversation when the stream is persisted. Without
@@ -490,36 +436,6 @@ app.post("/ai/:sessionId", async (req, res) => {
       stream,
     });
     cleanup();
-
-    // const [clientStream, persistenceStream] = uiStream.tee();
-
-    // const persistStream = async () => {
-    //   for await (const responseMessage of readUIMessageStream({
-    //     stream: persistenceStream,
-    //   })) {
-    //     latestMessages = [...incoming, responseMessage];
-    //   }
-    // };
-
-    // void persistStream().catch(() => undefined);
-    // const persistenceTimer = setInterval(() => {
-    //   void db.sessions
-    //     .update({
-    //       where: { id: session.id },
-    //       data: { parts: JSON.stringify(latestMessages), status: "running" },
-    //     })
-    //     .catch(() => undefined);
-    // }, 1_000);
-    // try {
-    //   await pipeUIMessageStreamToResponse({
-    //     response: res,
-    //     stream: clientStream,
-    //   });
-    // } finally {
-    //   clearInterval(persistenceTimer);
-    //   if (activeRuns.get(session.id) === abortController)
-    //     activeRuns.delete(session.id);
-    // }
   } catch (error) {
     const controller = activeRuns.get(session.id);
     if (controller) controller.abort();
