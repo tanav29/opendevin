@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -9,30 +8,27 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useChat } from "@ai-sdk/react";
-import { useQuery as useConvexQuery } from "convex/react";
-import { useQuery } from "@tanstack/react-query";
+import { useEveAgent } from "eve/react";
+import type { ClientSessionState, MessageStreamEvent } from "eve/client";
+import { useQuery as useConvexQuery, useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { DefaultChatTransport, type UIMessage } from "ai";
 import { PatchDiff } from "@pierre/diffs/react";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import Markdown from 'react-markdown'
+import Markdown from "react-markdown";
+import { IconBrandGithub } from "@tabler/icons-react";
 import {
   Archive,
   CircleStop,
   Command,
   FileDiff,
   LoaderCircle,
-  MonitorPlay,
   PanelRightClose,
   PanelRightOpen,
-  Power,
-  RefreshCw,
   SendHorizontal,
   ChevronDown,
   ChevronUp,
+  Download,
+  ExternalLink,
   Terminal as TerminalIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -41,20 +37,47 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { IconWorld } from '@tabler/icons-react';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  API,
   mapSessions,
   sessionTitle,
   useSessionSelection,
+  type Session,
 } from "@/components/providers";
 import { api } from "@convex/_generated/api";
-type View = "preview" | "diff" | "terminal";
+
+type SavedChat = {
+  events: readonly MessageStreamEvent[];
+  session?: ClientSessionState;
+};
+
+const storageKey = (sessionId: string) => `opendevin:eve:${sessionId}`;
+
+function loadChat(sessionId: string): SavedChat {
+  try {
+    const value = JSON.parse(
+      window.localStorage.getItem(storageKey(sessionId)) ?? "null",
+    ) as Partial<SavedChat> | null;
+    return {
+      events: Array.isArray(value?.events) ? value!.events : [],
+      session: value?.session,
+    };
+  } catch {
+    return { events: [] };
+  }
+}
+
+function saveChat(sessionId: string, value: SavedChat) {
+  try {
+    window.localStorage.setItem(storageKey(sessionId), JSON.stringify(value));
+  } catch {
+    // Storage may be full or blocked; the eve stream stays durable.
+  }
+}
 
 type ToolPart = {
   type: string;
@@ -64,6 +87,9 @@ type ToolPart = {
   output?: unknown;
   errorText?: string;
 };
+
+type ChatPart = { type?: string; text?: string } & Partial<ToolPart>;
+type ChatMessage = { id?: string; role: string; parts: ChatPart[] };
 
 function toolValue(value: unknown) {
   if (value === undefined || value === null) return "";
@@ -78,15 +104,12 @@ function toolValue(value: unknown) {
 const TOOL_DONE_STATES = new Set([
   "output-available",
   "output-denied",
+  "output-error",
   "successful-parse",
   "complete",
   "done",
 ]);
-const TOOL_ERROR_STATES = new Set([
-  "output-error",
-  "failed-parse",
-  "error",
-]);
+const TOOL_ERROR_STATES = new Set(["output-error", "failed-parse", "error"]);
 
 function ToolCall({ part }: { part: ToolPart }) {
   const name =
@@ -97,7 +120,10 @@ function ToolCall({ part }: { part: ToolPart }) {
   const status = error ? "Failed" : done ? "Completed" : "Running";
   const input = toolValue(part.input);
   const output = toolValue(part.errorText ?? part.output);
-  const verb = name === "run_command" ? "Running command" : `Using ${name}`;
+  const verb =
+    name === "bash" || name === "run_command"
+      ? "Running command"
+      : `Using ${name}`;
 
   return (
     <details className="group mb-2 overflow-hidden rounded-md border text-xs" open={!done && !error}>
@@ -124,7 +150,7 @@ function Message({
   message,
   streaming,
 }: {
-  message: UIMessage;
+  message: ChatMessage;
   streaming: boolean;
 }) {
   const startedAt = useRef<number | null>(null);
@@ -135,7 +161,7 @@ function Message({
     -1,
   );
   const hasToolParts = message.parts.some(
-    (part) => part.type.startsWith("tool-") || part.type === "dynamic-tool",
+    (part) => part.type?.startsWith("tool-") || part.type === "dynamic-tool",
   );
 
   useEffect(() => {
@@ -186,7 +212,7 @@ function Message({
                   {summary}
                   {part.type === "text" ? (
                     <div className="typeset typeset-chat">{part.text}</div>
-                  ) : part.type.startsWith("tool-") || part.type === "dynamic-tool" ? (
+                  ) : part.type?.startsWith("tool-") || part.type === "dynamic-tool" ? (
                     <ToolCall part={part as ToolPart} />
                   ) : null}
                 </div>
@@ -201,11 +227,11 @@ function Message({
                   key={`${message.id}-${i}`}
                   className="typeset typeset-chat">
                   <Markdown>
-                    {part.text}
+                    {part.text ?? ""}
                   </Markdown>
                 </div>
               );
-            if (part.type.startsWith("tool-") || part.type === "dynamic-tool")
+            if (part.type?.startsWith("tool-") || part.type === "dynamic-tool")
               return (
                 <ToolCall key={`${message.id}-${i}`} part={part as ToolPart} />
               );
@@ -223,140 +249,173 @@ function Message({
   );
 }
 
-function BrowserPane({ sandboxId }: { sandboxId: string }) {
-  const [port, setPort] = useState("3000");
-  const [path, setPath] = useState("");
-  const initial = `https://3000-${sandboxId}.e2b.app/`;
-  const [address, setAddress] = useState(initial);
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const value = path.trim();
-    const normalizedPath = value ? (value.startsWith("/") ? value : `/${value}`) : "/";
-    const next = `https://${port.trim() || "3000"}-${sandboxId}.e2b.app/${normalizedPath}`;
-    setAddress(next);
-  };
-  return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <form onSubmit={submit} className="flex border-b px-2 py-1.5">
-        <div className="flex h-7 w-full items-center rounded-md border px-2 font-mono text-xs">
-          <IconWorld className="mr-1.5 size-3.5 shrink-0 text-muted-foreground" />
-          <p className="select-none text-muted-foreground">localhost:</p>
-          <input value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))} inputMode="numeric" className="w-[4.2ch] bg-transparent outline-none" placeholder="port" />
-          <p className="select-none text-muted-foreground">/</p>
-          <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="home" className="w-full bg-transparent outline-none" />
-        <Button type="submit" variant="ghost" size="xs" className="ml-1 h-5 px-1.5 text-[10px]">Go</Button>
-        {/*<a href={address} target="_blank" rel="noreferrer" aria-label="Open preview in new tab" className="rounded p-1.5 text-[#879099] hover:bg-black/5"><ExternalLink className="size-3.5" /></a>*/}
-        </div>
-      </form>
-      <div className="min-h-0 flex-1">
-        <iframe key={address} src={address} title="Sandbox web preview" className="h-full w-full" />
-      </div>
-    </div>
-  );
+function legacyMessages(session: Session): ChatMessage[] {
+  try {
+    const value = JSON.parse(session.parts ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (message) =>
+        (message as ChatMessage).role === "user" ||
+        (message as ChatMessage).role === "assistant",
+    );
+  } catch {
+    return [];
+  }
 }
 
-function TerminalPane({
-  sessionId,
-  onError,
-}: {
-  sessionId: string;
-  onError: (message: string) => void;
-}) {
-  const host = useRef<HTMLDivElement>(null);
-  const terminal = useRef<XTerm | null>(null);
-  const socket = useRef<WebSocket | null>(null);
-  const connectRef = useRef<() => void>(() => undefined);
-  const reconnectTimer = useRef<number | undefined>(undefined);
-  const manualReconnect = useRef(false);
-  const [connection, setConnection] = useState<"connecting" | "connected" | "disconnected">("connecting");
+function Chat({ session }: { session: Session }) {
+  const update = useMutation(api.sessions.update);
+  const [prompt, setPrompt] = useState("");
+  const [notice, setNotice] = useState("");
+  const saved = useMemo(() => loadChat(session.id), [session.id]);
+  const eventsRef = useRef<readonly MessageStreamEvent[]>(saved.events);
+
+  const agent = useEveAgent({
+    initialEvents: saved.events,
+    initialSession: saved.session,
+    onEvent(event) {
+      eventsRef.current = [...eventsRef.current, event];
+    },
+    onSessionChange(next) {
+      if (!next?.sessionId) return;
+      saveChat(session.id, { events: eventsRef.current, session: next });
+      // Link the durable eve session id to the convex row once.
+      if (next.sessionId !== session.eveSessionId) {
+        void update({ id: session.id as never, eveSessionId: next.sessionId });
+      }
+    },
+    onFinish(snapshot) {
+      const value = {
+        events: snapshot.events,
+        session: snapshot.session,
+      };
+      saveChat(session.id, value);
+      void update({
+        id: session.id as never,
+        parts: JSON.stringify(value),
+      });
+    },
+  });
+
+  const messages = agent.data.messages as unknown as ChatMessage[];
+  const working =
+    agent.status === "submitted" || agent.status === "streaming";
+  const busy = working || session.status === "running";
 
   useEffect(() => {
-    if (!host.current) return;
-    const instance = new XTerm({
-      cursorBlink: true,
-      convertEol: true,
-      fontSize: 13,
-    });
-    const fit = new FitAddon();
-    instance.loadAddon(fit);
-    instance.open(host.current);
-    fit.fit();
-    terminal.current = instance;
+    if (!notice) return;
+    toast.error(notice);
+    queueMicrotask(() => setNotice(""));
+  }, [notice]);
+  useEffect(() => {
+    if (!agent.error?.message) return;
+    toast.error(agent.error.message);
+  }, [agent.error?.message]);
+  const bottom = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "auto" });
+  }, [messages, agent.status]);
 
-    let closed = false;
-    const connect = () => {
-      if (closed) return;
-      setConnection("connecting");
-      const base = API.replace(/^http/, "ws");
-      const ws = new WebSocket(`${base}/sessions/${sessionId}/terminal/ws`);
-      socket.current = ws;
-      ws.onopen = () => {
-        instance.reset();
-        setConnection("connected");
-      };
-      ws.onmessage = (event) => instance.write(String(event.data));
-      ws.onerror = () => {
-        setConnection("disconnected");
-        onError("Terminal connection failed.");
-      };
-      ws.onclose = () => {
-        if (!closed) {
-          setConnection("disconnected");
-          instance.write("\r\n\x1b[33m● reconnecting…\x1b[0m\r\n");
-          reconnectTimer.current = window.setTimeout(
-            connect,
-            manualReconnect.current ? 0 : 1200,
-          );
-          manualReconnect.current = false;
-        }
-      };
-    };
-    connectRef.current = connect;
-    const send = (data: string) => {
-      if (socket.current?.readyState === WebSocket.OPEN)
-        socket.current.send(JSON.stringify({ type: "input", data }));
-    };
-    const input = instance.onData(send);
-    const resize = () => fit.fit();
-    const resizeObserver = new ResizeObserver(resize);
-    resizeObserver.observe(host.current);
-    window.addEventListener("resize", resize);
-    connect();
-    return () => {
-      closed = true;
-      if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", resize);
-      input.dispose();
-      socket.current?.close();
-      connectRef.current = () => undefined;
-      instance.dispose();
-      terminal.current = null;
-    };
-  }, [sessionId, onError]);
+  const send = useCallback(
+    async (text = prompt) => {
+      if (!text.trim() || busy) return;
+      setPrompt("");
+      setNotice("");
+      try {
+        await agent.send(text.trim());
+      } catch (err) {
+        setNotice(
+          err instanceof Error ? err.message : "Could not send message.",
+        );
+      }
+    },
+    [agent, prompt, busy],
+  );
 
-  const reconnect = () => {
-    if (socket.current?.readyState === WebSocket.CONNECTING) return;
-    if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
-    manualReconnect.current = true;
-    if (socket.current && socket.current.readyState !== WebSocket.CLOSED)
-      socket.current.close();
-    else connectRef.current();
-  };
+  useEffect(() => {
+    if (busy) return;
+    const initialPrompt = window.sessionStorage.getItem("opendevin:initial-prompt");
+    if (!initialPrompt) return;
+    window.sessionStorage.removeItem("opendevin:initial-prompt");
+    queueMicrotask(() => void send(initialPrompt));
+  }, [send, busy]);
+
+  async function stopAgent() {
+    if (!working) return;
+    try {
+      await agent.cancel();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not stop the agent.");
+    }
+  }
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={host} className="h-full w-full pt-7" aria-label="Terminal" />
-      <Button
-        type="button"
-        variant="ghost"
-        size="xs"
-        onClick={reconnect}
-        disabled={connection === "connecting"}
-        className="absolute right-1.5 top-1 h-6 px-1.5">
-        <RefreshCw className={cn("size-3", connection === "connecting" && "animate-spin")} />
-        Reconnect
-      </Button>
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="min-h-0 flex-1 w-full overflow-y-auto scrollbar-none">
+        <div className="mx-auto max-w-2xl space-y-4 px-4 py-4 sm:px-6">
+          {messages.length === 0 && (
+            <div className="pt-8">
+              <h2 className="text-base font-medium tracking-tight">
+                What are we building?
+              </h2>
+              <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                Describe the outcome. The agent inspects the repository and makes the changes.
+              </p>
+            </div>
+          )}
+          {messages.map((m, index) => (
+            <Message
+              key={`${m.id || "message"}-${index}`}
+              message={m}
+              streaming={working && m.id === messages.at(-1)?.id}
+            />
+          ))}
+          <div ref={bottom} />
+        </div>
+      </div>
+      <div className="border-t px-3 py-2 sm:px-4">
+        <div className="mx-auto max-w-2xl">
+          <div className="flex items-end gap-1.5 rounded-md border bg-background p-1.5">
+            <Textarea
+              value={prompt}
+              disabled={Boolean(busy)}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder="Ask OpenDevin to investigate, build, or fix…"
+              rows={1}
+              className="min-h-8 resize-none border-0 bg-transparent py-1.5 shadow-none focus-visible:ring-0 disabled:bg-transparent"
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    aria-label={busy ? "Stop" : "Send message"}
+                    className="size-7"
+                    onClick={() => {
+                      if (busy) void stopAgent();
+                      else send();
+                    }}
+                    disabled={
+                      busy || !prompt.trim()
+                    }
+                    variant={busy ? "destructive" : "default"}>
+                    {busy ? <CircleStop /> : <SendHorizontal />}
+                  </Button>
+                }
+              />
+              <TooltipContent>
+                {busy ? "Stop" : "Send message"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -364,190 +423,109 @@ function TerminalPane({
 export function Home() {
   const { activeSessionId, selectSession } = useSessionSelection();
   const router = useRouter();
+  const updateSession = useMutation(api.sessions.update);
   const sessions = mapSessions(
     useConvexQuery(api.sessions.list, {}) as unknown[] | undefined,
   );
   const active =
     sessions.find((session) => session.id === activeSessionId) ?? null;
-  const activeId = active?.id;
-  const [prompt, setPrompt] = useState("");
-  const [notice, setNotice] = useState("");
-  const [view, setView] = useState<View>("preview");
+  const [view, setView] = useState<"diff" | null>("diff");
   const [collapsedPane, setCollapsedPane] = useState(false);
   const [paneWidth, setPaneWidth] = useState(40);
+  const [github, setGithub] = useState<
+    { connected: boolean; login?: string } | undefined
+  >();
+  const [publishing, setPublishing] = useState(false);
   const resizing = useRef(false);
-  const diffQuery = useQuery({
-    queryKey: ["session-diff", activeId],
-    enabled: Boolean(activeId && view === "diff"),
-    staleTime: 5_000,
-    queryFn: async () => {
-      const response = await fetch(`${API}/sessions/${activeId}/diff`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Could not load Git diff.");
-      return String(data.diff || "");
-    },
-  });
-  const diff = diffQuery.data ?? "";
-  const diffLoading = diffQuery.isFetching;
-  const { refetch: refetchDiff } = diffQuery;
-  const diffFiles = useMemo(
-    () => (diff ? diff.split(/(?=^diff --git )/m).filter(Boolean) : []),
-    [diff],
-  );
-  const bottom = useRef<HTMLDivElement>(null);
-  const transport = useMemo(
-    () =>
-      new DefaultChatTransport({
-        api: `${API}/ai/${active?.id ?? "new-session"}`,
-      }),
-    [active?.id],
-  );
-  const { messages, setMessages, status, error, sendMessage, stop } = useChat({
-    transport,
-    throttle: 40,
-  });
-  const working = status === "submitted" || status === "streaming";
-  const sessionStopped = active?.status === "stopped";
-  const canChat = Boolean(active) && !sessionStopped;
-  const sandboxUnavailable = sessionStopped;
-  const busy = working || active?.status === "running";
-  const activityLabel = active?.status === "running" ? "Working" : active?.status ?? "Idle";
-  const activityDot = active?.status === "running" ? "bg-emerald-500" : "bg-muted-foreground";
+  const diff = active?.diff ?? "";
+  const diffFiles = diff
+    ? diff.split(/(?=^diff --git )/m).filter(Boolean)
+    : [];
+  const legacy = Boolean(active && !active.eveSessionId && active.parts);
+  const legacyTranscript = legacy && active ? legacyMessages(active) : [];
+  const canChat = Boolean(active) && !legacy;
 
-  const messagesData = useConvexQuery(api.sessions.messages, active ? { sessionId: active.id as never } : "skip") as UIMessage[] | undefined;
   useEffect(() => {
-    // Convex contains the last completed transcript. Never let its reactive
-    // update replace the message currently being streamed by useChat.
-    if (working || active?.status === "running" || !messagesData) return;
-    setMessages(
-      messagesData.filter(
-        (m) => m.role === "user" || m.role === "assistant",
-      ),
-    );
-  }, [active?.id, active?.status, messagesData, setMessages, working]);
-  useEffect(() => {
-    if (!notice) return;
-    toast.error(notice);
-    queueMicrotask(() => setNotice(""));
-  }, [notice]);
-  useEffect(() => {
-    if (!error?.message) return;
-    toast.error(error.message);
-  }, [error?.message]);
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "auto" });
-  }, [messages, status]);
+    void fetch("/api/github/session")
+      .then((response) => response.json())
+      .then((value) => setGithub(value as { connected: boolean; login?: string }))
+      .catch(() => setGithub({ connected: false }));
+    const status = new URLSearchParams(window.location.search).get("github");
+    if (status === "connected") toast.success("GitHub connected.");
+    if (status === "error") toast.error("Could not connect GitHub.");
+    if (status) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
-  async function stopAgent() {
-    if (!active) return;
-    // Close the SSE stream immediately, then tell the backend to abort the
-    // model/tool loop that may still be running server-side.
-    stop();
+  function downloadPatch() {
+    if (!active || !diff) return;
+    const blob = new Blob([diff], { type: "text/x-diff;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${sessionTitle(active).replace(/[^a-z0-9-_]+/gi, "-").toLowerCase() || "opendevin"}.patch`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function publishChanges() {
+    if (!active || !diff || publishing) return;
+    if (!github?.connected) {
+      router.push("/api/github/login?returnTo=/");
+      return;
+    }
+    setPublishing(true);
+    const loading = toast.loading("Creating pull request…");
     try {
-      const response = await fetch(`${API}/sessions/${active.id}/stop`, { method: "POST" });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || "Could not stop the agent.");
+      const response = await fetch("/api/github/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          git: active.git,
+          diff,
+          title: sessionTitle(active),
+        }),
+      });
+      const result = (await response.json()) as {
+        number?: number;
+        url?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.number || !result.url) {
+        throw new Error(result.error || "Could not create the pull request.");
       }
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not stop the agent.");
+      await updateSession({
+        id: active.id as never,
+        PRNumber: result.number,
+        prUrl: result.url,
+      });
+      toast.success(`Pull request #${result.number} created.`, { id: loading });
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create the pull request.", { id: loading });
+    } finally {
+      setPublishing(false);
     }
   }
 
-  const send = useCallback(async (text = prompt) => {
-    if (!active || !text.trim() || working) return;
-    if (!canChat) {
-      setNotice(
-        "This session has been stopped. Start a new workspace to continue.",
-      );
-      return;
-    }
-    setPrompt("");
-    setNotice("");
-    try {
-      await sendMessage({ text: text.trim() });
-    } catch (err) {
-      setNotice(
-        err instanceof Error ? err.message : "Could not send message.",
-      );
-    }
-  }, [active, canChat, prompt, sendMessage, working]);
-  useEffect(() => {
-    if (!active || working) return;
-    const initialPrompt = window.sessionStorage.getItem("opendevin:initial-prompt");
-    if (!initialPrompt) return;
-    window.sessionStorage.removeItem("opendevin:initial-prompt");
-    queueMicrotask(() => void send(initialPrompt));
-  }, [active, active?.id, send, working]);
-  const loadDiff = useCallback(async () => {
-    const result = await refetchDiff();
-    if (result.error)
-      setNotice(
-        result.error instanceof Error ? result.error.message : "Could not load Git diff.",
-      );
-  }, [refetchDiff]);
-  async function stopSandbox() {
-    if (
-      !active ||
-      sessionStopped ||
-      !window.confirm(
-        "Stop this sandbox? Its files and terminal will no longer be available.",
-      )
-    )
-      return;
-    try {
-      const response = await fetch(`${API}/sessions/${active.id}/stop`, {
-        method: "POST",
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message);
-      setView("preview");
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not stop sandbox.");
-    }
-  }
-  async function restartSandbox() {
-    if (!active || !sessionStopped) return;
-    try {
-      const response = await fetch(`${API}/sessions/${active.id}/restart`, {
-        method: "POST",
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message);
-      toast.success("Sandbox restarted", {
-        description: "A fresh workspace is ready from the repository source.",
-      });
-      setView("preview");
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not restart sandbox.");
-    }
-  }
   async function archiveSession() {
     if (
       !active ||
-      !window.confirm("Archive this session? Its sandbox will be stopped.")
+      !window.confirm("Archive this session? It will be hidden from the list.")
     )
       return;
     try {
-      const response = await fetch(`${API}/sessions/${active.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archived: true }),
+      await updateSession({
+        id: active.id as never,
+        archived: true,
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message);
       selectSession(null);
-      setMessages([]);
     } catch (err) {
-      setNotice(
-        err instanceof Error ? err.message : "Could not archive session.",
-      );
+      toast.error(err instanceof Error ? err.message : "Could not archive session.");
     }
   }
-  const tabs: { id: View; label: string; icon: LucideIcon; requiresSandbox?: boolean }[] = [
-    { id: "preview", label: "Browser", icon: MonitorPlay, requiresSandbox: true },
-    { id: "terminal", label: "Terminal", icon: TerminalIcon, requiresSandbox: true },
-    { id: "diff", label: "Diffs", icon: FileDiff, requiresSandbox: true },
+
+  const tabs: { id: "diff"; label: string; icon: LucideIcon }[] = [
+    { id: "diff", label: "Diffs", icon: FileDiff },
   ];
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsedPane) return;
@@ -580,41 +558,11 @@ export function Home() {
           </div>
           {active && (
             <div className="flex items-center gap-0.5">
-              <span className="mr-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className={cn("size-1.5 rounded-full", activityDot)} />
-                {activityLabel}
-              </span>
-              {sessionStopped ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Restart sandbox"
-                        onClick={restartSandbox}>
-                        <RefreshCw />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Restart sandbox</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Stop sandbox"
-                        disabled={sessionStopped || busy}
-                        onClick={stopSandbox}>
-                        <Power />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Stop sandbox</TooltipContent>
-                </Tooltip>
+              {!legacy && (
+                <span className="mr-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className={cn("size-1.5 rounded-full", active.status === "running" ? "bg-emerald-500" : "bg-muted-foreground")} />
+                  {active.status === "running" ? "Working" : "Idle"}
+                </span>
               )}
               <Tooltip>
                 <TooltipTrigger
@@ -653,75 +601,32 @@ export function Home() {
           <section className="flex min-h-0 w-full flex-1 flex-col">
             <div className="flex min-h-0 flex-1">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r">
-                <div className="min-h-0 flex-1 w-full overflow-y-auto scrollbar-none">
-                  <div className="mx-auto max-w-2xl space-y-4 px-4 py-4 sm:px-6">
-                    {messages.length === 0 && (
-                      <div className="pt-8">
-                        <h2 className="text-base font-medium tracking-tight">
-                          What are we building?
-                        </h2>
-                        <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                          Describe the outcome. The agent inspects the repository and makes the changes.
-                        </p>
-                      </div>
-                    )}
-                    {messages.map((m, index) => (
-                      <Message
-                        key={`${m.id || "message"}-${index}`}
-                        message={m}
-                        streaming={(working || active?.status === "running") && m.id === messages.at(-1)?.id}
-                      />
-                    ))}
-                    <div ref={bottom} />
-                  </div>
-                </div>
-                <div className="border-t px-3 py-2 sm:px-4">
-                  <div className="mx-auto max-w-2xl">
-                    <div className="flex items-end gap-1.5 rounded-md border bg-background p-1.5">
-                      <Textarea
-                        value={prompt}
-                        disabled={!canChat || Boolean(busy)}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            send();
-                          }
-                        }}
-                        placeholder={
-                          sandboxUnavailable
-                            ? "Sandbox unavailable"
-                            : "Ask OpenDevin to investigate, build, or fix…"
-                        }
-                        rows={1}
-                        className="min-h-8 resize-none border-0 bg-transparent py-1.5 shadow-none focus-visible:ring-0 disabled:bg-transparent"
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              size="icon-sm"
-                              aria-label={busy ? "Stop" : "Send message"}
-                              className="size-7"
-                              onClick={() => {
-                                if (busy) void stopAgent();
-                                else send();
-                              }}
-                              disabled={
-                                !busy && (!prompt.trim() || sandboxUnavailable)
-                              }
-                              variant={busy ? "destructive" : "default"}>
-                              {busy ? <CircleStop /> : <SendHorizontal />}
-                            </Button>
-                          }
+                {canChat ? (
+                  <Chat key={active.id} session={active} />
+                ) : (
+                  <div className="min-h-0 flex-1 w-full overflow-y-auto scrollbar-none">
+                    <div className="mx-auto max-w-2xl space-y-4 px-4 py-4 sm:px-6">
+                      {legacyTranscript.length === 0 && (
+                        <div className="pt-8">
+                          <h2 className="text-base font-medium tracking-tight">
+                            Session not started
+                          </h2>
+                          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                            This session has no live agent. Start a new session
+                            from the project page.
+                          </p>
+                        </div>
+                      )}
+                      {legacyTranscript.map((m, index) => (
+                        <Message
+                          key={`${m.id || "message"}-${index}`}
+                          message={m}
+                          streaming={false}
                         />
-                        <TooltipContent>
-                          {busy ? "Stop" : "Send message"}
-                        </TooltipContent>
-                      </Tooltip>
+                      ))}
                     </div>
                   </div>
-                </div>
+                )}
               </div>
               {!collapsedPane && (
                 <div
@@ -752,84 +657,79 @@ export function Home() {
                     />
                     <TooltipContent>{collapsedPane ? "Expand panel" : "Collapse panel"}</TooltipContent>
                   </Tooltip>
-                  {!collapsedPane && <>
-                  {tabs.map(({ id, label, icon: Icon, requiresSandbox }) => (
-                    <Button key={id} size="sm" variant={view === id ? "outline" : "ghost"} disabled={Boolean(requiresSandbox && sandboxUnavailable)} onClick={() => setView(id)}>
-                      <Icon className="size-3.5" />{label}
-                    </Button>
-                  ))}
-                  </>}
+                  {!collapsedPane && (
+                    <>
+                      {tabs.map(({ id, label, icon: Icon }) => (
+                        <Button key={id} size="sm" variant={view === id ? "outline" : "ghost"} onClick={() => setView(id)}>
+                          <Icon className="size-3.5" />{label}
+                        </Button>
+                      ))}
+                      <div className="flex-1" />
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label="Download patch"
+                              disabled={!diff}
+                              onClick={downloadPatch}>
+                              <Download />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>Download patch</TooltipContent>
+                      </Tooltip>
+                      {active?.prUrl ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => window.open(active.prUrl, "_blank", "noopener,noreferrer")}>
+                          <ExternalLink />PR #{active.PRNumber}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled={!diff || publishing || github === undefined}
+                          onClick={publishChanges}>
+                          {publishing ? <LoaderCircle className="animate-spin" /> : <IconBrandGithub />}
+                          {github?.connected ? "Create PR" : "Connect GitHub"}
+                        </Button>
+                      )}
+                    </>
+                  )}
                 </div>
-                {active && !sandboxUnavailable && (
-                  <div
-                    className={cn(
-                      "min-h-0 min-w-0 flex-1 flex-col",
-                      !collapsedPane && view === "preview" ? "flex" : "hidden",
-                    )}>
-                    <BrowserPane sandboxId={active.sandbox ?? ""} />
-                  </div>
-                )}
                 <div
                   className={cn(
                     "min-h-0 min-w-0 flex-1 flex-col",
                     !collapsedPane && view === "diff" ? "flex" : "hidden",
                   )}>
-                <div className="flex items-center justify-end px-1.5 py-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={loadDiff}
-                    disabled={diffLoading || sandboxUnavailable}>
-                    {diffLoading ? (
-                      <LoaderCircle className="animate-spin" />
+                  <ScrollArea
+                    aria-label="Git changes"
+                    className="min-h-0 flex-1">
+                    {diffFiles.length > 0 ? (
+                      <div className="">
+                        {diffFiles.map((filePatch, index) => {
+                          const fileName = filePatch.match(/^diff --git a\/(.*?) b\//m)?.[1] ?? `Changed file ${index + 1}`;
+                          return (
+                            <details key={`${fileName}-${index}`} open className="border-b">
+                              <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                                {fileName}
+                              </summary>
+                              <PatchDiff patch={filePatch} disableWorkerPool />
+                            </details>
+                          );
+                        })}
+                      </div>
                     ) : (
-                      <RefreshCw />
+                      <p className="p-3 text-sm text-muted-foreground">
+                        No changes yet.
+                      </p>
                     )}
-                  </Button>
+                  </ScrollArea>
                 </div>
-                <ScrollArea
-                  aria-label="Git changes"
-                  className="min-h-0 flex-1">
-                  {diffLoading ? (
-                    <p className="p-3 text-sm text-muted-foreground">
-                      Loading…
-                    </p>
-                  ) : diff ? (
-                    <div className="">
-                      {diffFiles.map((filePatch, index) => {
-                        const fileName = filePatch.match(/^diff --git a\/(.*?) b\//m)?.[1] ?? `Changed file ${index + 1}`;
-                        return (
-                          <details key={`${fileName}-${index}`} open className="border-b">
-                            <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                              {fileName}
-                            </summary>
-                            <PatchDiff patch={filePatch} disableWorkerPool />
-                          </details>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="p-3 text-sm text-muted-foreground">
-                      No changes yet.
-                    </p>
-                  )}
-                </ScrollArea>
-              </div>
-                {active && !sandboxUnavailable && (
-                  <div
-                    className={cn(
-                      "min-h-0 min-w-0 flex-1 flex-col",
-                      !collapsedPane && view === "terminal" ? "flex" : "hidden",
-                    )}>
-                  <TerminalPane
-                    sessionId={active.id}
-                    onError={setNotice}
-                  />
-                  </div>
-                )}
               </aside>
             </div>
-
           </section>
         )}
       </section>

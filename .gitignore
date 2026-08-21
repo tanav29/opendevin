@@ -12,3 +12,6 @@ generated
 _generated
 .agents
 .claude
+pnpm-lock.yaml
+.eve
+.output

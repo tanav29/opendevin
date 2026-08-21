@@ -2,7 +2,7 @@
 
 import { type FormEvent, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery as useConvexQuery } from "convex/react";
+import { useMutation, useQuery as useConvexQuery } from "convex/react";
 import {
   CheckCircle2,
   CircleDashed,
@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  API,
   mapSessions,
   sessionTitle,
   type Session,
@@ -96,6 +95,7 @@ export default function ProjectPage() {
   const params = useParams<{ projectId: string }>();
   const router = useRouter();
   const { selectSession } = useSessionSelection();
+  const createSession = useMutation(api.sessions.create);
   const project = useConvexQuery(
     api.projects.get,
     params.projectId ? { id: params.projectId as never } : "skip",
@@ -113,34 +113,32 @@ export default function ProjectPage() {
   const working = sessions.filter((session) => session.status === "running");
   const completed = sessions.filter((session) => session.status !== "running");
 
-  async function createSession(event: FormEvent) {
+  async function createSessionHandler(event: FormEvent) {
     event.preventDefault();
-    if (!prompt.trim()) {
+    if (!project) return;
+    const task = prompt.trim();
+    if (!task) {
       toast.error("Describe what this session should do.");
       return;
     }
     setCreating(true);
-    const loadingToast = toast.loading("Starting sandbox…");
+    const loadingToast = toast.loading("Starting session…");
     try {
-      const response = await fetch(
-        `${API}/projects/${params.projectId}/sessions`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: prompt.trim() }),
-        },
-      );
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.message || "Could not create session.");
+      const session = await createSession({
+        projectId: params.projectId as never,
+        git: project.git,
+        status: "idle",
+        title: task.slice(0, 80),
+      });
+      if (!session) throw new Error("Could not create session.");
       toast.success("Session created", {
         id: loadingToast,
-        description: "Your sandbox is ready.",
+        description: "The repository will be checked out when the agent starts.",
       });
-      window.sessionStorage.setItem("opendevin:initial-prompt", prompt.trim());
+      window.sessionStorage.setItem("opendevin:initial-prompt", task);
       setPrompt("");
-      selectSession(data.sessionId);
-      router.push(`/s/${data.sessionId}`);
+      selectSession(session._id);
+      router.push(`/s/${session._id}`);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not create session.",
@@ -184,7 +182,7 @@ export default function ProjectPage() {
               Each session gets its own sandbox with this repository checked
               out.
             </p>
-            <form onSubmit={createSession} className="mt-2.5 flex items-end gap-1.5">
+            <form onSubmit={createSessionHandler} className="mt-2.5 flex items-end gap-1.5">
               <Textarea
                 value={prompt}
                 disabled={creating}
@@ -192,7 +190,7 @@ export default function ProjectPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    createSession(event);
+                    createSessionHandler(event);
                   }
                 }}
                 placeholder="Describe the task for this session…"

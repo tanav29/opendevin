@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery as useConvexQuery } from "convex/react";
+import { useMutation, useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
@@ -16,7 +16,6 @@ import {
   Trash2,
 } from "lucide-react";
 import {
-  API,
   mapProjects,
   mapSessions,
   sessionTitle,
@@ -147,21 +146,16 @@ export function AppSidebar() {
   const isLoading = sessionsResult === undefined && projectsResult === undefined;
   const { activeSessionId, selectSession } = useSessionSelection();
   const router = useRouter();
+  const updateSession = useMutation(api.sessions.update);
+  const removeSession = useMutation(api.sessions.remove);
   const activeSessions = sessions.filter((session) => !session.archived);
   const archivedSessions = sessions.filter((session) => session.archived);
 
   async function archiveSession(session: Session) {
-    if (!window.confirm("Archive this session? Its sandbox will be stopped."))
+    if (!window.confirm("Archive this session? It will be hidden from the list."))
       return;
     try {
-      const response = await fetch(`${API}/sessions/${session.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archived: true }),
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.message || "Could not archive session.");
+      await updateSession({ id: session.id as never, archived: true });
       if (activeSessionId === session.id) selectSession(null);
     } catch (error) {
       window.alert(
@@ -172,14 +166,7 @@ export function AppSidebar() {
 
   async function unarchiveSession(session: Session) {
     try {
-      const response = await fetch(`${API}/sessions/${session.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archived: false }),
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.message || "Could not unarchive session.");
+      await updateSession({ id: session.id as never, archived: false });
     } catch (error) {
       window.alert(
         error instanceof Error ? error.message : "Could not unarchive session.",
@@ -190,10 +177,7 @@ export function AppSidebar() {
   async function deleteSession(session: Session) {
     if (!window.confirm("Delete this archived session permanently? This cannot be undone.")) return;
     try {
-      const response = await fetch(`${API}/sessions/${session.id}`, { method: "DELETE" });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.message || "Could not delete session.");
+      await removeSession({ id: session.id as never });
       if (activeSessionId === session.id) selectSession(null);
     } catch (error) {
       window.alert(

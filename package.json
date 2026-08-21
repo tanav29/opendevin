@@ -10,7 +10,7 @@
     "format": "turbo fmt:check",
     "format:fix": "turbo fmt",
     "convex:dev": "convex dev",
-    "convex:codegen": "convex codegen",
+    "convex:codegen": "convex codegen && node scripts/copy-convex-generated.mjs",
     "prepare": "husky"
   },
   "devDependencies": {

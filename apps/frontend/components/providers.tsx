@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConvexProvider } from "convex/react";
 import { convex } from "@/lib/convex";
@@ -16,6 +23,12 @@ export type Session = {
   cwd?: string;
   parts?: string;
   projectId?: string;
+  // Linked after the first message reaches the eve runtime.
+  eveSessionId?: string;
+  title?: string;
+  diff?: string;
+  PRNumber?: number;
+  prUrl?: string;
 };
 
 export type Project = {
@@ -29,26 +42,45 @@ export type Project = {
 type StoredMessagePart = { type?: string; text?: string };
 type StoredMessage = { role?: string; parts?: StoredMessagePart[] };
 
+function firstMessageText(value: unknown): string | undefined {
+  // Legacy rows store an array of UIMessage-like objects.
+  if (Array.isArray(value)) {
+    for (const message of value as StoredMessage[]) {
+      if (message.role !== "user") continue;
+      const text = message.parts
+        ?.filter((part) => part.type === "text")
+        .map((part) => part.text?.trim())
+        .find(Boolean);
+      if (text) return text;
+    }
+    return undefined;
+  }
+  // eve snapshots store { events, session }.
+  const events = (value as { events?: unknown[] })?.events;
+  if (!Array.isArray(events)) return undefined;
+  for (const event of events) {
+    const data = (event as { data?: { message?: unknown } })?.data;
+    if ((event as { type?: string }).type === "message.received" && data) {
+      if (typeof data.message === "string" && data.message.trim())
+        return data.message.trim();
+    }
+  }
+  return undefined;
+}
+
 export function sessionTitle(session: Session) {
+  if (session.title?.trim()) return session.title;
   try {
-    const messages = JSON.parse(session.parts ?? "[]") as StoredMessage[];
-    const firstUserMessage = messages.find((message) => message.role === "user");
-    const text = firstUserMessage?.parts
-      ?.filter((part) => part.type === "text")
-      .map((part) => part.text?.trim())
-      .find(Boolean);
+    const text = firstMessageText(JSON.parse(session.parts ?? "[]"));
     if (text) return text;
   } catch {
     // A malformed stored transcript should not prevent the session list rendering.
   }
-
   return (
     session.git.split("/").pop()?.replace(/\.git$/, "") ||
     "Untitled session"
   );
 }
-
-export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 function normalizeRecord(value: Record<string, unknown>, fallbackId: string) {
   const id = String(value.id ?? value._id ?? fallbackId);
@@ -79,7 +111,20 @@ const SessionSelectionContext = createContext<{
 
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
-  const [activeSessionId, selectSession] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    queueMicrotask(() =>
+      setActiveSessionId(window.localStorage.getItem("opendevin:active-session")),
+    );
+  }, []);
+
+  const selectSession = useCallback((id: string | null) => {
+    setActiveSessionId(id);
+    if (id) window.localStorage.setItem("opendevin:active-session", id);
+    else window.localStorage.removeItem("opendevin:active-session");
+  }, []);
+
   return (
     <ConvexProvider client={convex}>
     <QueryClientProvider client={queryClient}>
