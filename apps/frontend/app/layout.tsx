@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/sidebar";
 import { AppProviders } from "@/components/providers";
+import { ConfirmProvider } from "@/components/ui/confirm";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geistSans = Geist({
@@ -30,13 +31,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="h-screen w-full">
         <AppProviders>
           <TooltipProvider>
-            <SidebarProvider>
-              <AppSidebar />
-              <main className="flex min-h-screen min-w-0 flex-1 flex-col">
-                {children}
-              </main>
-            </SidebarProvider>
-            <Toaster position="bottom-left" />
+            <ConfirmProvider>
+              <SidebarProvider>
+                <AppSidebar />
+                <main className="flex min-h-screen min-w-0 flex-1 flex-col">
+                  {children}
+                </main>
+              </SidebarProvider>
+            </ConfirmProvider>
+            <Toaster
+              position="bottom-right"
+              toastOptions={{ className: "overlay" }}
+            />
           </TooltipProvider>
         </AppProviders>
       </body>
