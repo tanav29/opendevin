@@ -9,15 +9,15 @@ const shellArg = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 // The convex row for a session is created by the UI before the first message
 // is sent, but the eve session id is only linked to it after the create-session
 // response reaches the browser. Poll briefly so a fast first tool call still
-// finds the repository URL.
-async function findGitUrl(eveSessionId: string): Promise<string | null> {
+// finds the selected repository and branch.
+async function findCheckout(eveSessionId: string): Promise<{ git: string; baseBranch?: string } | null> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   for (;;) {
     try {
       const row = await convex().query(api.sessions.byEveSessionId, {
         eveSessionId,
       });
-      if (row?.git) return row.git;
+      if (row?.git) return { git: row.git, baseBranch: row.baseBranch };
     } catch {
       // Convex may not be configured; fall through to the retry loop.
     }
@@ -30,8 +30,8 @@ export default defineSandbox({
   description: "Clones the session's repository into /workspace",
   async onSession({ ctx, use: openSession }) {
     const sandbox = await openSession();
-    const git = await findGitUrl(ctx.session.id);
-    if (!git) {
+    const checkout = await findCheckout(ctx.session.id);
+    if (!checkout) {
       console.warn(
         `[opendevin] no git URL found for eve session ${ctx.session.id}; ` +
           "the workspace was not populated",
@@ -44,7 +44,7 @@ export default defineSandbox({
         "if [ -d /workspace/.git ]; then",
         "  echo 'workspace already populated';",
         "else",
-        `  git clone ${shellArg(git)} /workspace/.repo`,
+        `  git clone${checkout.baseBranch ? ` --branch ${shellArg(checkout.baseBranch)} --single-branch` : ""} ${shellArg(checkout.git)} /workspace/.repo`,
         "  && cp -a /workspace/.repo/. /workspace/",
         "  && rm -rf /workspace/.repo",
         "  && echo 'workspace populated';",

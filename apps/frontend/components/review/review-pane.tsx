@@ -149,6 +149,7 @@ export function ReviewPane({
     { connected: boolean; login?: string } | undefined
   >();
   const [publishing, setPublishing] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const hasDiff = patch.files.length > 0;
 
   useEffect(() => {
@@ -179,8 +180,49 @@ export function ReviewPane({
     URL.revokeObjectURL(url);
   }
 
+  async function commitChanges() {
+    if (!session.diff || committing) return;
+    setCommitting(true);
+    const loading = toast.loading(session.agentBranch ? "Updating agent branch…" : "Committing changes…");
+    try {
+      const response = await fetch("/api/github/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          git: session.git,
+          diff: session.diff,
+          title: sessionTitle(session),
+          baseBranch: session.baseBranch,
+          branch: session.agentBranch || `opendevin/${session.id}`,
+        }),
+      });
+      const result = (await response.json()) as {
+        branch?: string;
+        sha?: string;
+        repository?: string;
+        baseBranch?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.branch || !result.sha || !result.repository) {
+        throw new Error(result.error || "Could not commit changes.");
+      }
+      await updateSession({
+        id: session.id as never,
+        agentBranch: result.branch,
+        commitSha: result.sha,
+        publishRepository: result.repository,
+        baseBranch: result.baseBranch,
+      });
+      toast.success(session.agentBranch ? "Agent branch updated." : "Changes committed to the agent branch.", { id: loading });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not commit changes.", { id: loading });
+    } finally {
+      setCommitting(false);
+    }
+  }
+
   async function publishChanges() {
-    if (!session.diff || publishing) return;
+    if (!session.agentBranch || !session.publishRepository || !session.baseBranch || publishing) return;
     setPublishing(true);
     const loading = toast.loading("Creating pull request…");
     try {
@@ -189,32 +231,21 @@ export function ReviewPane({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           git: session.git,
-          diff: session.diff,
           title: sessionTitle(session),
+          baseBranch: session.baseBranch,
+          branch: session.agentBranch,
+          publishRepository: session.publishRepository,
         }),
       });
-      const result = (await response.json()) as {
-        number?: number;
-        url?: string;
-        error?: string;
-      };
+      const result = (await response.json()) as { number?: number; url?: string; error?: string };
       if (!response.ok || !result.number || !result.url) {
         throw new Error(result.error || "Could not create the pull request.");
       }
-      await updateSession({
-        id: session.id as never,
-        PRNumber: result.number,
-        prUrl: result.url,
-      });
+      await updateSession({ id: session.id as never, PRNumber: result.number, prUrl: result.url });
       toast.success(`Pull request #${result.number} created.`, { id: loading });
       window.open(result.url, "_blank", "noopener,noreferrer");
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not create the pull request.",
-        { id: loading },
-      );
+      toast.error(error instanceof Error ? error.message : "Could not create the pull request.", { id: loading });
     } finally {
       setPublishing(false);
     }
@@ -313,28 +344,31 @@ export function ReviewPane({
           <TooltipContent side="bottom">Download patch</TooltipContent>
         </Tooltip>
 
-        {session.prUrl ? (
-          <Button
-            size="sm"
-            variant="outline"
-            nativeButton={false}
-            render={
-              <a href={session.prUrl} target="_blank" rel="noreferrer noopener" />
-            }
-          >
-            <IconBrandGithub />
-            PR #{session.PRNumber}
-            <ExternalLink />
-          </Button>
-        ) : github?.connected ? (
-          <Button size="sm" disabled={!hasDiff || publishing} onClick={publishChanges}>
-            {publishing ? (
-              <LoaderCircle className="animate-spin" />
-            ) : (
-              <IconBrandGithub />
+        {github?.connected ? (
+          <>
+            {session.prUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<a href={session.prUrl} target="_blank" rel="noreferrer noopener" />}
+              >
+                <IconBrandGithub />
+                PR #{session.PRNumber}
+                <ExternalLink />
+              </Button>
             )}
-            Create pull request
-          </Button>
+            <Button size="sm" variant="outline" disabled={!hasDiff || committing} onClick={commitChanges}>
+              {committing ? <LoaderCircle className="animate-spin" /> : <IconBrandGithub />}
+              {session.agentBranch ? "Update branch" : "Commit changes"}
+            </Button>
+            {!session.prUrl && session.agentBranch && (
+              <Button size="sm" disabled={publishing} onClick={publishChanges}>
+                {publishing ? <LoaderCircle className="animate-spin" /> : <IconBrandGithub />}
+                Create pull request
+              </Button>
+            )}
+          </>
         ) : (
           // Leaves the app for GitHub's OAuth flow, so it has to be a real link.
           <Button

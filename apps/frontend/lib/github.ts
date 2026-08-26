@@ -1,9 +1,13 @@
 type GitHubRepo = {
   name?: string;
-  owner?: { login: string };
-  fork?: boolean;
-  parent?: { full_name: string };
+  full_name?: string;
+  html_url?: string;
+  clone_url?: string;
   default_branch: string;
+  private?: boolean;
+  fork?: boolean;
+  owner?: { login: string };
+  parent?: { full_name: string };
   permissions?: { push?: boolean };
 };
 
@@ -22,12 +26,40 @@ type FilePatch = {
   patch: string;
 };
 
-export type PublishPullRequestInput = {
+export type GitHubRepository = {
+  fullName: string;
+  url: string;
+  cloneUrl: string;
+  defaultBranch: string;
+  private: boolean;
+  canPush: boolean;
+};
+
+export type GitHubBranch = {
+  name: string;
+  sha: string;
+  protected: boolean;
+};
+
+export type CommitChangesInput = {
   accessToken: string;
   login: string;
   gitUrl: string;
   diff: string;
   title: string;
+  baseBranch?: string;
+  branch?: string;
+};
+
+export type CommitChangesResult = {
+  branch: string;
+  sha: string;
+  repository: string;
+  baseBranch: string;
+};
+
+export type PublishPullRequestInput = CommitChangesInput & {
+  publishRepository?: string;
 };
 
 const headers = (accessToken: string) => ({
@@ -47,9 +79,7 @@ async function github<T>(
     headers: { ...headers(accessToken), ...init.headers },
   });
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      message?: string;
-    } | null;
+    const body = (await response.json().catch(() => null)) as { message?: string } | null;
     throw new Error(body?.message || `GitHub request failed (${response.status}).`);
   }
   return response.json() as Promise<T>;
@@ -58,12 +88,27 @@ async function github<T>(
 function repositoryFromUrl(value: string) {
   const url = new URL(value);
   if (url.hostname.toLowerCase() !== "github.com") {
-    throw new Error("Pull requests are only supported for GitHub repositories.");
+    throw new Error("GitHub publishing requires a GitHub repository.");
   }
   const [owner, rawRepo] = url.pathname.split("/").filter(Boolean);
   const repo = rawRepo?.replace(/\.git$/, "");
   if (!owner || !repo) throw new Error("The repository URL is invalid.");
   return { owner, repo };
+}
+
+function repositoryFromName(value: string) {
+  const [owner, repo, ...rest] = value.split("/");
+  if (!owner || !repo || rest.length || !/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo)) {
+    throw new Error("The repository is invalid.");
+  }
+  return { owner, repo };
+}
+
+function branchName(value: string) {
+  if (!/^[\w./-]+$/.test(value) || value.startsWith("/") || value.endsWith("/") || value.includes("..")) {
+    throw new Error("The branch name is invalid.");
+  }
+  return value;
 }
 
 function patchPath(line: string) {
@@ -77,13 +122,11 @@ function patchPath(line: string) {
       throw new Error(`Unsupported Git path: ${path}`);
     }
   }
-  return path.startsWith("a/") || path.startsWith("b/")
-    ? path.slice(2)
-    : path;
+  return path.startsWith("a/") || path.startsWith("b/") ? path.slice(2) : path;
 }
 
 function parseDiff(diff: string): FilePatch[] {
-  if (!diff.trim()) throw new Error("There are no changes to publish.");
+  if (!diff.trim()) throw new Error("There are no changes to commit.");
   return diff
     .replace(/\r\n/g, "\n")
     .split(/(?=^diff --git )/m)
@@ -97,11 +140,7 @@ function parseDiff(diff: string): FilePatch[] {
       if (!oldHeader || !newHeader) {
         throw new Error("A changed file has an unsupported patch format.");
       }
-      return {
-        oldPath: patchPath(oldHeader),
-        newPath: patchPath(newHeader),
-        patch,
-      };
+      return { oldPath: patchPath(oldHeader), newPath: patchPath(newHeader), patch };
     });
 }
 
@@ -129,11 +168,11 @@ function applyPatch(original: string, patch: string) {
       const marker = line[0];
       const text = line.slice(1);
       if (marker === " ") {
-        if (source[cursor] !== text) throw new Error("The patch no longer matches the repository base.");
+        if (source[cursor] !== text) throw new Error("The patch no longer matches the selected branch.");
         output.push(text);
         cursor += 1;
       } else if (marker === "-") {
-        if (source[cursor] !== text) throw new Error("The patch no longer matches the repository base.");
+        if (source[cursor] !== text) throw new Error("The patch no longer matches the selected branch.");
         cursor += 1;
       } else if (marker === "+") {
         output.push(text);
@@ -142,9 +181,7 @@ function applyPatch(original: string, patch: string) {
   }
   output.push(...source.slice(cursor));
   const noFinalNewline = lines.some(
-    (line, index) =>
-      line === "\\ No newline at end of file" &&
-      (lines[index - 1]?.startsWith("+") || lines[index - 1]?.startsWith(" ")),
+    (line, index) => line === "\\ No newline at end of file" && (lines[index - 1]?.startsWith("+") || lines[index - 1]?.startsWith(" ")),
   );
   return `${output.join("\n")}${noFinalNewline ? "" : "\n"}`;
 }
@@ -172,61 +209,66 @@ async function targetRepository(
   let forkOwner = login;
   let forkRepo = repo;
   try {
-    const created = await github<GitHubRepo>(
-      accessToken,
-      `/repos/${owner}/${repo}/forks`,
-      {
-        method: "POST",
-        body: JSON.stringify({ default_branch_only: true }),
-      },
-    );
+    const created = await github<GitHubRepo>(accessToken, `/repos/${owner}/${repo}/forks`, {
+      method: "POST",
+      body: JSON.stringify({ default_branch_only: false }),
+    });
     forkOwner = created.owner?.login || login;
     forkRepo = created.name || repo;
   } catch (error) {
-    const existing = await github<GitHubRepo>(
-      accessToken,
-      `/repos/${login}/${repo}`,
-    ).catch(() => null);
+    const existing = await github<GitHubRepo>(accessToken, `/repos/${login}/${repo}`).catch(() => null);
     const expectedParent = `${owner}/${repo}`.toLowerCase();
-    if (
-      !existing?.fork ||
-      existing.parent?.full_name.toLowerCase() !== expectedParent
-    ) {
-      throw error;
-    }
+    if (!existing?.fork || existing.parent?.full_name.toLowerCase() !== expectedParent) throw error;
   }
   await waitForFork(accessToken, forkOwner, forkRepo);
   return { owner: forkOwner, repo: forkRepo };
 }
 
-export async function publishPullRequest(input: PublishPullRequestInput) {
+export async function listRepositories(accessToken: string): Promise<GitHubRepository[]> {
+  const repos = await github<GitHubRepo[]>(
+    accessToken,
+    "/user/repos?affiliation=owner,collaborator,organization&sort=updated&direction=desc&per_page=100",
+  );
+  return repos
+    .filter((repo) => repo.full_name && repo.html_url && repo.clone_url && repo.default_branch)
+    .map((repo) => ({
+      fullName: repo.full_name!,
+      url: repo.html_url!,
+      cloneUrl: repo.clone_url!,
+      defaultBranch: repo.default_branch,
+      private: Boolean(repo.private),
+      canPush: Boolean(repo.permissions?.push),
+    }));
+}
+
+export async function listBranches(accessToken: string, repository: string): Promise<GitHubBranch[]> {
+  const { owner, repo } = repositoryFromName(repository);
+  const branches = await github<Array<{ name: string; protected: boolean; commit: { sha: string } }>>(
+    accessToken,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100`,
+  );
+  return branches.map((branch) => ({ name: branch.name, sha: branch.commit.sha, protected: branch.protected }));
+}
+
+export async function commitChanges(input: CommitChangesInput): Promise<CommitChangesResult> {
   const source = repositoryFromUrl(input.gitUrl);
   const patches = parseDiff(input.diff);
-  const upstream = await github<GitHubRepo>(
+  const upstream = await github<GitHubRepo>(input.accessToken, `/repos/${source.owner}/${source.repo}`);
+  const baseBranch = branchName(input.baseBranch || upstream.default_branch);
+  const sourceRef = await github<{ object: { sha: string } }>(
     input.accessToken,
-    `/repos/${source.owner}/${source.repo}`,
+    `/repos/${source.owner}/${source.repo}/git/ref/heads/${encodeURIComponent(baseBranch)}`,
   );
-  const target = await targetRepository(
+  const sourceCommit = await github<{ tree: { sha: string } }>(
     input.accessToken,
-    input.login,
-    source.owner,
-    source.repo,
-    upstream,
+    `/repos/${source.owner}/${source.repo}/git/commits/${sourceRef.object.sha}`,
   );
-  const baseBranch = upstream.default_branch;
-  const ref = await github<{ object: { sha: string } }>(
+  const sourceTree = await github<GitHubTree>(
     input.accessToken,
-    `/repos/${target.owner}/${target.repo}/git/ref/heads/${encodeURIComponent(baseBranch)}`,
+    `/repos/${source.owner}/${source.repo}/git/trees/${sourceCommit.tree.sha}?recursive=1`,
   );
-  const commit = await github<{ tree: { sha: string } }>(
-    input.accessToken,
-    `/repos/${target.owner}/${target.repo}/git/commits/${ref.object.sha}`,
-  );
-  const tree = await github<GitHubTree>(
-    input.accessToken,
-    `/repos/${target.owner}/${target.repo}/git/trees/${commit.tree.sha}?recursive=1`,
-  );
-  const files = new Map(tree.tree.map((entry) => [entry.path, entry]));
+  const target = await targetRepository(input.accessToken, input.login, source.owner, source.repo, upstream);
+  const files = new Map(sourceTree.tree.map((entry) => [entry.path, entry]));
   const entries: Array<{ path: string; mode: string; type: "blob"; sha: string | null }> = [];
 
   for (const file of patches) {
@@ -240,53 +282,57 @@ export async function publishPullRequest(input: PublishPullRequestInput) {
     if (existing) {
       const blob = await github<{ content: string; encoding: string }>(
         input.accessToken,
-        `/repos/${target.owner}/${target.repo}/git/blobs/${existing.sha}`,
+        `/repos/${source.owner}/${source.repo}/git/blobs/${existing.sha}`,
       );
       if (blob.encoding !== "base64") throw new Error(`Could not read ${file.oldPath}.`);
       original = Buffer.from(blob.content, "base64").toString("utf8");
     }
     const content = applyPatch(original, file.patch);
-    const blob = await github<{ sha: string }>(
-      input.accessToken,
-      `/repos/${target.owner}/${target.repo}/git/blobs`,
-      { method: "POST", body: JSON.stringify({ content, encoding: "utf-8" }) },
-    );
+    const blob = await github<{ sha: string }>(input.accessToken, `/repos/${target.owner}/${target.repo}/git/blobs`, {
+      method: "POST",
+      body: JSON.stringify({ content, encoding: "utf-8" }),
+    });
     if (file.oldPath && file.oldPath !== file.newPath) {
       entries.push({ path: file.oldPath, mode: "100644", type: "blob", sha: null });
     }
-    entries.push({
-      path: file.newPath,
-      mode: existing?.mode || "100644",
-      type: "blob",
-      sha: blob.sha,
-    });
+    entries.push({ path: file.newPath, mode: existing?.mode || "100644", type: "blob", sha: blob.sha });
   }
 
-  const nextTree = await github<{ sha: string }>(
-    input.accessToken,
-    `/repos/${target.owner}/${target.repo}/git/trees`,
-    {
-      method: "POST",
-      body: JSON.stringify({ base_tree: commit.tree.sha, tree: entries }),
-    },
-  );
-  const nextCommit = await github<{ sha: string }>(
-    input.accessToken,
-    `/repos/${target.owner}/${target.repo}/git/commits`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        message: input.title,
-        tree: nextTree.sha,
-        parents: [ref.object.sha],
-      }),
-    },
-  );
-  const branch = `opendevin/${Date.now().toString(36)}`;
-  await github(input.accessToken, `/repos/${target.owner}/${target.repo}/git/refs`, {
+  const nextTree = await github<{ sha: string }>(input.accessToken, `/repos/${target.owner}/${target.repo}/git/trees`, {
     method: "POST",
-    body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: nextCommit.sha }),
+    body: JSON.stringify({ base_tree: sourceCommit.tree.sha, tree: entries }),
   });
+  const nextCommit = await github<{ sha: string }>(input.accessToken, `/repos/${target.owner}/${target.repo}/git/commits`, {
+    method: "POST",
+    body: JSON.stringify({ message: input.title, tree: nextTree.sha, parents: [sourceRef.object.sha] }),
+  });
+  const branch = branchName(input.branch || `opendevin/${Date.now().toString(36)}`);
+  try {
+    await github(input.accessToken, `/repos/${target.owner}/${target.repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ sha: nextCommit.sha, force: true }),
+    });
+  } catch {
+    await github(input.accessToken, `/repos/${target.owner}/${target.repo}/git/refs`, {
+      method: "POST",
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: nextCommit.sha }),
+    });
+  }
+  return { branch, sha: nextCommit.sha, repository: `${target.owner}/${target.repo}`, baseBranch };
+}
+
+export async function createPullRequest(input: {
+  accessToken: string;
+  gitUrl: string;
+  title: string;
+  baseBranch: string;
+  branch: string;
+  publishRepository: string;
+}) {
+  const source = repositoryFromUrl(input.gitUrl);
+  const target = repositoryFromName(input.publishRepository);
+  const branch = branchName(input.branch);
+  const baseBranch = branchName(input.baseBranch);
   const pull = await github<{ number: number; html_url: string }>(
     input.accessToken,
     `/repos/${source.owner}/${source.repo}/pulls`,
@@ -301,4 +347,16 @@ export async function publishPullRequest(input: PublishPullRequestInput) {
     },
   );
   return { number: pull.number, url: pull.html_url };
+}
+
+export async function publishPullRequest(input: PublishPullRequestInput) {
+  const commit = await commitChanges(input);
+  return createPullRequest({
+    accessToken: input.accessToken,
+    gitUrl: input.gitUrl,
+    title: input.title,
+    baseBranch: commit.baseBranch,
+    branch: commit.branch,
+    publishRepository: input.publishRepository || commit.repository,
+  });
 }

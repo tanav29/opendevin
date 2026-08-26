@@ -1,5 +1,7 @@
 # OpenDevin
 
+# GH APP LINK - https://github.com/settings/apps/tp-opendevin
+
 OpenDevin is a local autonomous coding workspace. It uses an AI model (via OpenRouter) to plan and edit code inside an isolated sandbox, with a Next.js interface.
 
 ## What it does
@@ -50,12 +52,25 @@ GITHUB_CLIENT_SECRET="your-oauth-app-client-secret"
 GITHUB_COOKIE_SECRET="at-least-32-random-characters"
 ```
 
-For GitHub publishing, create a GitHub OAuth App with
+For repository publishing, create a GitHub OAuth App with
 `http://localhost:3000/api/github/callback` as its authorization callback URL.
 The app requests `public_repo` access. Tokens stay in an encrypted, HTTP-only
 cookie and are never sent to the agent sandbox. When the user cannot push to
 the source repository, OpenDevin creates or reuses their fork before opening
 the pull request.
+
+For application sign-in, create a second GitHub OAuth App. Its callback URL is
+`https://<your-convex-deployment>.convex.site/api/auth/callback/github` (find
+this HTTP Actions URL in the Convex dashboard). Set its credentials on Convex:
+
+```bash
+pnpm exec convex env set AUTH_GITHUB_ID "your-github-login-client-id"
+pnpm exec convex env set AUTH_GITHUB_SECRET "your-github-login-client-secret"
+```
+
+This GitHub login is what scopes projects and sessions to one user. It is
+separate from the repository-publishing OAuth app because GitHub OAuth Apps
+accept only one callback URL.
 
 ## Run locally
 

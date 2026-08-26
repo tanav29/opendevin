@@ -9,12 +9,16 @@ import {
   type ReactNode,
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ConvexProvider } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { ConvexAuthProvider, useAuthActions } from "@convex-dev/auth/react";
+import { IconBrandGithub } from "@tabler/icons-react";
 import { convex } from "@/lib/convex";
+import { Button } from "@/components/ui/button";
 
 export type Session = {
   id: string;
   git: string;
+  baseBranch?: string;
   status: string;
   archived: boolean;
   createdAt: string;
@@ -29,6 +33,9 @@ export type Session = {
   diff?: string;
   PRNumber?: number;
   prUrl?: string;
+  publishRepository?: string;
+  agentBranch?: string;
+  commitSha?: string;
 };
 
 export type Project = {
@@ -109,6 +116,25 @@ const SessionSelectionContext = createContext<{
   selectSession: (id: string | null) => void;
 } | null>(null);
 
+function AuthGate({ children }: { children: ReactNode }) {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  const { signIn } = useAuthActions();
+  if (isLoading) return <div className="grid min-h-screen place-items-center text-[13px] text-muted-foreground">Loading workspace…</div>;
+  if (isAuthenticated) return <>{children}</>;
+  return (
+    <div className="grid min-h-screen place-items-center bg-background px-6">
+      <div className="w-full max-w-sm rounded-xl border bg-surface-1 p-6 shadow-2xl shadow-black/10">
+        <p className="eyebrow">OpenDevin</p>
+        <h1 className="mt-2 text-xl font-medium tracking-[-0.02em]">Sign in to your workspace</h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">Projects and sessions are private to your GitHub account.</p>
+        <Button className="mt-5 w-full" onClick={() => void signIn("github")}>
+          <IconBrandGithub /> Continue with GitHub
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -126,13 +152,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ConvexProvider client={convex}>
-    <QueryClientProvider client={queryClient}>
-      <SessionSelectionContext.Provider value={{ activeSessionId, selectSession }}>
-        {children}
-      </SessionSelectionContext.Provider>
-    </QueryClientProvider>
-    </ConvexProvider>
+    <ConvexAuthProvider client={convex}>
+      <QueryClientProvider client={queryClient}>
+        <SessionSelectionContext.Provider value={{ activeSessionId, selectSession }}>
+          <AuthGate>{children}</AuthGate>
+        </SessionSelectionContext.Provider>
+      </QueryClientProvider>
+    </ConvexAuthProvider>
   );
 }
 

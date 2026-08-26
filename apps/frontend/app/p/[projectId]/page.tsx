@@ -7,6 +7,7 @@ import { ArrowUpRight, ChevronRight, FolderGit2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Composer } from "@/components/chat/composer";
+import { GitHubRepositoryBranchPicker } from "@/components/github/repository-branch-picker";
 import {
   mapSessions,
   sessionTitle,
@@ -97,6 +98,7 @@ export default function ProjectPage() {
     [sessionsResult],
   );
   const [creating, setCreating] = useState(false);
+  const [baseBranch, setBaseBranch] = useState<string>();
   const working = sessions.filter((session) => session.status === "running");
   const rest = sessions.filter((session) => session.status !== "running");
 
@@ -110,6 +112,7 @@ export default function ProjectPage() {
         git: project.git,
         status: "idle",
         title: task.slice(0, 80),
+        baseBranch,
       });
       if (!session) throw new Error("Could not create the session.");
       toast.success("Session started.", {
@@ -170,6 +173,12 @@ export default function ProjectPage() {
             </span>{" "}
             checked out, so they never step on each other.
           </p>
+
+          <GitHubRepositoryBranchPicker
+            value={{ git: project?.git || "", baseBranch }}
+            lockRepository
+            onChange={({ baseBranch: nextBranch }) => setBaseBranch(nextBranch)}
+          />
 
           <div className="mt-4 -mx-3 sm:-mx-4">
             <Composer

@@ -74,7 +74,7 @@ function SessionRow({
         onClick={onOpen}
         render={<button type="button" />}
         title={`${sessionTitle(session)} · ${statusLabel(session.status)}`}
-        className="w-full pr-14 text-left"
+        className="w-full text-left"
       >
         <StatusDot status={session.archived ? "stopped" : session.status} />
         <span className="min-w-0 flex-1 truncate text-[12.5px]">

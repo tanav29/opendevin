@@ -6,6 +6,7 @@ import { useMutation, useQuery as useConvexQuery } from "convex/react";
 import { ArrowRight, FolderGit2, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { GitHubRepositoryBranchPicker } from "@/components/github/repository-branch-picker";
 import { useSessionSelection } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,7 @@ export default function NewPage() {
     | undefined;
   const [prompt, setPrompt] = useState("");
   const [gitUrl, setGitUrl] = useState("");
+  const [baseBranch, setBaseBranch] = useState<string>();
   const [creating, setCreating] = useState(false);
 
   const url = gitUrl.trim();
@@ -95,6 +97,7 @@ export default function NewPage() {
         git: url,
         status: "idle",
         title: task.slice(0, 80),
+        baseBranch,
       });
       if (!session) throw new Error("Could not create the session.");
 
@@ -141,17 +144,27 @@ export default function NewPage() {
 
           <Field
             label="Repository URL"
-            hint="Public repositories on GitHub, GitLab, or Bitbucket."
+            hint="Paste a public URL, or choose a repository you connected from GitHub."
           >
             <Input
               value={gitUrl}
-              onChange={(event) => setGitUrl(event.target.value)}
+              onChange={(event) => {
+                setGitUrl(event.target.value);
+                setBaseBranch(undefined);
+              }}
               placeholder="https://github.com/owner/repository"
               autoFocus
               spellCheck={false}
               autoCapitalize="none"
               aria-invalid={url.length > 0 && !validUrl}
               className="mono text-[13px]"
+            />
+            <GitHubRepositoryBranchPicker
+              value={{ git: gitUrl, baseBranch }}
+              onChange={({ git, baseBranch: nextBranch }) => {
+                setGitUrl(git);
+                setBaseBranch(nextBranch);
+              }}
             />
             <span
               className={cn(
