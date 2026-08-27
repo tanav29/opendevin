@@ -54,6 +54,7 @@ export function GitHubRepositoryBranchPicker({
 
   useEffect(() => {
     if (!connected) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingRepos(true);
     void githubFetch("/api/github/repositories")
       .then(async (r) => {

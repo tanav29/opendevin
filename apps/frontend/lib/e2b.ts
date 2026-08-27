@@ -12,7 +12,7 @@ export async function findSandbox(sessionId: string) {
   return info ? Sandbox.connect(info.sandboxId, { timeoutMs: 3_600_000 }) : null;
 }
 
-export async function getSandbox(sessionId: string, git: string, baseBranch?: string) {
+export async function getSandbox(sessionId: string, git: string, baseBranch?: string, accessToken?: string) {
   const existing = await findSandbox(sessionId);
   if (existing) return existing;
 
@@ -22,8 +22,11 @@ export async function getSandbox(sessionId: string, git: string, baseBranch?: st
     allowInternetAccess: true,
   });
   const branch = baseBranch ? ` --branch ${shellQuote(baseBranch)} --single-branch` : "";
+  const auth = accessToken
+    ? ` -c http.extraheader=${shellQuote(`AUTHORIZATION: bearer ${accessToken}`)}`
+    : "";
   const result = await sandbox.commands.run(
-    `git clone${branch} ${shellQuote(git)} ${WORKSPACE}`,
+    `git${auth} clone${branch} ${shellQuote(git)} ${WORKSPACE}`,
     { timeoutMs: 120_000 },
   );
   if (result.exitCode !== 0) throw new Error(result.stderr || "Could not clone the repository.");

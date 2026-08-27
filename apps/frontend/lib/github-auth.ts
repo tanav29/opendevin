@@ -1,6 +1,4 @@
 import { ConvexHttpClient } from "convex/browser";
-import type { NextRequest } from "next/server";
-
 import { api } from "@convex/_generated/api";
 
 export type GitHubAuth = { accessToken: string; login: string; avatarUrl: string };
@@ -10,7 +8,7 @@ export type GitHubCommitContext = Pick<GitHubAuth, "accessToken" | "login"> & {
   branch?: string;
 };
 
-export async function githubAuth(request: NextRequest): Promise<GitHubAuth | null> {
+export async function githubAuth(request: Request): Promise<GitHubAuth | null> {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return null;
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -22,7 +20,7 @@ export async function githubAuth(request: NextRequest): Promise<GitHubAuth | nul
 }
 
 export async function githubCommitContext(
-  request: NextRequest,
+  request: Request,
   sessionId: string,
 ): Promise<GitHubCommitContext | null> {
   const authorization = request.headers.get("authorization");

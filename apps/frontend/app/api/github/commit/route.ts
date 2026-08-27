@@ -25,7 +25,8 @@ export async function POST(request: NextRequest) {
     if (repositoryRoot.trim() !== WORKSPACE) {
       return NextResponse.json({ error: "Sandbox repository is invalid." }, { status: 409 });
     }
-    const { stdout: diff } = await sandbox.commands.run("git diff --no-ext-diff --unified=3 HEAD", { cwd: WORKSPACE });
+    await sandbox.commands.run("git add -N -- .", { cwd: WORKSPACE });
+    const { stdout: diff } = await sandbox.commands.run("git diff --no-ext-diff --unified=3 HEAD -- .", { cwd: WORKSPACE });
     if (!diff.trim()) return NextResponse.json({ error: "There are no changes to commit." }, { status: 400 });
     if (Buffer.byteLength(diff, "utf8") > MAX_DIFF_SIZE) return NextResponse.json({ error: "The diff is too large to commit." }, { status: 413 });
 

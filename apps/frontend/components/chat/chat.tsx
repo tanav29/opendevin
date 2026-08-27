@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "convex/react";
+import { useAuthToken } from "@convex-dev/auth/react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { ArrowDown, Hammer, Play, Sparkles } from "lucide-react";
@@ -29,6 +30,7 @@ const PINNED_SLACK = 80;
 
 export function Chat({ session, project }: { session: Session; project?: Project }) {
   const update = useMutation(api.sessions.update);
+  const authToken = useAuthToken();
   const initialMessages = useMemo(() => {
     try {
       const saved = loadChat(session.id);
@@ -61,7 +63,7 @@ export function Chat({ session, project }: { session: Session; project?: Project
   const agent = useChat({
     id: session.id,
     messages: initialMessages,
-    transport: new DefaultChatTransport({ api: "/api/chat", body: { sessionId: session.id, git: session.git, baseBranch: session.baseBranch, envVars: project?.envVars, devCommand: project?.devCommand, buildCommand: project?.buildCommand } }),
+    transport: new DefaultChatTransport({ api: "/api/chat", headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined, body: { sessionId: session.id, git: session.git, baseBranch: session.baseBranch, envVars: project?.envVars, devCommand: project?.devCommand, buildCommand: project?.buildCommand } }),
     onFinish({ messages }) {
       try { window.localStorage.setItem(`opendevin:chat:${session.id}`, JSON.stringify(messages)); } catch { /* best effort */ }
       void fetch(`/api/chat/diff?sessionId=${encodeURIComponent(session.id)}`)

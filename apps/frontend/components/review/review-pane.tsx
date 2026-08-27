@@ -10,9 +10,7 @@ import {
   ExternalLink,
   FileDiff,
   LoaderCircle,
-  PanelRightClose,
-  PanelRightOpen,
-  Globe,
+  RotateCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -134,24 +132,54 @@ function FileRow({
 
 export function ReviewPane({
   session,
-  collapsed,
-  onToggle,
-  onPreview,
   className,
   style,
 }: {
   session: Session;
-  collapsed: boolean;
-  onToggle: () => void;
-  onPreview: () => void;
   className?: string;
   style?: CSSProperties;
 }) {
   const updateSession = useMutation(api.sessions.update);
   const githubFetch = useGitHubFetch();
   const github = useGitHubSession();
-  const patch = useMemo(() => parsePatch(session.diff), [session.diff]);
+  const [currentDiff, setCurrentDiff] = useState(session.diff);
+  const [changesError, setChangesError] = useState<string>();
+  const [refreshing, setRefreshing] = useState(false);
+  const patch = useMemo(() => parsePatch(currentDiff), [currentDiff]);
   const highlighter = useHighlighter();
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCurrentDiff(session.diff);
+  }, [session.diff]);
+
+
+  const refreshChanges = async () => {
+    setRefreshing(true);
+    setChangesError(undefined);
+    try {
+      const response = await fetch(`/api/chat/diff?sessionId=${encodeURIComponent(session.id)}`, { cache: "no-store" });
+      const result = (await response.json()) as { diff?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not load changes.");
+      setCurrentDiff(result.diff ?? "");
+    } catch (error) {
+      setChangesError(error instanceof Error ? error.message : "Could not load changes.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (session.status !== "running") return;
+    const initial = window.setTimeout(() => void refreshChanges(), 0);
+    const interval = window.setInterval(() => void refreshChanges(), 5_000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  // Refreshing is intentionally bound to the current session and stream state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, session.status]);
   const [publishing, setPublishing] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitOpen, setCommitOpen] = useState(false);
@@ -251,61 +279,11 @@ export function ReviewPane({
     }
   }
 
-  if (collapsed) {
-    return (
-      <aside style={style} className={cn("flex w-10 shrink-0 flex-col items-center border-l bg-surface-1 py-2", className)}>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button variant="ghost" size="icon-sm" aria-label="Show changes" onClick={onToggle}>
-                <PanelRightOpen />
-              </Button>
-            }
-          />
-          <TooltipContent side="left">Show changes</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button variant="ghost" size="icon-sm" aria-label="Show preview" onClick={onPreview}>
-                <Globe />
-              </Button>
-            }
-          />
-          <TooltipContent side="left">Show preview</TooltipContent>
-        </Tooltip>
-        {hasDiff && (
-          <span data-numeric className="mono mt-3 rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-medium text-brand-foreground">
-            {patch.files.length}
-          </span>
-        )}
-      </aside>
-    );
-  }
 
   return (
-    <aside style={style} className={cn("flex min-h-0 min-w-0 flex-1 flex-col border-l bg-background", className)}>
-      <header className="flex h-11 shrink-0 items-center gap-1.5 border-b bg-background px-1.5">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Hide changes"
-                onClick={onToggle}
-              >
-                <PanelRightClose />
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom">Hide changes</TooltipContent>
-        </Tooltip>
-
-        <span className="text-[13px] font-medium tracking-[-0.01em]">Changes</span>
-        <Button variant="ghost" size="sm" onClick={onPreview}>
-          <Globe /> Preview
-        </Button>
+    <div style={style} className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-background", className)}>
+      <header className="flex h-10 shrink-0 items-center gap-1.5 border-b bg-background px-2">
+        <span className="text-[13px] font-medium tracking-[-0.01em]">Changed files</span>
         {hasDiff && (
           <span className="hidden items-center gap-2 sm:flex">
             <span data-numeric className="mono rounded-full bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted-foreground">
@@ -318,19 +296,11 @@ export function ReviewPane({
         <div className="flex-1" />
 
         <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Download patch"
-                disabled={!hasDiff}
-                onClick={downloadPatch}
-              >
-                <Download />
-              </Button>
-            }
-          />
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Refresh changes" disabled={refreshing} onClick={() => void refreshChanges()}>{refreshing ? <LoaderCircle className="animate-spin" /> : <RotateCw />}</Button>} />
+          <TooltipContent side="bottom">Refresh changes</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Download patch" disabled={!hasDiff} onClick={downloadPatch}><Download /></Button>} />
           <TooltipContent side="bottom">Download patch</TooltipContent>
         </Tooltip>
 
@@ -377,7 +347,9 @@ export function ReviewPane({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {!hasDiff ? (
+        {changesError ? (
+          <div role="alert" className="m-3 rounded-md border border-danger/30 bg-danger-muted px-3 py-2 text-xs text-danger">{changesError}</div>
+        ) : !hasDiff ? (
           <div className="flex h-full items-center justify-center px-6 py-10">
             <div className="max-w-64 text-center">
               <span className="mx-auto grid size-9 place-items-center rounded-xl border bg-surface-1 text-muted-foreground"><FileDiff className="size-4" /></span>
@@ -448,6 +420,6 @@ export function ReviewPane({
           </div>
         </div>
       )}
-    </aside>
+    </div>
   );
 }

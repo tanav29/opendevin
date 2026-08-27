@@ -1,4 +1,5 @@
 import { convertToModelMessages, streamText } from "ai";
+import { githubAuth } from "@/lib/github-auth";
 import { createTools, instructions, model, stepCountIs } from "@/agent/agent";
 import { getSandbox, WORKSPACE } from "@/lib/e2b";
 
@@ -6,9 +7,19 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const body = (await request.json()) as { messages?: unknown[]; sessionId?: string; git?: string; baseBranch?: string; envVars?: string; devCommand?: string; buildCommand?: string };
   if (!body.sessionId || !body.git || !Array.isArray(body.messages)) return Response.json({ error: "sessionId, git, and messages are required" }, { status: 400 });
+  if (body.messages.length === 0) return Response.json({ error: "A message is required." }, { status: 400 });
   if (!/^[a-zA-Z0-9_-]+$/.test(body.sessionId)) return Response.json({ error: "Invalid session id" }, { status: 400 });
 
-  const sandbox = await getSandbox(body.sessionId, body.git, body.baseBranch);
+  let sandbox;
+  try {
+    const github = await githubAuth(request);
+    sandbox = await getSandbox(body.sessionId, body.git, body.baseBranch, github?.accessToken);
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Could not prepare the sandbox." },
+      { status: 502 },
+    );
+  }
 
   const result = streamText({
     model,

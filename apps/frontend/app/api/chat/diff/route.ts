@@ -7,7 +7,8 @@ export async function GET(request: Request) {
   const sandbox = await findSandbox(sessionId);
   if (!sandbox) return Response.json({ diff: "" });
   try {
-    const { stdout } = await sandbox.commands.run("git diff --no-ext-diff --unified=3", { cwd: WORKSPACE });
+    await sandbox.commands.run("git add -N -- .", { cwd: WORKSPACE });
+    const { stdout } = await sandbox.commands.run("git diff --no-ext-diff --unified=3 HEAD -- .", { cwd: WORKSPACE });
     return Response.json({ diff: stdout });
   } catch {
     return Response.json({ diff: "" });

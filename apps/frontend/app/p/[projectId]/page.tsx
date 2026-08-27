@@ -72,6 +72,7 @@ function ProjectSettings({ project, onSaved }: { project: { _id: string; envVars
     if (!project) return;
     try {
       const parsed = JSON.parse(project.envVars ?? "[]");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEnv(Array.isArray(parsed) ? parsed : []);
     } catch { setEnv([]); }
     setDevCommand(project.devCommand ?? "");
