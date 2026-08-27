@@ -10,7 +10,7 @@ import {
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useConvexAuth } from "convex/react";
-import { ConvexAuthProvider, useAuthActions } from "@convex-dev/auth/react";
+import { ConvexAuthProvider, useAuthActions, useAuthToken } from "@convex-dev/auth/react";
 import { IconBrandGithub } from "@tabler/icons-react";
 import { convex } from "@/lib/convex";
 import { Button } from "@/components/ui/button";
@@ -159,6 +159,18 @@ export function AppProviders({ children }: { children: ReactNode }) {
         </SessionSelectionContext.Provider>
       </QueryClientProvider>
     </ConvexAuthProvider>
+  );
+}
+
+export function useGitHubFetch() {
+  const token = useAuthToken();
+  return useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      return fetch(input, { ...init, headers });
+    },
+    [token],
   );
 }
 

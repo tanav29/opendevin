@@ -144,21 +144,7 @@ export default function NewPage() {
 
           <Field
             label="Repository URL"
-            hint="Paste a public URL, or choose a repository you connected from GitHub."
-          >
-            <Input
-              value={gitUrl}
-              onChange={(event) => {
-                setGitUrl(event.target.value);
-                setBaseBranch(undefined);
-              }}
-              placeholder="https://github.com/owner/repository"
-              autoFocus
-              spellCheck={false}
-              autoCapitalize="none"
-              aria-invalid={url.length > 0 && !validUrl}
-              className="mono text-[13px]"
-            />
+         >
             <GitHubRepositoryBranchPicker
               value={{ git: gitUrl, baseBranch }}
               onChange={({ git, baseBranch: nextBranch }) => {

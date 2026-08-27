@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listRepositories } from "@/lib/github";
-import { GITHUB_SESSION_COOKIE, type GitHubSession, unseal } from "@/lib/github-session";
+import { githubAuth } from "@/lib/github-auth";
 
 export async function GET(request: NextRequest) {
-  const cookie = request.cookies.get(GITHUB_SESSION_COOKIE)?.value;
-  const session = cookie ? unseal<GitHubSession>(cookie) : null;
-  if (!session) return NextResponse.json({ error: "Connect GitHub first." }, { status: 401 });
+  const session = await githubAuth(request);
+  if (!session) return NextResponse.json({ error: "Sign in with GitHub to continue." }, { status: 401 });
 
   try {
     return NextResponse.json({ repositories: await listRepositories(session.accessToken) });

@@ -51,6 +51,7 @@ export function Chat({ session }: { session: Session }) {
   const saved = useMemo(() => loadChat(session.id), [session.id]);
   const eventsRef = useRef<readonly MessageStreamEvent[]>(saved.events);
   const [responding, setResponding] = useState(false);
+  const initialPromptStarted = useRef(false);
 
   const agent = useEveAgent({
     initialEvents: saved.events,
@@ -81,6 +82,17 @@ export function Chat({ session }: { session: Session }) {
   useEffect(() => {
     if (agent.error?.message) toast.error(agent.error.message);
   }, [agent.error?.message]);
+
+  // The first turn can start before Eve has reported its session ID through
+  // onSessionChange. Persist status by the Convex row ID as soon as the
+  // client knows the turn is live so the sidebar does not stay idle.
+  useEffect(() => {
+    if (agent.status === "submitted" || agent.status === "streaming") {
+      void update({ id: session.id as never, status: "running" });
+    } else if (agent.status === "error") {
+      void update({ id: session.id as never, status: "failed" });
+    }
+  }, [agent.status, session.id, update]);
 
   /* -- Scrolling: follow the stream, but never yank a reading user down. -- */
   const viewport = useRef<HTMLDivElement>(null);
@@ -124,11 +136,17 @@ export function Chat({ session }: { session: Session }) {
 
   // A prompt typed on the project page starts the session's first turn here.
   useEffect(() => {
-    if (busy) return;
+    if (busy || initialPromptStarted.current) return;
     const initial = window.sessionStorage.getItem("opendevin:initial-prompt");
     if (!initial) return;
-    window.sessionStorage.removeItem("opendevin:initial-prompt");
-    queueMicrotask(() => void send(initial));
+    initialPromptStarted.current = true;
+    queueMicrotask(() => {
+      void send(initial).then(() => {
+        window.sessionStorage.removeItem("opendevin:initial-prompt");
+      }).catch(() => {
+        initialPromptStarted.current = false;
+      });
+    });
   }, [send, busy]);
 
   const stop = async () => {

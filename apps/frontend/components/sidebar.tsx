@@ -9,6 +9,7 @@ import {
   Command,
   FolderGit2,
   Plus,
+  Settings,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +32,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
@@ -174,6 +176,10 @@ function ProjectGroup({
 export function AppSidebar() {
   const projectsResult = useConvexQuery(api.projects.list, {});
   const sessionsResult = useConvexQuery(api.sessions.list, {});
+  const user = useConvexQuery(api.users.current, {}) as
+    | { name?: string; email?: string; image?: string }
+    | null
+    | undefined;
   const projects = mapProjects(projectsResult as unknown[] | undefined);
   const sessions = mapSessions(sessionsResult as unknown[] | undefined);
   const loading = projectsResult === undefined || sessionsResult === undefined;
@@ -356,6 +362,31 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
       </SidebarContent>
+
+      <SidebarFooter className="border-t p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="sm"
+              onClick={() => router.push("/settings")}
+              title="Account settings"
+            >
+              {user?.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.image} alt="" className="size-4 rounded-full" />
+              ) : (
+                <span className="grid size-4 rounded-full bg-surface-3 text-[8px] font-medium">
+                  {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-[12.5px]">
+                {user?.name || user?.email || "Account"}
+              </span>
+              <Settings className="size-3.5 text-muted-foreground" />
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

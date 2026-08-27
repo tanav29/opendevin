@@ -14,8 +14,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { sessionTitle, type Session } from "@/components/providers";
+import { sessionTitle, useGitHubFetch, type Session } from "@/components/providers";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -143,6 +144,7 @@ export function ReviewPane({
   style?: CSSProperties;
 }) {
   const updateSession = useMutation(api.sessions.update);
+  const githubFetch = useGitHubFetch();
   const patch = useMemo(() => parsePatch(session.diff), [session.diff]);
   const highlighter = useHighlighter();
   const [github, setGithub] = useState<
@@ -150,10 +152,12 @@ export function ReviewPane({
   >();
   const [publishing, setPublishing] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
   const hasDiff = patch.files.length > 0;
 
   useEffect(() => {
-    void fetch("/api/github/session")
+    void githubFetch("/api/github/session")
       .then((response) => response.json())
       .then((value) => setGithub(value as { connected: boolean }))
       .catch(() => setGithub({ connected: false }));
@@ -161,7 +165,7 @@ export function ReviewPane({
     if (status === "connected") toast.success("GitHub connected.");
     if (status === "error") toast.error("Could not connect GitHub.");
     if (status) window.history.replaceState({}, "", window.location.pathname);
-  }, []);
+  }, [githubFetch]);
 
   function downloadPatch() {
     if (!session.diff) return;
@@ -182,16 +186,17 @@ export function ReviewPane({
 
   async function commitChanges() {
     if (!session.diff || committing) return;
+    const title = commitMessage.trim() || sessionTitle(session);
     setCommitting(true);
     const loading = toast.loading(session.agentBranch ? "Updating agent branch…" : "Committing changes…");
     try {
-      const response = await fetch("/api/github/commit", {
+      const response = await githubFetch("/api/github/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           git: session.git,
           diff: session.diff,
-          title: sessionTitle(session),
+          title,
           baseBranch: session.baseBranch,
           branch: session.agentBranch || `opendevin/${session.id}`,
         }),
@@ -213,6 +218,7 @@ export function ReviewPane({
         publishRepository: result.repository,
         baseBranch: result.baseBranch,
       });
+      setCommitOpen(false);
       toast.success(session.agentBranch ? "Agent branch updated." : "Changes committed to the agent branch.", { id: loading });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not commit changes.", { id: loading });
@@ -226,7 +232,7 @@ export function ReviewPane({
     setPublishing(true);
     const loading = toast.loading("Creating pull request…");
     try {
-      const response = await fetch("/api/github/publish", {
+      const response = await githubFetch("/api/github/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -358,8 +364,16 @@ export function ReviewPane({
                 <ExternalLink />
               </Button>
             )}
-            <Button size="sm" variant="outline" disabled={!hasDiff || committing} onClick={commitChanges}>
-              {committing ? <LoaderCircle className="animate-spin" /> : <IconBrandGithub />}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!hasDiff || committing}
+              onClick={() => {
+                setCommitMessage(sessionTitle(session));
+                setCommitOpen(true);
+              }}
+            >
+              <IconBrandGithub />
               {session.agentBranch ? "Update branch" : "Commit changes"}
             </Button>
             {!session.prUrl && session.agentBranch && (
@@ -370,16 +384,9 @@ export function ReviewPane({
             )}
           </>
         ) : (
-          // Leaves the app for GitHub's OAuth flow, so it has to be a real link.
-          <Button
-            size="sm"
-            disabled={github === undefined}
-            nativeButton={false}
-            render={<a href="/api/github/login?returnTo=/" />}
-          >
-            <IconBrandGithub />
-            Connect GitHub
-          </Button>
+          <span className="text-xs text-muted-foreground">
+            GitHub repository permission required. Sign out and sign in again.
+          </span>
         )}
       </header>
 
@@ -415,6 +422,45 @@ export function ReviewPane({
           ))
         )}
       </div>
+
+      {commitOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="commit-title"
+            className="w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl"
+          >
+            <p className="eyebrow">Review commit</p>
+            <h2 id="commit-title" className="mt-2 text-base font-medium tracking-[-0.01em]">
+              {session.agentBranch ? "Update agent branch" : "Commit changes"}
+            </h2>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+              This commit will include {patch.files.length} {patch.files.length === 1 ? "changed file" : "changed files"} on {session.agentBranch || `opendevin/${session.id}`}.
+            </p>
+            <ul className="mono mt-3 max-h-32 space-y-1 overflow-y-auto rounded-md border bg-surface-1 p-2 text-[11px] text-muted-foreground">
+              {patch.files.map((file) => <li key={file.id} className="truncate">{file.path}</li>)}
+            </ul>
+            <label className="mt-4 block text-[13px] font-medium">
+              Commit message
+              <Textarea
+                value={commitMessage}
+                onChange={(event) => setCommitMessage(event.target.value)}
+                rows={3}
+                className="mt-1.5 resize-none text-[13px]"
+              />
+            </label>
+            <p className="mt-1.5 text-[11.5px] text-muted-foreground">Generated from the session title. Edit it before committing.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button size="sm" variant="outline" disabled={committing} onClick={() => setCommitOpen(false)}>Cancel</Button>
+              <Button size="sm" disabled={!commitMessage.trim() || committing} onClick={() => void commitChanges()}>
+                {committing && <LoaderCircle className="animate-spin" />}
+                Commit changes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
