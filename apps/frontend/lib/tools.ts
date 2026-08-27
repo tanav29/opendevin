@@ -1,5 +1,5 @@
 /**
- * Turns an eve tool call into one readable line: a verb, the thing it acted
+ * Turns a tool call into one readable line: a verb, the thing it acted
  * on, and a result chip. The agent's tools are a small, known set, so we
  * describe them properly instead of dumping JSON at the user.
  */
@@ -38,12 +38,12 @@ export type ToolDescriptor = {
 };
 
 export type ToolPartLike = {
-  toolName: string;
+  toolName?: string;
+  type?: string;
   state?: string;
   input?: unknown;
   output?: unknown;
   errorText?: string;
-  toolMetadata?: { eve?: { kind?: string; name?: string } };
 };
 
 const RUNNING_STATES = new Set(["input-streaming", "input-available"]);
@@ -51,7 +51,7 @@ const WAITING_STATES = new Set(["approval-requested"]);
 const FAILED_STATES = new Set(["output-error", "failed-parse", "error"]);
 const DENIED_STATES = new Set(["output-denied"]);
 
-/** eve namespaces tool names (`mcp:server/tool`); we want the last segment. */
+/** Namespaced tool names (`mcp:server/tool`) use their last segment. */
 export function toolBaseName(name: string) {
   return name.split(/[.:/]/).filter(Boolean).pop() ?? name;
 }
@@ -181,7 +181,7 @@ function chipFor(
 }
 
 export function describeTool(part: ToolPartLike): ToolDescriptor {
-  const base = toolBaseName(part.toolName);
+  const base = toolBaseName(part.toolName ?? part.type?.replace(/^tool-/, "") ?? "tool");
   const state = part.state ?? "";
   const running = RUNNING_STATES.has(state);
   const waiting = WAITING_STATES.has(state);

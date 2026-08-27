@@ -25,7 +25,15 @@ import {
 import { describeTool, toolBaseName, type ChipTone, type ToolKind } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 
-import type { EveDynamicToolPart } from "eve/react";
+export type AgentToolPart = {
+  type: string;
+  toolName?: string;
+  toolCallId: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+};
 
 const ICONS: Record<ToolKind, LucideIcon> = {
   shell: Terminal,
@@ -161,7 +169,7 @@ function TodoList({ input }: { input: unknown }) {
 }
 
 /** Terminal transcript: the command, then whatever it printed. */
-function ShellDetail({ part }: { part: EveDynamicToolPart }) {
+function ShellDetail({ part }: { part: AgentToolPart }) {
   const command = str(part.input, "command");
   const stdout = str(part.output, "stdout");
   const stderr = str(part.output, "stderr");
@@ -192,8 +200,8 @@ function ShellDetail({ part }: { part: EveDynamicToolPart }) {
   );
 }
 
-function ToolDetail({ part }: { part: EveDynamicToolPart }) {
-  const base = toolBaseName(part.toolName);
+function ToolDetail({ part }: { part: AgentToolPart }) {
+  const base = toolBaseName(part.toolName ?? part.type.replace(/^tool-/, ""));
 
   if (base === "bash") return <ShellDetail part={part} />;
   if (base === "todo") return <TodoList input={part.input} />;
@@ -246,7 +254,7 @@ function ToolDetail({ part }: { part: EveDynamicToolPart }) {
  * One action, on one line. Expands in place to the full input and output —
  * the sequence stays readable while any single step can be inspected.
  */
-export function ActivityNode({ part }: { part: EveDynamicToolPart }) {
+export function ActivityNode({ part }: { part: AgentToolPart }) {
   const [open, setOpen] = useState(false);
   const tool = describeTool(part);
   const Icon = ICONS[tool.kind];

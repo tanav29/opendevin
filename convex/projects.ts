@@ -47,6 +47,21 @@ export const remove = mutation({
   },
 });
 
+export const update = mutation({
+  args: {
+    id: v.id("projects"),
+    envVars: v.optional(v.string()),
+    devCommand: v.optional(v.string()),
+    buildCommand: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, ...changes }) => {
+    const project = await ctx.db.get(id);
+    if (!project || project.ownerId !== await ownerId(ctx)) throw new Error("Project not found.");
+    await ctx.db.patch(id, { ...changes, updatedAt: Date.now() });
+    return ctx.db.get(id);
+  },
+});
+
 // Legacy data has no owner and is intentionally excluded from all user queries.
 // Assign it explicitly from an admin migration instead of exposing it to the first
 // account that signs in.

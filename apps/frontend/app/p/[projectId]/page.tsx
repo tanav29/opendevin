@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery as useConvexQuery } from "convex/react";
-import { ArrowUpRight, ChevronRight, FolderGit2 } from "lucide-react";
+import { ArrowUpRight, ChevronRight, FolderGit2, Plus, Save, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Composer } from "@/components/chat/composer";
@@ -12,6 +12,8 @@ import { mapSessions, sessionTitle, useSessionSelection, type Session } from "@/
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
 import { InlineEmpty, SectionLabel } from "@/components/ui/empty-state";
 import { StatusDot, statusLabel } from "@/components/ui/status-dot";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { parsePatch } from "@/lib/diff";
 import { plural, repoName, timeAgo, timestamp } from "@/lib/format";
 import { api } from "@convex/_generated/api";
@@ -54,6 +56,62 @@ function SessionRow({ session, onOpen }: { session: Session; onOpen: () => void 
       )}
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5" />
     </button>
+  );
+}
+
+type EnvRow = { key: string; value: string };
+
+function ProjectSettings({ project, onSaved }: { project: { _id: string; envVars?: string; devCommand?: string; buildCommand?: string } | null | undefined; onSaved?: () => void }) {
+  const updateProject = useMutation(api.projects.update);
+  const [env, setEnv] = useState<EnvRow[]>([]);
+  const [devCommand, setDevCommand] = useState("");
+  const [buildCommand, setBuildCommand] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!project) return;
+    try {
+      const parsed = JSON.parse(project.envVars ?? "[]");
+      setEnv(Array.isArray(parsed) ? parsed : []);
+    } catch { setEnv([]); }
+    setDevCommand(project.devCommand ?? "");
+    setBuildCommand(project.buildCommand ?? "");
+  }, [project]);
+
+  if (!project) return null;
+  const projectId = project._id;
+  async function save() {
+    setSaving(true);
+    try {
+      const validEnv = env.filter((row) => row.key.trim());
+      await updateProject({ id: projectId as never, envVars: JSON.stringify(validEnv), devCommand: devCommand.trim(), buildCommand: buildCommand.trim() });
+      toast.success("Project settings saved.");
+      onSaved?.();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save project settings."); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <section className="mt-8 rounded-xl border bg-surface-1 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="eyebrow flex items-center gap-1.5"><Settings2 className="size-3" /> Project runtime</p>
+          <p className="mt-1 text-[12px] text-muted-foreground">Available to every session sandbox for this project.</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void save()} disabled={saving}><Save />{saving ? "Saving…" : "Save"}</Button>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <label className="block"><span className="text-[12px] font-medium">Dev command</span><Input className="mono mt-1.5 text-[12px]" value={devCommand} onChange={(e) => setDevCommand(e.target.value)} placeholder="pnpm dev" /></label>
+        <label className="block"><span className="text-[12px] font-medium">Build command</span><Input className="mono mt-1.5 text-[12px]" value={buildCommand} onChange={(e) => setBuildCommand(e.target.value)} placeholder="pnpm build" /></label>
+      </div>
+      <div className="mt-4">
+        <div className="flex items-center justify-between"><span className="text-[12px] font-medium">Environment variables</span><Button size="xs" variant="ghost" onClick={() => setEnv([...env, { key: "", value: "" }])}><Plus /> Add variable</Button></div>
+        <div className="mt-2 space-y-2">
+          {env.map((row, index) => <div className="flex gap-2" key={`${index}-${row.key}`}><Input className="mono text-[12px]" value={row.key} onChange={(e) => setEnv(env.map((item, i) => i === index ? { ...item, key: e.target.value } : item))} placeholder="KEY" aria-label="Variable name" /><Input className="mono text-[12px]" value={row.value} onChange={(e) => setEnv(env.map((item, i) => i === index ? { ...item, value: e.target.value } : item))} placeholder="value" aria-label="Variable value" type="password" /><Button size="icon-sm" variant="ghost" aria-label={`Remove ${row.key || "variable"}`} onClick={() => setEnv(env.filter((_, i) => i !== index))}><Trash2 /></Button></div>)}
+          {env.length === 0 && <p className="rounded-lg border border-dashed px-3 py-2.5 text-[11.5px] text-muted-foreground">No variables yet. Add values such as API keys or feature flags.</p>}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -151,6 +209,8 @@ export default function ProjectPage() {
             placeholder="Describe the task for this session…"
           />
         </div>
+
+        <ProjectSettings project={project} />
 
         {working.length > 0 && (
           <section className="mt-8">

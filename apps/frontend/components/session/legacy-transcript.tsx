@@ -13,7 +13,7 @@ type LegacyPart = {
 type LegacyMessage = { id?: string; role: string; parts: LegacyPart[] };
 
 /**
- * Sessions recorded before the eve runtime stored a plain UIMessage array.
+ * Read-only transcripts retained from older sessions.
  * They are read-only history, so they render as text plus a flat list of the
  * tool calls — enough to reread the session, without a live trace.
  */

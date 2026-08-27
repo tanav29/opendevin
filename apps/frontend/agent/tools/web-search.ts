@@ -1,9 +1,6 @@
-import { defineTool } from "eve/tools";
-import { z } from "zod";
-
 const SEARCH_TIMEOUT_MS = 15_000;
 
-async function search(query: string) {
+export async function searchWeb(query: string) {
   const response = await fetch(
     `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
     {
@@ -30,12 +27,3 @@ async function search(query: string) {
   }
   return { query, results };
 }
-
-export default defineTool({
-  description:
-    "Search the web for up-to-date information and return the top result titles, URLs, and snippets.",
-  inputSchema: z.object({ query: z.string().min(1) }),
-  async execute({ query }) {
-    return search(query);
-  },
-});

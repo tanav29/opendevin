@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { repoName, timeAgo, timestamp } from "@/lib/format";
 import { api } from "@convex/_generated/api";
 
-export function SessionHeader({ session, legacy }: { session?: Session | null; legacy?: boolean }) {
+export function SessionHeader({ session }: { session?: Session | null }) {
   const updateSession = useMutation(api.sessions.update);
   const { selectSession } = useSessionSelection();
   const confirm = useConfirm();
@@ -59,8 +59,8 @@ export function SessionHeader({ session, legacy }: { session?: Session | null; l
                   tabIndex={0}
                   className="flex shrink-0 items-center gap-1.5 rounded-full border bg-surface-1 px-2 py-1 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:border-border-strong hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
-                  <StatusDot status={legacy ? "stopped" : session.status} />
-                  <span className="hidden sm:inline">{legacy ? "Archived transcript" : statusLabel(session.status)}</span>
+                  <StatusDot status={session.status} />
+                  <span className="hidden sm:inline">{statusLabel(session.status)}</span>
                 </span>
               }
             />

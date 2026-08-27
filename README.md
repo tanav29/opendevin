@@ -14,29 +14,29 @@ OpenDevin turns a coding request into a direct, observable conversation:
 4. Review the changed files side by side.
 5. Download the patch, or connect GitHub to publish it as a branch and pull request.
 
-No plan approval gates or separate run pipeline. Sessions and chat history are persisted with Convex, and the session is driven by [eve](https://vercel.com/docs/ai-sdk/eve), Vercel's agent runtime — eve owns the durable session, sandbox, and tool calling; Convex stores the session metadata (repository, title, status, diff) that the sidebar and project pages render.
+No plan approval gates or separate run pipeline. Sessions and chat history are persisted with Convex, and the session is driven by a small AI SDK agent using OpenRouter. The agent owns the tool loop and per-session workspace; Convex stores the session metadata (repository, title, status, diff) that the sidebar and project pages render.
 
 This project is designed for local experimentation and human-in-the-loop development—not unattended production changes. The repository flow accepts public GitHub, GitLab, and Bitbucket URLs. Patch downloads work for all three; direct pull request publishing is available for GitHub repositories.
 
 ## Architecture
 
-- **Frontend:** Next.js + React, chat, activity, and diff review. The Next.js dev server proxies `/eve/v1/*` to the eve runtime (`withEve` in `next.config.ts`).
-- **Agent:** an authored eve agent in `apps/frontend/agent/` — model (OpenRouter), instructions, repo-clone sandbox setup, web search tool, and Convex sync hooks.
-- **Sandbox:** eve's default sandbox backend (Docker locally; Vercel sandbox or microsandbox depending on availability). The session's repository is cloned into `/workspace` when the sandbox first starts.
-- **Persistence:** Convex stores sessions and projects. Each session links to its durable eve session id; eve replays the conversation from its own stream.
+- **Frontend:** Next.js + React, chat, activity, and diff review. `/api/chat` streams AI SDK UI messages.
+- **Agent:** an authored AI SDK agent in `apps/frontend/agent/` using OpenRouter, repository tools, and web search.
+- **Sandbox:** each session gets a persistent E2B cloud sandbox with its repository checked out at `/workspace`.
+- **Persistence:** Convex stores sessions, projects, and the serialized AI SDK message transcript.
 
 ## Repository layout
 
 This is a [pnpm](https://pnpm.io) + [Turborepo](https://turbo.build/repo) monorepo:
 
-- `apps/frontend` — Next.js web application + eve agent (`:3000`)
+- `apps/frontend` — Next.js web application + AI SDK agent (`:3000`)
 - `convex/` — Convex schema and functions (shared deployment)
 
 ## Prerequisites
 
-- Node.js 22 or newer (eve requires Node ≥ 22)
+- Node.js 22 or newer
 - pnpm (`corepack enable`)
-- [Docker](https://www.docker.com/products/docker-desktop/) for the sandbox (no Docker → the agent runs without shell access)
+- An [E2B API key](https://e2b.dev/docs/getting-started/api-key) for isolated cloud sandboxes
 - An [OpenRouter API key](https://openrouter.ai) for the model
 
 ## Configuration
@@ -46,6 +46,7 @@ Create `apps/frontend/.env` (see `apps/frontend/.env.example`):
 ```dotenv
 NEXT_PUBLIC_CONVEX_URL="https://your-deployment.convex.cloud"
 OPENROUTER_API_KEY="your-openrouter-api-key"
+E2B_API_KEY="your-e2b-api-key"
 MODEL="openai/gpt-5.4-mini"
 GITHUB_CLIENT_ID="your-oauth-app-client-id"
 GITHUB_CLIENT_SECRET="your-oauth-app-client-secret"
@@ -80,12 +81,12 @@ pnpm convex:dev
 pnpm dev
 ```
 
-Open `http://localhost:3000`. Turborepo starts the frontend, and the eve runtime comes up alongside Next.js automatically.
+Open `http://localhost:3000`. Turborepo starts the frontend and its AI SDK chat route.
 
 ## Common commands
 
 ```bash
-pnpm dev          # Start the frontend (with the eve dev server)
+pnpm dev          # Start the frontend
 pnpm build        # Build/check all workspaces
 pnpm lint         # Lint all workspaces
 pnpm format       # Check formatting

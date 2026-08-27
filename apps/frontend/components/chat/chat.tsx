@@ -2,54 +2,41 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "convex/react";
-import { useEveAgent } from "eve/react";
-import type { ClientSessionState, MessageStreamEvent } from "eve/client";
-import { ArrowDown } from "lucide-react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, type UIMessage } from "ai";
+import { ArrowDown, Hammer, Play } from "lucide-react";
 import { toast } from "sonner";
 
 import { Composer } from "@/components/chat/composer";
 import { Message } from "@/components/chat/message";
 import { Button } from "@/components/ui/button";
-import type { Session } from "@/components/providers";
+import type { Project, Session } from "@/components/providers";
 import { repoName } from "@/lib/format";
 import { api } from "@convex/_generated/api";
 
-type SavedChat = {
-  events: readonly MessageStreamEvent[];
-  session?: ClientSessionState;
-};
-
-const storageKey = (sessionId: string) => `opendevin:eve:${sessionId}`;
-
-function loadChat(sessionId: string): SavedChat {
+function loadChat(sessionId: string): UIMessage[] {
   try {
-    const value = JSON.parse(
-      window.localStorage.getItem(storageKey(sessionId)) ?? "null",
-    ) as Partial<SavedChat> | null;
-    return {
-      events: Array.isArray(value?.events) ? value.events : [],
-      session: value?.session,
-    };
+    const stored = JSON.parse(window.localStorage.getItem(`opendevin:chat:${sessionId}`) ?? "null");
+    if (Array.isArray(stored)) return stored as UIMessage[];
+    return [];
   } catch {
-    return { events: [] };
-  }
-}
-
-function saveChat(sessionId: string, value: SavedChat) {
-  try {
-    window.localStorage.setItem(storageKey(sessionId), JSON.stringify(value));
-  } catch {
-    // Storage may be full or blocked; the eve stream stays durable.
+    return [];
   }
 }
 
 /** How close to the bottom still counts as "following along". */
 const PINNED_SLACK = 80;
 
-export function Chat({ session }: { session: Session }) {
+export function Chat({ session, project }: { session: Session; project?: Project }) {
   const update = useMutation(api.sessions.update);
-  const saved = useMemo(() => loadChat(session.id), [session.id]);
-  const eventsRef = useRef<readonly MessageStreamEvent[]>(saved.events);
+  const initialMessages = useMemo(() => {
+    try {
+      const saved = loadChat(session.id);
+      if (saved.length) return saved;
+      const persisted = JSON.parse(session.parts ?? "[]");
+      return Array.isArray(persisted) ? persisted as UIMessage[] : [];
+    } catch { return []; }
+  }, [session.id, session.parts]);
   const [responding, setResponding] = useState(false);
   const initialPromptStarted = useRef(false);
 
@@ -71,27 +58,20 @@ export function Chat({ session }: { session: Session }) {
     [session.id, session.status, update],
   );
 
-  const agent = useEveAgent({
-    initialEvents: saved.events,
-    initialSession: saved.session,
-    onEvent(event) {
-      eventsRef.current = [...eventsRef.current, event];
-    },
-    onSessionChange(next) {
-      if (!next?.sessionId) return;
-      saveChat(session.id, { events: eventsRef.current, session: next });
-      if (next.sessionId !== session.eveSessionId) {
-        void update({ id: session.id as never, eveSessionId: next.sessionId }).catch(() => {});
-      }
-    },
-    onFinish(snapshot) {
-      const value = { events: snapshot.events, session: snapshot.session };
-      saveChat(session.id, value);
-      void update({ id: session.id as never, parts: JSON.stringify(value), status: "idle" }).catch(() => {});
+  const agent = useChat({
+    id: session.id,
+    messages: initialMessages,
+    transport: new DefaultChatTransport({ api: "/api/chat", body: { sessionId: session.id, git: session.git, baseBranch: session.baseBranch, envVars: project?.envVars, devCommand: project?.devCommand, buildCommand: project?.buildCommand } }),
+    onFinish({ messages }) {
+      try { window.localStorage.setItem(`opendevin:chat:${session.id}`, JSON.stringify(messages)); } catch { /* best effort */ }
+      void fetch(`/api/chat/diff?sessionId=${encodeURIComponent(session.id)}`)
+        .then((response) => response.json() as Promise<{ diff?: string }>)
+        .then(({ diff }) => update({ id: session.id as never, parts: JSON.stringify(messages), status: "idle", diff, title: messages.find((m) => m.role === "user")?.parts.find((p) => p.type === "text")?.text?.slice(0, 80) }))
+        .catch(() => {});
     },
   });
 
-  const messages = agent.data.messages;
+  const messages = agent.messages;
   const working = agent.status === "submitted" || agent.status === "streaming";
   const busy = working || session.status === "running";
   const lastId = messages.at(-1)?.id;
@@ -136,7 +116,7 @@ export function Chat({ session }: { session: Session }) {
       if (!text.trim() || busy) return;
       pinned.current = true;
       try {
-        await agent.send(text.trim());
+        await agent.sendMessage({ text: text.trim() });
       } catch (error) {
         toast.error(
           error instanceof Error ? error.message : "Could not send the message.",
@@ -164,7 +144,7 @@ export function Chat({ session }: { session: Session }) {
   const stop = async () => {
     if (!working) return;
     try {
-      await agent.cancel();
+      await agent.stop();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not stop the agent.",
@@ -172,21 +152,15 @@ export function Chat({ session }: { session: Session }) {
     }
   };
 
+  const quickRun = (kind: "dev" | "build") => {
+    const command = kind === "dev" ? project?.devCommand : project?.buildCommand;
+    if (!command?.trim() || busy) return;
+    void send(`Run this ${kind} command exactly and show me the output: ${command.trim()}`);
+  };
+
   const respond = useCallback(
-    (response: { requestId: string; optionId?: string; text?: string }) => {
-      setResponding(true);
-      void agent
-        .respond([response])
-        .catch((error: unknown) =>
-          toast.error(
-            error instanceof Error
-              ? error.message
-              : "Could not send your answer.",
-          ),
-        )
-        .finally(() => setResponding(false));
-    },
-    [agent],
+    () => setResponding(false),
+    [],
   );
 
   return (
@@ -199,13 +173,7 @@ export function Chat({ session }: { session: Session }) {
         <div className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-5 sm:px-6">
           {messages.length === 0 && <EmptyState git={session.git} />}
           {messages.map((message) => (
-            <Message
-              key={message.id}
-              message={message}
-              streaming={working && message.id === lastId}
-              responding={responding}
-              onRespond={respond}
-            />
+            <Message key={message.id} message={message} streaming={working && message.id === lastId} />
           ))}
           <div ref={bottom} className="h-px" />
         </div>
@@ -223,6 +191,11 @@ export function Chat({ session }: { session: Session }) {
         </Button>
       )}
 
+      <div className="flex items-center gap-1.5 border-t bg-background px-4 pt-2 sm:px-6">
+        <span className="eyebrow mr-1">Quick run</span>
+        {project?.devCommand && <Button size="xs" variant="outline" disabled={busy} onClick={() => quickRun("dev")}><Play /> Dev <span className="mono hidden text-muted-foreground sm:inline">{project.devCommand}</span></Button>}
+        {project?.buildCommand && <Button size="xs" variant="outline" disabled={busy} onClick={() => quickRun("build")}><Hammer /> Build <span className="mono hidden text-muted-foreground sm:inline">{project.buildCommand}</span></Button>}
+      </div>
       <Composer busy={busy} onSend={(text) => void send(text)} onStop={() => void stop()} />
     </div>
   );

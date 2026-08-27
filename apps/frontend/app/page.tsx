@@ -10,9 +10,9 @@ import { useRouter } from "next/navigation";
 import { Command, Plus } from "lucide-react";
 
 import { Chat } from "@/components/chat/chat";
-import { useSessions, useSessionSelection } from "@/components/providers";
+import { useProjects, useSessions, useSessionSelection } from "@/components/providers";
 import { ReviewPane } from "@/components/review/review-pane";
-import { LegacyTranscript } from "@/components/session/legacy-transcript";
+import { PreviewPane } from "@/components/preview/preview-pane";
 import { SessionHeader } from "@/components/session/session-header";
 import { Button } from "@/components/ui/button";
 import { usePersisted } from "@/lib/persisted";
@@ -38,17 +38,24 @@ export function Home() {
   const router = useRouter();
   const { activeSessionId } = useSessionSelection();
   const { sessions } = useSessions();
+  const { projects } = useProjects();
   const active = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const legacy = Boolean(active && !active.eveSessionId && active.parts);
+  const project = active?.projectId ? projects.find((item) => item.id === active.projectId) : undefined;
 
   const [savedWidth, saveWidth] = usePersisted(WIDTH_KEY, DEFAULT_PANE, readWidth);
   const [savedCollapsed, setSavedCollapsed] = usePersisted(COLLAPSED_KEY, false, readCollapsed);
   const wide = useMediaQuery("(min-width: 768px)");
   const [showingDiff, setShowingDiff] = useState(false);
+  const [showingPreview, setShowingPreview] = useState(false);
   const collapsed = wide ? savedCollapsed : !showingDiff;
   function togglePane() {
     if (wide) setSavedCollapsed(!savedCollapsed);
     else setShowingDiff(!showingDiff);
+  }
+  function togglePreview() {
+    if (wide) setSavedCollapsed(false);
+    else setShowingDiff(true);
+    setShowingPreview((value) => !value);
   }
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const paneWidth = dragWidth ?? savedWidth;
@@ -100,10 +107,10 @@ export function Home() {
 
   return (
     <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-background">
-      <SessionHeader session={active} legacy={legacy} />
+      <SessionHeader session={active} />
       <div className="flex min-h-0 flex-1">
         <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !collapsed && "max-md:hidden")}>
-          {legacy ? <LegacyTranscript session={active} /> : <Chat key={active.id} session={active} />}
+          <Chat key={active.id} session={active} project={project} />
         </div>
         {!collapsed && (
           <div
@@ -122,13 +129,24 @@ export function Home() {
             className="relative hidden w-px shrink-0 cursor-col-resize bg-border transition-colors duration-100 after:absolute after:inset-y-0 after:-left-1 after:-right-1 after:content-[''] hover:bg-brand focus-visible:bg-brand md:block"
           />
         )}
-        <ReviewPane
+        {showingPreview ? (
+          <aside className={cn("flex min-h-0 min-w-0 flex-1 flex-col border-l bg-background", collapsed ? "hidden" : "w-full md:w-[var(--pane)] md:flex-none")} style={collapsed ? undefined : ({ "--pane": `${paneWidth}%` } as CSSProperties)}>
+            <header className="flex h-11 shrink-0 items-center gap-1.5 border-b bg-background px-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setShowingPreview(false)}>Changes</Button>
+              <span className="rounded-md bg-surface-2 px-2 py-1 text-[13px] font-medium">Preview</span>
+              <div className="flex-1" />
+              <Button variant="ghost" size="sm" onClick={() => setShowingPreview(false)}>Close</Button>
+            </header>
+            <PreviewPane sessionId={active.id} />
+          </aside>
+        ) : <ReviewPane
           session={active}
           collapsed={collapsed}
           onToggle={togglePane}
+          onPreview={togglePreview}
           className={collapsed ? undefined : "w-full md:w-[var(--pane)] md:flex-none"}
           style={collapsed ? undefined : ({ "--pane": `${paneWidth}%` } as CSSProperties)}
-        />
+        />}
       </div>
     </div>
   );

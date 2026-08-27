@@ -30,7 +30,6 @@ export type Session = {
   cwd?: string;
   parts?: string;
   projectId?: string;
-  eveSessionId?: string;
   title?: string;
   diff?: string;
   PRNumber?: number;
@@ -46,6 +45,9 @@ export type Project = {
   git: string;
   createdAt: string;
   updatedAt: string;
+  envVars?: string;
+  devCommand?: string;
+  buildCommand?: string;
 };
 
 type StoredMessagePart = { type?: string; text?: string };
@@ -62,15 +64,6 @@ function firstMessageText(value: unknown): string | undefined {
       if (text) return text;
     }
     return undefined;
-  }
-  const events = (value as { events?: unknown[] })?.events;
-  if (!Array.isArray(events)) return undefined;
-  for (const event of events) {
-    const data = (event as { data?: { message?: unknown } })?.data;
-    if ((event as { type?: string }).type === "message.received" && data) {
-      if (typeof data.message === "string" && data.message.trim())
-        return data.message.trim();
-    }
   }
   return undefined;
 }

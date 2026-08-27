@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
+  Globe,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -134,12 +135,14 @@ export function ReviewPane({
   session,
   collapsed,
   onToggle,
+  onPreview,
   className,
   style,
 }: {
   session: Session;
   collapsed: boolean;
   onToggle: () => void;
+  onPreview: () => void;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -187,11 +190,8 @@ export function ReviewPane({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          git: session.git,
-          diff: session.diff,
+          sessionId: session.id,
           title,
-          baseBranch: session.baseBranch,
-          branch: session.agentBranch || `opendevin/${session.id}`,
         }),
       });
       const result = (await response.json()) as {
@@ -263,6 +263,16 @@ export function ReviewPane({
           />
           <TooltipContent side="left">Show changes</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button variant="ghost" size="icon-sm" aria-label="Show preview" onClick={onPreview}>
+                <Globe />
+              </Button>
+            }
+          />
+          <TooltipContent side="left">Show preview</TooltipContent>
+        </Tooltip>
         {hasDiff && (
           <span data-numeric className="mono mt-3 rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-medium text-brand-foreground">
             {patch.files.length}
@@ -292,6 +302,9 @@ export function ReviewPane({
         </Tooltip>
 
         <span className="text-[13px] font-medium tracking-[-0.01em]">Changes</span>
+        <Button variant="ghost" size="sm" onClick={onPreview}>
+          <Globe /> Preview
+        </Button>
         {hasDiff && (
           <span className="hidden items-center gap-2 sm:flex">
             <span data-numeric className="mono rounded-full bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted-foreground">
