@@ -6,12 +6,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useQuery as useConvexQuery } from "convex/react";
 import { useRouter } from "next/navigation";
-import { Command } from "lucide-react";
+import { Command, Plus } from "lucide-react";
 
 import { Chat } from "@/components/chat/chat";
-import { mapSessions, useSessionSelection } from "@/components/providers";
+import { useSessions, useSessionSelection } from "@/components/providers";
 import { ReviewPane } from "@/components/review/review-pane";
 import { LegacyTranscript } from "@/components/session/legacy-transcript";
 import { SessionHeader } from "@/components/session/session-header";
@@ -19,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { usePersisted } from "@/lib/persisted";
 import { useMediaQuery } from "@/lib/media";
 import { cn } from "@/lib/utils";
-import { api } from "@convex/_generated/api";
 
 const MIN_PANE = 25;
 const MAX_PANE = 62;
@@ -27,43 +25,24 @@ const DEFAULT_PANE = 40;
 const WIDTH_KEY = "opendevin:pane-width";
 const COLLAPSED_KEY = "opendevin:pane-collapsed";
 
-const clamp = (value: number) =>
-  Math.min(MAX_PANE, Math.max(MIN_PANE, Math.round(value)));
+const clamp = (value: number) => Math.min(MAX_PANE, Math.max(MIN_PANE, Math.round(value)));
 
 const readWidth = (raw: string | null) => {
   const value = Number(raw);
   return Number.isFinite(value) && value > 0 ? clamp(value) : DEFAULT_PANE;
 };
 
-// With nothing saved, a phone shows one pane at a time and the chat leads.
-const readCollapsed = (raw: string | null) =>
-  raw === null ? window.innerWidth < 768 : raw === "true";
+const readCollapsed = (raw: string | null) => (raw === null ? window.innerWidth < 768 : raw === "true");
 
 export function Home() {
   const router = useRouter();
   const { activeSessionId } = useSessionSelection();
-  const sessions = mapSessions(
-    useConvexQuery(api.sessions.list, {}) as unknown[] | undefined,
-  );
-  const active = sessions.find((session) => session.id === activeSessionId) ?? null;
-  // Rows written before the eve runtime have a transcript but no live agent.
+  const { sessions } = useSessions();
+  const active = sessions.find((s) => s.id === activeSessionId) ?? null;
   const legacy = Boolean(active && !active.eveSessionId && active.parts);
 
-  const [savedWidth, saveWidth] = usePersisted(
-    WIDTH_KEY,
-    DEFAULT_PANE,
-    readWidth,
-  );
-  const [savedCollapsed, setSavedCollapsed] = usePersisted(
-    COLLAPSED_KEY,
-    false,
-    readCollapsed,
-  );
-  // Wide screens split, and remember how the user left the split. Narrow ones
-  // take turns instead, always starting on the transcript: a session's diff is
-  // empty until the agent edits something, so leading with it hides the only
-  // thing there is to read. The two preferences stay separate so neither
-  // breakpoint inherits a choice made at the other.
+  const [savedWidth, saveWidth] = usePersisted(WIDTH_KEY, DEFAULT_PANE, readWidth);
+  const [savedCollapsed, setSavedCollapsed] = usePersisted(COLLAPSED_KEY, false, readCollapsed);
   const wide = useMediaQuery("(min-width: 768px)");
   const [showingDiff, setShowingDiff] = useState(false);
   const collapsed = wide ? savedCollapsed : !showingDiff;
@@ -71,7 +50,6 @@ export function Home() {
     if (wide) setSavedCollapsed(!savedCollapsed);
     else setShowingDiff(!showingDiff);
   }
-  // Live drag stays in React state; only the settled width reaches storage.
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const paneWidth = dragWidth ?? savedWidth;
 
@@ -81,8 +59,6 @@ export function Home() {
   };
   const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragWidth === null) return;
-    // Measured against the split row, not the viewport, because the pane's
-    // percentage resolves against that row — the sidebar is not part of it.
     const row = event.currentTarget.parentElement?.getBoundingClientRect();
     if (!row) return;
     setDragWidth(clamp(((row.right - event.clientX) / row.width) * 100));
@@ -92,10 +68,8 @@ export function Home() {
     saveWidth(dragWidth);
     setDragWidth(null);
   };
-
   const nudge = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const step =
-      event.key === "ArrowLeft" ? 3 : event.key === "ArrowRight" ? -3 : 0;
+    const step = event.key === "ArrowLeft" ? 3 : event.key === "ArrowRight" ? -3 : 0;
     if (!step) return;
     event.preventDefault();
     saveWidth(clamp(paneWidth + step));
@@ -103,25 +77,19 @@ export function Home() {
 
   if (!active) {
     return (
-      <div className="flex h-screen min-w-0 flex-col overflow-hidden">
+      <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-background">
         <SessionHeader />
         <div className="flex flex-1 flex-col items-center justify-center px-6">
           <div className="animate-rise max-w-sm text-center">
             <span className="mx-auto flex size-9 items-center justify-center rounded-lg border bg-surface-2">
               <Command className="size-4 text-muted-foreground" />
             </span>
-            <h1 className="mt-4 text-[15px] font-medium tracking-[-0.01em]">
-              No session open
-            </h1>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">
-              Pick a session from the sidebar, or point the agent at a
-              repository to start a new one.
+            <h1 className="mt-4 text-[15px] font-medium tracking-[-0.01em]">No session open</h1>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              Pick a session from the sidebar, or point the agent at a repository to start a new one.
             </p>
-            <Button
-              size="sm"
-              className="mt-4"
-              onClick={() => router.push("/new")}
-            >
+            <Button size="sm" className="mt-4" onClick={() => router.push("/new")}>
+              <Plus className="size-3.5" />
               New project
             </Button>
           </div>
@@ -131,23 +99,12 @@ export function Home() {
   }
 
   return (
-    <div className="flex h-screen min-w-0 flex-col overflow-hidden">
+    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-background">
       <SessionHeader session={active} legacy={legacy} />
       <div className="flex min-h-0 flex-1">
-        <div
-          className={cn(
-            "flex min-h-0 min-w-0 flex-1 flex-col",
-            // On a narrow screen the two panes take turns instead of splitting.
-            !collapsed && "max-md:hidden",
-          )}
-        >
-          {legacy ? (
-            <LegacyTranscript session={active} />
-          ) : (
-            <Chat key={active.id} session={active} />
-          )}
+        <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !collapsed && "max-md:hidden")}>
+          {legacy ? <LegacyTranscript session={active} /> : <Chat key={active.id} session={active} />}
         </div>
-
         {!collapsed && (
           <div
             role="separator"
@@ -165,19 +122,12 @@ export function Home() {
             className="relative hidden w-px shrink-0 cursor-col-resize bg-border transition-colors duration-100 after:absolute after:inset-y-0 after:-left-1 after:-right-1 after:content-[''] hover:bg-brand focus-visible:bg-brand md:block"
           />
         )}
-
         <ReviewPane
           session={active}
           collapsed={collapsed}
           onToggle={togglePane}
-          className={
-            collapsed ? undefined : "w-full md:w-[var(--pane)] md:flex-none"
-          }
-          style={
-            collapsed
-              ? undefined
-              : ({ "--pane": `${paneWidth}%` } as CSSProperties)
-          }
+          className={collapsed ? undefined : "w-full md:w-[var(--pane)] md:flex-none"}
+          style={collapsed ? undefined : ({ "--pane": `${paneWidth}%` } as CSSProperties)}
         />
       </div>
     </div>

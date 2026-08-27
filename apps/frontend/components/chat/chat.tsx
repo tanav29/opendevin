@@ -53,6 +53,24 @@ export function Chat({ session }: { session: Session }) {
   const [responding, setResponding] = useState(false);
   const initialPromptStarted = useRef(false);
 
+  // Debounce status writes — avoid spamming Convex on every status tick.
+  const pendingStatus = useRef<string | null>(null);
+  const statusTimer = useRef<number | null>(null);
+  const flushStatus = useCallback(
+    (status: string) => {
+      pendingStatus.current = status;
+      if (statusTimer.current) window.clearTimeout(statusTimer.current);
+      statusTimer.current = window.setTimeout(() => {
+        const next = pendingStatus.current;
+        pendingStatus.current = null;
+        if (next && next !== session.status) {
+          void update({ id: session.id as never, status: next }).catch(() => {});
+        }
+      }, 400);
+    },
+    [session.id, session.status, update],
+  );
+
   const agent = useEveAgent({
     initialEvents: saved.events,
     initialSession: saved.session,
@@ -62,15 +80,14 @@ export function Chat({ session }: { session: Session }) {
     onSessionChange(next) {
       if (!next?.sessionId) return;
       saveChat(session.id, { events: eventsRef.current, session: next });
-      // Link the durable eve session id to the convex row once.
       if (next.sessionId !== session.eveSessionId) {
-        void update({ id: session.id as never, eveSessionId: next.sessionId });
+        void update({ id: session.id as never, eveSessionId: next.sessionId }).catch(() => {});
       }
     },
     onFinish(snapshot) {
       const value = { events: snapshot.events, session: snapshot.session };
       saveChat(session.id, value);
-      void update({ id: session.id as never, parts: JSON.stringify(value) });
+      void update({ id: session.id as never, parts: JSON.stringify(value), status: "idle" }).catch(() => {});
     },
   });
 
@@ -83,16 +100,11 @@ export function Chat({ session }: { session: Session }) {
     if (agent.error?.message) toast.error(agent.error.message);
   }, [agent.error?.message]);
 
-  // The first turn can start before Eve has reported its session ID through
-  // onSessionChange. Persist status by the Convex row ID as soon as the
-  // client knows the turn is live so the sidebar does not stay idle.
   useEffect(() => {
-    if (agent.status === "submitted" || agent.status === "streaming") {
-      void update({ id: session.id as never, status: "running" });
-    } else if (agent.status === "error") {
-      void update({ id: session.id as never, status: "failed" });
-    }
-  }, [agent.status, session.id, update]);
+    if (agent.status === "submitted" || agent.status === "streaming") flushStatus("running");
+    else if (agent.status === "error") flushStatus("failed");
+    else if (agent.status === "ready" && session.status === "running") flushStatus("idle");
+  }, [agent.status, session.status, flushStatus]);
 
   /* -- Scrolling: follow the stream, but never yank a reading user down. -- */
   const viewport = useRef<HTMLDivElement>(null);
@@ -218,15 +230,12 @@ export function Chat({ session }: { session: Session }) {
 
 function EmptyState({ git }: { git: string }) {
   return (
-    <div className="animate-rise pt-10">
+    <div className="animate-rise rounded-xl border border-dashed bg-surface-1/50 px-5 py-8">
       <p className="eyebrow">Ready</p>
-      <h2 className="mt-2 text-xl font-medium tracking-[-0.02em]">
-        What should we change?
-      </h2>
-      <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">
-        Describe the outcome you want in{" "}
-        <span className="mono text-foreground">{repoName(git)}</span>. The agent
-        reads the repository, makes the changes, and shows you the diff.
+      <h2 className="mt-2 text-[15px] font-medium tracking-[-0.02em]">What should we change?</h2>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+        Describe the outcome you want in <span className="mono text-foreground">{repoName(git)}</span>. The agent reads
+        the repository, makes the changes, and shows you the diff.
       </p>
     </div>
   );

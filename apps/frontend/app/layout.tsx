@@ -25,23 +25,24 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="h-screen w-full">
+    <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+      <body className="h-screen w-full bg-background">
         <AppProviders>
           <TooltipProvider>
             <ConfirmProvider>
               <SidebarProvider>
                 <AppSidebar />
-                <main className="flex min-h-screen min-w-0 flex-1 flex-col">
-                  {children}
-                </main>
+                <main className="flex min-h-screen min-w-0 flex-1 flex-col bg-background">{children}</main>
               </SidebarProvider>
             </ConfirmProvider>
             <Toaster
               position="bottom-right"
-              toastOptions={{ className: "overlay" }}
+              closeButton
+              richColors={false}
+              toastOptions={{
+                className: "overlay",
+                style: { fontSize: 13 } as React.CSSProperties,
+              }}
             />
           </TooltipProvider>
         </AppProviders>

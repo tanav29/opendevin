@@ -12,7 +12,11 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     const owner = await ownerId(ctx);
-    return ctx.db.query("projects").withIndex("by_updatedAt").order("desc").filter((q) => q.eq(q.field("ownerId"), owner)).take(100);
+    return ctx.db
+      .query("projects")
+      .withIndex("by_owner_and_updatedAt", (q) => q.eq("ownerId", owner))
+      .order("desc")
+      .take(100);
   },
 });
 

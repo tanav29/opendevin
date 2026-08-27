@@ -27,6 +27,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_owner_and_updatedAt", ["ownerId", "updatedAt"])
     .index("by_updatedAt", ["updatedAt"])
     .index("by_git", ["git"]),
   sessions: defineTable({
@@ -53,10 +54,16 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_owner_and_updatedAt", ["ownerId", "updatedAt"])
     .index("by_updatedAt", ["updatedAt"])
     .index("by_eveSessionId", ["eveSessionId"])
     .index("by_projectId_and_archived_and_updatedAt", [
       "projectId",
+      "archived",
+      "updatedAt",
+    ])
+    .index("by_owner_and_archived_and_updatedAt", [
+      "ownerId",
       "archived",
       "updatedAt",
     ]),

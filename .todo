@@ -1,4 +1,0 @@
-[x] user can login, show usr info and bottom of the sidebar and a setting page with logout button
-[x] tell me permission to add to the github app, and after that not ask user to again connect github just pick from the app auth
-[x] user can choose a branch to work in the when prompting for first time
-[x] feat: user can just commit a change to the repo using existing github auth, commit model shows file that have changed and what message generated

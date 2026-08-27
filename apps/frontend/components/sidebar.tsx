@@ -15,10 +15,9 @@ import {
 import { toast } from "sonner";
 
 import {
-  mapProjects,
-  mapSessions,
   sessionTitle,
   useSessionSelection,
+  useWorkspaceData,
   type Project,
   type Session,
 } from "@/components/providers";
@@ -174,22 +173,16 @@ function ProjectGroup({
 }
 
 export function AppSidebar() {
-  const projectsResult = useConvexQuery(api.projects.list, {});
-  const sessionsResult = useConvexQuery(api.sessions.list, {});
+  const { projects, live, archived, loading } = useWorkspaceData();
   const user = useConvexQuery(api.users.current, {}) as
     | { name?: string; email?: string; image?: string }
     | null
     | undefined;
-  const projects = mapProjects(projectsResult as unknown[] | undefined);
-  const sessions = mapSessions(sessionsResult as unknown[] | undefined);
-  const loading = projectsResult === undefined || sessionsResult === undefined;
   const { activeSessionId, selectSession } = useSessionSelection();
   const router = useRouter();
   const confirm = useConfirm();
   const updateSession = useMutation(api.sessions.update);
   const removeSession = useMutation(api.sessions.remove);
-  const live = sessions.filter((session) => !session.archived);
-  const archived = sessions.filter((session) => session.archived);
 
   const failed = (error: unknown, fallback: string) =>
     toast.error(error instanceof Error ? error.message : fallback);
@@ -243,16 +236,16 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r bg-sidebar text-sidebar-foreground">
-      <SidebarHeader className="flex h-11 w-full flex-row items-center justify-between gap-2 border-b px-2.5 py-0">
+      <SidebarHeader className="flex h-11 w-full flex-row items-center justify-between gap-2 border-b border-sidebar-border px-2.5 py-0">
         <button
           type="button"
           onClick={() => router.push("/")}
-          className="flex min-w-0 items-center gap-2 rounded-md text-left"
+          className="flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-sidebar-accent"
         >
-          <Command className="size-4 shrink-0" />
-          <span className="truncate text-[13px] font-medium tracking-[-0.01em]">
-            OpenDevin
+          <span className="grid size-6 place-items-center rounded-md bg-foreground text-background">
+            <Command className="size-3.5" />
           </span>
+          <span className="truncate text-[13px] font-semibold tracking-[-0.015em]">OpenDevin</span>
         </button>
         <Tooltip>
           <TooltipTrigger

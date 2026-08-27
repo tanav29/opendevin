@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { sessionTitle, useGitHubFetch, type Session } from "@/components/providers";
+import { sessionTitle, useGitHubFetch, useGitHubSession, type Session } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -145,11 +145,9 @@ export function ReviewPane({
 }) {
   const updateSession = useMutation(api.sessions.update);
   const githubFetch = useGitHubFetch();
+  const github = useGitHubSession();
   const patch = useMemo(() => parsePatch(session.diff), [session.diff]);
   const highlighter = useHighlighter();
-  const [github, setGithub] = useState<
-    { connected: boolean; login?: string } | undefined
-  >();
   const [publishing, setPublishing] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitOpen, setCommitOpen] = useState(false);
@@ -157,15 +155,10 @@ export function ReviewPane({
   const hasDiff = patch.files.length > 0;
 
   useEffect(() => {
-    void githubFetch("/api/github/session")
-      .then((response) => response.json())
-      .then((value) => setGithub(value as { connected: boolean }))
-      .catch(() => setGithub({ connected: false }));
     const status = new URLSearchParams(window.location.search).get("github");
     if (status === "connected") toast.success("GitHub connected.");
     if (status === "error") toast.error("Could not connect GitHub.");
-    if (status) window.history.replaceState({}, "", window.location.pathname);
-  }, [githubFetch]);
+  }, []);
 
   function downloadPatch() {
     if (!session.diff) return;
@@ -259,22 +252,11 @@ export function ReviewPane({
 
   if (collapsed) {
     return (
-      <aside
-        style={style}
-        className={cn(
-          "flex w-10 shrink-0 flex-col items-center border-l bg-surface-1 py-2",
-          className,
-        )}
-      >
+      <aside style={style} className={cn("flex w-10 shrink-0 flex-col items-center border-l bg-surface-1 py-2", className)}>
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Show changes"
-                onClick={onToggle}
-              >
+              <Button variant="ghost" size="icon-sm" aria-label="Show changes" onClick={onToggle}>
                 <PanelRightOpen />
               </Button>
             }
@@ -282,10 +264,7 @@ export function ReviewPane({
           <TooltipContent side="left">Show changes</TooltipContent>
         </Tooltip>
         {hasDiff && (
-          <span
-            data-numeric
-            className="mono mt-2 text-[10px] text-muted-foreground [writing-mode:vertical-rl]"
-          >
+          <span data-numeric className="mono mt-3 rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-medium text-brand-foreground">
             {patch.files.length}
           </span>
         )}
@@ -294,14 +273,8 @@ export function ReviewPane({
   }
 
   return (
-    <aside
-      style={style}
-      className={cn(
-        "flex min-h-0 min-w-0 flex-1 flex-col border-l bg-background",
-        className,
-      )}
-    >
-      <header className="flex h-11 shrink-0 items-center gap-1.5 border-b px-1.5">
+    <aside style={style} className={cn("flex min-h-0 min-w-0 flex-1 flex-col border-l bg-background", className)}>
+      <header className="flex h-11 shrink-0 items-center gap-1.5 border-b bg-background px-1.5">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -320,15 +293,12 @@ export function ReviewPane({
 
         <span className="text-[13px] font-medium tracking-[-0.01em]">Changes</span>
         {hasDiff && (
-          <>
-            <span
-              data-numeric
-              className="mono text-[11px] text-muted-foreground"
-            >
+          <span className="hidden items-center gap-2 sm:flex">
+            <span data-numeric className="mono rounded-full bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted-foreground">
               {patch.files.length} {patch.files.length === 1 ? "file" : "files"}
             </span>
             <Stat file={patch} />
-          </>
+          </span>
         )}
 
         <div className="flex-1" />
@@ -383,9 +353,11 @@ export function ReviewPane({
               </Button>
             )}
           </>
+        ) : github === undefined ? (
+          <span className="text-xs text-muted-foreground">Checking GitHub…</span>
         ) : (
-          <span className="text-xs text-muted-foreground">
-            GitHub repository permission required. Sign out and sign in again.
+          <span className="hidden text-xs text-muted-foreground lg:inline">
+            GitHub access required — re-authenticate to commit.
           </span>
         )}
       </header>

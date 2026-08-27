@@ -58,12 +58,13 @@ export function Composer({
   const ready = value.trim().length > 0;
 
   return (
-    <div className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4">
+    <div className={cn("shrink-0 px-3 pb-3 sm:px-4 sm:pb-4", disabled && "opacity-60")}>
       <div className="mx-auto max-w-2xl">
         <div
           className={cn(
-            "raised rounded-xl border bg-surface-2 transition-colors duration-150",
-            focused ? "border-border-strong" : "hover:border-border-strong",
+            "raised rounded-xl border bg-surface-2 transition-all duration-150",
+            focused ? "border-border-strong shadow-sm" : "border-border hover:border-border-strong",
+            disabled && "pointer-events-none",
           )}
         >
           <textarea
@@ -82,12 +83,15 @@ export function Composer({
               }
             }}
             placeholder={placeholder}
-            className="block max-h-[200px] w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[13.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            className="block max-h-[200px] w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           />
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
-            <p className="min-w-0 truncate pl-1 text-[11px] text-muted-foreground/70">
-              <Kbd>↵</Kbd> to send · <Kbd>⇧↵</Kbd> for a new line
+            <p className="hidden min-w-0 truncate pl-1 text-[11px] text-muted-foreground/60 sm:block">
+              <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
             </p>
+            <span className="pl-1 text-[11px] text-muted-foreground/60 sm:hidden">
+              {value.length > 0 ? `${value.length} chars` : ""}
+            </span>
             {busy ? (
               <Button
                 size="icon-sm"
@@ -95,12 +99,9 @@ export function Composer({
                 disabled={!onStop}
                 aria-label={onStop ? "Stop the agent" : "Working"}
                 onClick={onStop}
+                className="shrink-0"
               >
-                {onStop ? (
-                  <Square className="size-2.5 fill-current" />
-                ) : (
-                  <LoaderCircle className="animate-spin" />
-                )}
+                {onStop ? <Square className="size-2.5 fill-current" /> : <LoaderCircle className="animate-spin" />}
               </Button>
             ) : (
               <Button
@@ -108,6 +109,7 @@ export function Composer({
                 aria-label="Send message"
                 disabled={!ready || disabled}
                 onClick={submit}
+                className="shrink-0 disabled:opacity-40"
               >
                 <ArrowUp />
               </Button>

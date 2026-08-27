@@ -5,15 +5,18 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { useQuery as useConvexQuery } from "convex/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useConvexAuth } from "convex/react";
 import { ConvexAuthProvider, useAuthActions, useAuthToken } from "@convex-dev/auth/react";
 import { IconBrandGithub } from "@tabler/icons-react";
 import { convex } from "@/lib/convex";
 import { Button } from "@/components/ui/button";
+import { api } from "@convex/_generated/api";
 
 export type Session = {
   id: string;
@@ -27,7 +30,6 @@ export type Session = {
   cwd?: string;
   parts?: string;
   projectId?: string;
-  // Linked after the first message reaches the eve runtime.
   eveSessionId?: string;
   title?: string;
   diff?: string;
@@ -50,7 +52,6 @@ type StoredMessagePart = { type?: string; text?: string };
 type StoredMessage = { role?: string; parts?: StoredMessagePart[] };
 
 function firstMessageText(value: unknown): string | undefined {
-  // Legacy rows store an array of UIMessage-like objects.
   if (Array.isArray(value)) {
     for (const message of value as StoredMessage[]) {
       if (message.role !== "user") continue;
@@ -62,7 +63,6 @@ function firstMessageText(value: unknown): string | undefined {
     }
     return undefined;
   }
-  // eve snapshots store { events, session }.
   const events = (value as { events?: unknown[] })?.events;
   if (!Array.isArray(events)) return undefined;
   for (const event of events) {
@@ -81,12 +81,9 @@ export function sessionTitle(session: Session) {
     const text = firstMessageText(JSON.parse(session.parts ?? "[]"));
     if (text) return text;
   } catch {
-    // A malformed stored transcript should not prevent the session list rendering.
+    // malformed transcript shouldn't break list
   }
-  return (
-    session.git.split("/").pop()?.replace(/\.git$/, "") ||
-    "Untitled session"
-  );
+  return session.git.split("/").pop()?.replace(/\.git$/, "") || "Untitled session";
 }
 
 function normalizeRecord(value: Record<string, unknown>, fallbackId: string) {
@@ -111,6 +108,32 @@ export function mapProjects(raw: unknown[] | undefined): Project[] {
   ) as Project[];
 }
 
+// Centralized data hooks — single subscription per query, shared across the app.
+// Consumers read from the same cache instead of opening duplicate Convex streams.
+export function useSessions() {
+  const raw = useConvexQuery(api.sessions.list, {});
+  const sessions = useMemo(() => mapSessions(raw as unknown[] | undefined), [raw]);
+  return { sessions, raw, loading: raw === undefined };
+}
+
+export function useProjects() {
+  const raw = useConvexQuery(api.projects.list, {});
+  const projects = useMemo(() => mapProjects(raw as unknown[] | undefined), [raw]);
+  return { projects, raw, loading: raw === undefined };
+}
+
+export function useWorkspaceData() {
+  const { sessions, loading: sessionsLoading } = useSessions();
+  const { projects, loading: projectsLoading } = useProjects();
+  return {
+    sessions,
+    projects,
+    loading: sessionsLoading || projectsLoading,
+    live: useMemo(() => sessions.filter((s) => !s.archived), [sessions]),
+    archived: useMemo(() => sessions.filter((s) => s.archived), [sessions]),
+  };
+}
+
 const SessionSelectionContext = createContext<{
   activeSessionId: string | null;
   selectSession: (id: string | null) => void;
@@ -119,7 +142,15 @@ const SessionSelectionContext = createContext<{
 function AuthGate({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const { signIn } = useAuthActions();
-  if (isLoading) return <div className="grid min-h-screen place-items-center text-[13px] text-muted-foreground">Loading workspace…</div>;
+  if (isLoading)
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <div className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
+          <span className="size-3 animate-pulse rounded-full bg-brand" />
+          Loading workspace…
+        </div>
+      </div>
+    );
   if (isAuthenticated) return <>{children}</>;
   return (
     <div className="grid min-h-screen place-items-center bg-background px-6">
@@ -136,13 +167,18 @@ function AuthGate({ children }: { children: ReactNode }) {
 }
 
 export function AppProviders({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false },
+        },
+      }),
+  );
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
-    queueMicrotask(() =>
-      setActiveSessionId(window.localStorage.getItem("opendevin:active-session")),
-    );
+    queueMicrotask(() => setActiveSessionId(window.localStorage.getItem("opendevin:active-session")));
   }, []);
 
   const selectSession = useCallback((id: string | null) => {
@@ -172,6 +208,32 @@ export function useGitHubFetch() {
     },
     [token],
   );
+}
+
+// Cached GitHub connection state — avoids firing /api/github/session on every mount.
+export function useGitHubSession() {
+  const githubFetch = useGitHubFetch();
+  const [state, setState] = useState<{ connected: boolean; login?: string } | undefined>(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    void githubFetch("/api/github/session")
+      .then((r) => r.json())
+      .then((v) => {
+        if (alive) setState(v as { connected: boolean; login?: string });
+      })
+      .catch(() => {
+        if (alive) setState({ connected: false });
+      });
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("github");
+    if (status) window.history.replaceState({}, "", window.location.pathname);
+    return () => {
+      alive = false;
+    };
+  }, [githubFetch]);
+
+  return state;
 }
 
 export function useSessionSelection() {
