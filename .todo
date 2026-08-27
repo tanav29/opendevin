@@ -1,0 +1,75 @@
+# Session UI, Preview, and Changes Panel
+
+## 1. Define behavior and data requirements
+
+[ ] Document the right-panel states: hidden, unavailable, loading, preview, and changes
+[ ] Define when a session is considered sandbox-enabled/running and what happens when the sandbox stops
+[ ] Define the session status model: created time, sandbox status, streaming status, and error state
+[ ] Decide which state belongs in Convex/server data and which state belongs in client UI state
+
+## 2. Establish client state management
+
+[ ] Add Zustand for shared UI state only (active right-panel tab, open/collapsed state, selected session)
+[ ] Keep server/session state sourced from Convex instead of duplicating it in Zustand
+[ ] Add typed actions/selectors and reset state when switching sessions
+[ ] Handle loading, stale, disconnected, and error states without showing misleading status
+
+## 3. Clean up the navigation
+
+[ ] Remove the Archive button from the navbar
+[ ] Add a right-panel toggle button at the end of the navbar
+[ ] Make the toggle button reflect whether the panel is open or collapsed
+[ ] Add an accessible label, tooltip, keyboard support, and visible focus state to the toggle
+[ ] Ensure the navbar remains usable at narrow widths after the changes
+
+## 4. Build the right-panel shell
+
+[ ] Show the right panel only for sessions with a running/available sandbox
+[ ] Define the empty state when no sandbox is available
+[ ] Add open, collapsed, and restored states without losing the selected tab
+[ ] Make the panel responsive and prevent it from covering core session controls
+[ ] Preserve panel state across refreshes where appropriate
+
+## 5. Implement Preview and Changes tabs
+
+[ ] Make Preview and Changes separate tabs in the right panel
+[ ] Add active-tab styling and accessible tab semantics
+[ ] Keep tab content mounted or preserve its state when switching tabs where useful
+[ ] Add loading, empty, and error states for both tabs
+[ ] Disable or explain unavailable tabs when the sandbox is not ready
+
+## 6. Complete the Preview panel
+
+[ ] Render the sandbox preview in the panel
+[ ] Add preview loading and connection states
+[ ] Show a useful error state with retry/reconnect action
+[ ] Add refresh/reload preview action
+[ ] Handle preview URL changes and sandbox restarts safely
+[ ] Add fullscreen/open-in-new-tab action if supported
+
+## 7. Implement the Changes panel
+
+[ ] Define the changes data shape and update behavior
+[ ] Render changed files with clear added, modified, and deleted states
+[ ] Add file selection and a readable diff view
+[ ] Add loading, no-changes, and error states
+[ ] Keep changes synchronized with the active sandbox/session
+
+## 8. Improve session status visibility
+
+[ ] Show created time in the session status area
+[ ] Show sandbox status with clear labels and visual indicators
+[ ] Show streaming status and distinguish active, paused, complete, and failed states
+[ ] Add precise status text/tooltips instead of relying on color alone
+[ ] Update statuses in real time and handle reconnects gracefully
+
+## 9. UX polish and validation
+
+[ ] Add consistent spacing, sizing, borders, and empty-state styling across the panel
+[ ] Add transition/animation for opening and collapsing the panel without blocking interaction
+[ ] Verify keyboard navigation for navbar, toggle, tabs, preview, and changes
+[ ] Verify responsive behavior on desktop and narrow viewport sizes
+[ ] Test session switching, sandbox start/stop, reconnects, and preview failures
+[ ] Test that panel state and tab state do not leak between sessions
+[ ] Run lint, typecheck, and relevant frontend tests
+[ ] Use agent-browser to perform a final end-to-end UI smoke test

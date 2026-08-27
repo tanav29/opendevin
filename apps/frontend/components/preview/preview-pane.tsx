@@ -19,6 +19,7 @@ export function PreviewPane({ sessionId }: { sessionId: string }) {
       setError("Enter a valid port.");
       return;
     }
+    // TODO: preview the port in the sandbox via a special link you can see in https://docs.e2b.dev/network/public-url
     setLoading(true);
     setError(undefined);
     try {
@@ -36,26 +37,29 @@ export function PreviewPane({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface-1">
       <div className="flex shrink-0 items-center gap-1.5 border-b bg-background px-2 py-1.5">
-        <Globe className="size-3.5 text-muted-foreground" />
-        <span className="mono min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{url || "Sandbox preview"}</span>
+        <Globe className="size-3 text-muted-foreground" />
+        <span className="mono min-w-0 flex-1 truncate text-[11px] text-muted-foreground">http://localhost:</span>
         <Input
           aria-label="Preview port"
           inputMode="numeric"
           value={port}
           onChange={(event) => setPort(event.target.value.replace(/\D/g, "").slice(0, 5))}
           onKeyDown={(event) => { if (event.key === "Enter") void loadPreview(); }}
-          className="mono h-7 w-20 text-[11px]"
+          className="mono w-20"
           placeholder="3000"
         />
-        <Button size="icon-sm" variant="outline" aria-label="Load preview" onClick={() => void loadPreview()} disabled={loading}>
+        <Input
+          aria-label="Path" // path after the domain
+          inputMode="text"
+          value={port}
+          onChange={(event) => setPort(event.target.value.replace(/\D/g, "").slice(0, 5))}
+          onKeyDown={(event) => { if (event.key === "Enter") void loadPreview(); }}
+          className="mono w-20"
+          placeholder="/"
+        />
+        <Button size="icon" variant="outline" aria-label="Load preview" onClick={() => void loadPreview()} disabled={loading}>
           {loading ? <LoaderCircle className="animate-spin" /> : <RotateCw />}
         </Button>
-        {url && (
-          <Tooltip>
-            <TooltipTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Open preview in new tab" nativeButton={false} render={<a href={url} target="_blank" rel="noreferrer noopener" />}><ExternalLink /></Button>} />
-            <TooltipContent side="bottom">Open in new tab</TooltipContent>
-          </Tooltip>
-        )}
       </div>
       {error ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center">

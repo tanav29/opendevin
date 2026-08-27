@@ -24,7 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
-  CollapsiblePanel,
+  CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useConfirm } from "@/components/ui/confirm";
@@ -78,17 +78,17 @@ function SessionRow({
         className="w-full text-left"
       >
         <StatusDot status={session.archived ? "stopped" : session.status} />
-        <span className="min-w-0 flex-1 truncate text-[12.5px]">
+        <span className="min-w-0 flex-1 truncate text-xs">
           {sessionTitle(session)}
         </span>
+        <span
+          data-numeric
+          className={`pointer-events-none absolute top-1.5 right-2 text-[10px] text-muted-foreground ${META}`}
+        >
+          {timeAgo(session.updatedAt)}
+        </span>
+        {actions}
       </SidebarMenuSubButton>
-      <span
-        data-numeric
-        className={`pointer-events-none absolute top-1.5 right-2 text-[10px] text-muted-foreground ${META}`}
-      >
-        {timeAgo(session.updatedAt)}
-      </span>
-      {actions}
     </SidebarMenuSubItem>
   );
 }
@@ -117,7 +117,6 @@ function ProjectGroup({
           title={project.git}
         >
           <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-150 group-data-[panel-open]/menu-button:rotate-90" />
-          <FolderGit2 className="text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-[12.5px]">
             {project.name}
           </span>
@@ -139,7 +138,7 @@ function ProjectGroup({
         >
           <Plus />
         </SidebarMenuAction>
-        <CollapsiblePanel>
+        <CollapsibleContent>
           <SidebarMenuSub>
             {sessions.length === 0 && (
               <SidebarMenuSubItem>
@@ -166,7 +165,7 @@ function ProjectGroup({
               />
             ))}
           </SidebarMenuSub>
-        </CollapsiblePanel>
+        </CollapsibleContent>
       </Collapsible>
     </SidebarMenuItem>
   );
@@ -237,16 +236,7 @@ export function AppSidebar() {
   return (
     <Sidebar className="border-r bg-sidebar text-sidebar-foreground">
       <SidebarHeader className="flex h-11 w-full flex-row items-center justify-between gap-2 border-b border-sidebar-border px-2.5 py-0">
-        <button
-          type="button"
-          onClick={() => router.push("/")}
-          className="flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-sidebar-accent"
-        >
-          <span className="grid size-6 place-items-center rounded-md bg-foreground text-background">
-            <Command className="size-3.5" />
-          </span>
           <span className="truncate text-[13px] font-semibold tracking-[-0.015em]">OpenDevin</span>
-        </button>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -263,7 +253,7 @@ export function AppSidebar() {
               </Button>
             }
           />
-          <TooltipContent side="right">New project</TooltipContent>
+          <TooltipContent side="bottom">New project</TooltipContent>
         </Tooltip>
       </SidebarHeader>
 
@@ -274,7 +264,7 @@ export function AppSidebar() {
             {loading &&
               ["64%", "82%", "55%"].map((width) => (
                 <SidebarMenuItem key={width}>
-                  <SidebarMenuSkeleton showIcon width={width} />
+                  <SidebarMenuSkeleton showIcon style={{ width }} />
                 </SidebarMenuItem>
               ))}
             {!loading && projects.length === 0 && (
@@ -321,7 +311,7 @@ export function AppSidebar() {
                   {archived.length}
                 </span>
               </CollapsibleTrigger>
-              <CollapsiblePanel>
+              <CollapsibleContent>
                 <SidebarMenuSub>
                   {archived.map((session) => (
                     <SessionRow
@@ -350,7 +340,7 @@ export function AppSidebar() {
                     />
                   ))}
                 </SidebarMenuSub>
-              </CollapsiblePanel>
+              </CollapsibleContent>
             </Collapsible>
           </SidebarGroup>
         )}

@@ -19,7 +19,7 @@ import {
 
 import {
   Collapsible,
-  CollapsiblePanel,
+  CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { describeTool, toolBaseName, type ChipTone, type ToolKind } from "@/lib/tools";
@@ -322,11 +322,11 @@ export function ActivityNode({ part }: { part: AgentToolPart }) {
           className="size-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 group-data-[panel-open]/node:rotate-90"
         />
       </CollapsibleTrigger>
-      <CollapsiblePanel>
+      <CollapsibleContent>
         <div className="pt-1.5 pr-1 pb-2.5 pl-6">
           <ToolDetail part={part} />
         </div>
-      </CollapsiblePanel>
+      </CollapsibleContent>
     </Collapsible>
   );
 }

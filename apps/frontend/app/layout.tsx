@@ -7,11 +7,9 @@ import { AppSidebar } from "@/components/sidebar";
 import { AppProviders } from "@/components/providers";
 import { ConfirmProvider } from "@/components/ui/confirm";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-const geistSans = Geist({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const geistMono = Geist_Mono({
   variable: "--font-mono",
@@ -25,7 +23,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="en" className={cn("dark", "h-full", "antialiased", geistMono.variable, "font-sans", geist.variable)}>
       <body className="h-screen w-full bg-background">
         <AppProviders>
           <TooltipProvider>

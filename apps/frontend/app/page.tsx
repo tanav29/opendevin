@@ -87,11 +87,11 @@ export function Home() {
       <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-background">
         <SessionHeader />
         <div className="flex flex-1 flex-col items-center justify-center px-6">
-          <div className="animate-rise max-w-sm text-center">
-            <span className="mx-auto flex size-9 items-center justify-center rounded-lg border bg-surface-2">
+          <div className="animate-rise max-w-sm rounded-xl border bg-surface-1/50 px-6 py-8 text-center shadow-sm">
+            <span className="mx-auto flex size-9 items-center justify-center rounded-lg border bg-brand-muted text-brand">
               <Command className="size-4 text-muted-foreground" />
             </span>
-            <h1 className="mt-4 text-[15px] font-medium tracking-[-0.01em]">No session open</h1>
+            <h1 className="mt-4 text-base font-medium tracking-[-0.025em]">No session open</h1>
             <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
               Pick a session from the sidebar, or point the agent at a repository to start a new one.
             </p>

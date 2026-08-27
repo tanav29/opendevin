@@ -184,10 +184,10 @@ export default function ProjectPage() {
         />
       }
     >
-      <PageContainer className="pt-10 pb-12">
-        <p className="eyebrow">New session</p>
-        <h2 className="mt-2 text-[22px] font-medium tracking-[-0.025em]">What should we change?</h2>
-        <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+      <PageContainer className="animate-rise pt-12 pb-16">
+        <p className="eyebrow text-brand">New session</p>
+        <h2 className="mt-3 text-2xl font-medium tracking-[-0.035em]">What should we change?</h2>
+        <p className="mt-3 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
           Every session gets its own sandbox with{" "}
           <span className="mono text-foreground">{project?.git ? repoName(project.git) : "the repository"}</span> checked
           out, so they never step on each other.

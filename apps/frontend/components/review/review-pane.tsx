@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Download,
   ExternalLink,
+  FileDiff,
   LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
@@ -20,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Collapsible,
-  CollapsiblePanel,
+  CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
@@ -105,7 +106,7 @@ function FileRow({
           <Stat file={file} />
         )}
       </CollapsibleTrigger>
-      <CollapsiblePanel>
+      <CollapsibleContent>
         {file.binary ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">
             Binary file — no text diff to show.
@@ -126,7 +127,7 @@ function FileRow({
             className="text-[12px] [--diffs-bg-separator-override:var(--surface-2)]"
           />
         )}
-      </CollapsiblePanel>
+      </CollapsibleContent>
     </Collapsible>
   );
 }
@@ -378,9 +379,10 @@ export function ReviewPane({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!hasDiff ? (
           <div className="flex h-full items-center justify-center px-6 py-10">
-            <div className="max-w-56 text-center">
-              <p className="text-[13px] font-medium">No changes yet</p>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            <div className="max-w-64 text-center">
+              <span className="mx-auto grid size-9 place-items-center rounded-xl border bg-surface-1 text-muted-foreground"><FileDiff className="size-4" /></span>
+              <p className="mt-4 text-[13px] font-medium">No changes yet</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                 Edits the agent makes to the repository show up here as a diff.
               </p>
             </div>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "convex/react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { ArrowDown, Hammer, Play } from "lucide-react";
+import { ArrowDown, Hammer, Play, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Composer } from "@/components/chat/composer";
@@ -171,7 +171,7 @@ export function Chat({ session, project }: { session: Session; project?: Project
         className="min-h-0 flex-1 overflow-y-auto"
       >
         <div className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-5 sm:px-6">
-          {messages.length === 0 && <EmptyState git={session.git} />}
+          {messages.length === 0 && <EmptyState git={session.git} onSelect={send} />}
           {messages.map((message) => (
             <Message key={message.id} message={message} streaming={working && message.id === lastId} />
           ))}
@@ -191,8 +191,7 @@ export function Chat({ session, project }: { session: Session; project?: Project
         </Button>
       )}
 
-      <div className="flex items-center gap-1.5 border-t bg-background px-4 pt-2 sm:px-6">
-        <span className="eyebrow mr-1">Quick run</span>
+      <div className="flex items-center gap-1.5 bg-background px-4 sm:px-6">
         {project?.devCommand && <Button size="xs" variant="outline" disabled={busy} onClick={() => quickRun("dev")}><Play /> Dev <span className="mono hidden text-muted-foreground sm:inline">{project.devCommand}</span></Button>}
         {project?.buildCommand && <Button size="xs" variant="outline" disabled={busy} onClick={() => quickRun("build")}><Hammer /> Build <span className="mono hidden text-muted-foreground sm:inline">{project.buildCommand}</span></Button>}
       </div>
@@ -201,15 +200,32 @@ export function Chat({ session, project }: { session: Session; project?: Project
   );
 }
 
-function EmptyState({ git }: { git: string }) {
+function EmptyState({ git, onSelect }: { git: string; onSelect: (text: string) => void }) {
+  const suggestions = ["Give me a quick tour of this repository", "Find a small bug worth fixing", "Add tests for the most important path"];
+
   return (
-    <div className="animate-rise rounded-xl border border-dashed bg-surface-1/50 px-5 py-8">
-      <p className="eyebrow">Ready</p>
-      <h2 className="mt-2 text-[15px] font-medium tracking-[-0.02em]">What should we change?</h2>
-      <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+    <div className="animate-rise rounded-xl border bg-surface-1/50 px-5 py-7 sm:px-6">
+      <div className="flex items-center gap-2">
+        <span className="grid size-7 place-items-center rounded-lg bg-brand-muted text-brand"><Sparkles className="size-3.5" /></span>
+        <p className="eyebrow">Ready when you are</p>
+      </div>
+      <h2 className="mt-4 text-base font-medium tracking-[-0.025em]">What should we change?</h2>
+      <p className="mt-1.5 max-w-lg text-[13px] leading-relaxed text-muted-foreground">
         Describe the outcome you want in <span className="mono text-foreground">{repoName(git)}</span>. The agent reads
         the repository, makes the changes, and shows you the diff.
       </p>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {suggestions.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            onClick={() => onSelect(suggestion)}
+            className="rounded-md border bg-background/60 px-2.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:border-brand/50 hover:bg-brand-muted hover:text-foreground"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

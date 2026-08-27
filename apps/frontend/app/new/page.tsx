@@ -84,11 +84,11 @@ export default function NewPage() {
 
   return (
     <PageShell header={<PageHeader title="New project" />}>
-      <PageContainer size="sm" className="pt-10 pb-12">
+      <PageContainer size="sm" className="pt-12 pb-16">
         <form onSubmit={submit} className="animate-rise">
           <p className="eyebrow">Start here</p>
-          <h2 className="mt-2 text-[22px] font-medium tracking-[-0.025em]">Point the agent at a repository</h2>
-          <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+          <h2 className="mt-3 text-2xl font-medium tracking-[-0.035em]">Point the agent at a repository</h2>
+          <p className="mt-3 max-w-lg text-[13px] leading-relaxed text-muted-foreground">
             A project holds every session for one repository. Each session runs in its own sandbox, so parallel
             work never collides.
           </p>

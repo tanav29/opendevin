@@ -22,7 +22,7 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "z-10 flex h-11 shrink-0 items-center gap-1.5 border-b bg-background px-1.5 sm:px-2",
+        "z-10 flex h-12 shrink-0 items-center gap-1.5 border-b bg-background/95 px-2 backdrop-blur-sm sm:px-3",
         className,
       )}
     >
@@ -77,6 +77,6 @@ export function PageContainer({
     wide: "max-w-3xl",
   };
   return (
-    <div className={cn("mx-auto w-full px-4 sm:px-6", widths[size], className)}>{children}</div>
+    <div className={cn("mx-auto w-full px-5 sm:px-8", widths[size], className)}>{children}</div>
   );
 }

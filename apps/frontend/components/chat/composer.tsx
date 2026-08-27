@@ -83,13 +83,10 @@ export function Composer({
               }
             }}
             placeholder={placeholder}
-            className="block max-h-[200px] w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
+            className="block max-h-[200px] min-h-12 w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           />
-          <div className="flex items-center justify-between gap-2 px-2 pb-2">
-            <p className="hidden min-w-0 truncate pl-1 text-[11px] text-muted-foreground/60 sm:block">
-              <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
-            </p>
-            <span className="pl-1 text-[11px] text-muted-foreground/60 sm:hidden">
+          <div className="flex items-center justify-end gap-2 px-2 pb-2 text-xs">
+            <span className="pl-1 text-muted-foreground/60 sm:hidden">
               {value.length > 0 ? `${value.length} chars` : ""}
             </span>
             {busy ? (

@@ -14,6 +14,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useConvexAuth } from "convex/react";
 import { ConvexAuthProvider, useAuthActions, useAuthToken } from "@convex-dev/auth/react";
 import { IconBrandGithub } from "@tabler/icons-react";
+import { ArrowUpRight, Command, GitBranch, LockKeyhole } from "lucide-react";
 import { convex } from "@/lib/convex";
 import { Button } from "@/components/ui/button";
 import { api } from "@convex/_generated/api";
@@ -146,14 +147,50 @@ function AuthGate({ children }: { children: ReactNode }) {
     );
   if (isAuthenticated) return <>{children}</>;
   return (
-    <div className="grid min-h-screen place-items-center bg-background px-6">
-      <div className="w-full max-w-sm rounded-xl border bg-surface-1 p-6 shadow-2xl shadow-black/10">
-        <p className="eyebrow">OpenDevin</p>
-        <h1 className="mt-2 text-xl font-medium tracking-[-0.02em]">Sign in to your workspace</h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">Projects and sessions are private to your GitHub account.</p>
-        <Button className="mt-5 w-full" onClick={() => void signIn("github")}>
-          <IconBrandGithub /> Continue with GitHub
-        </Button>
+    <div className="relative min-h-screen overflow-hidden bg-background px-5 py-5 sm:px-8 sm:py-8">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,color-mix(in_oklab,var(--brand)_12%,transparent),transparent_30%),radial-gradient(circle_at_85%_82%,color-mix(in_oklab,var(--brand)_7%,transparent),transparent_28%)]" />
+      <div className="relative mx-auto flex min-h-[calc(100vh-2.5rem)] max-w-5xl flex-col justify-between rounded-2xl border border-white/[0.08] bg-surface-1/55 p-5 shadow-2xl shadow-black/20 backdrop-blur-sm sm:min-h-[calc(100vh-4rem)] sm:p-8">
+        <header className="flex items-center justify-between">
+          <button type="button" className="flex items-center gap-2 text-left" aria-label="OpenDevin home">
+            <span className="grid size-7 place-items-center rounded-lg bg-foreground text-background shadow-sm">
+              <Command className="size-3.5" />
+            </span>
+            <span className="text-[13px] font-semibold tracking-[-0.02em]">OpenDevin</span>
+          </button>
+          <span className="eyebrow hidden sm:block">Autonomous development workspace</span>
+        </header>
+
+        <main className="grid gap-12 py-16 lg:grid-cols-[1fr_360px] lg:items-center lg:gap-20 lg:py-20">
+          <section className="max-w-xl animate-rise">
+            <p className="eyebrow text-brand">Ship from intent</p>
+            <h1 className="mt-4 max-w-lg text-4xl font-medium leading-[1.02] tracking-[-0.055em] sm:text-6xl">
+              Your repository, with a second pair of hands.
+            </h1>
+            <p className="mt-6 max-w-md text-[15px] leading-7 text-muted-foreground sm:text-base">
+              Give an agent a task. Review the work as it happens. Keep every session, diff, and decision close to the code.
+            </p>
+            <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-[12px] text-muted-foreground">
+              <span className="inline-flex items-center gap-2"><GitBranch className="size-3.5 text-brand" /> Isolated sessions</span>
+              <span className="inline-flex items-center gap-2"><LockKeyhole className="size-3.5 text-brand" /> Private by default</span>
+            </div>
+          </section>
+
+          <section className="animate-rise rounded-xl border border-white/[0.1] bg-background/80 p-6 shadow-xl shadow-black/20 [animation-delay:100ms] sm:p-7">
+            <p className="eyebrow">Open your workspace</p>
+            <h2 className="mt-3 text-xl font-medium tracking-[-0.03em]">Sign in with GitHub</h2>
+            <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">Your repositories and sessions stay tied to your GitHub account.</p>
+            <Button className="mt-6 h-10 w-full justify-between px-3.5" onClick={() => void signIn("github")}>
+              <span className="flex items-center gap-2"><IconBrandGithub className="size-4" /> Continue with GitHub</span>
+              <ArrowUpRight className="size-3.5 opacity-60" />
+            </Button>
+            <p className="mt-4 text-center text-[11px] leading-relaxed text-muted-foreground/70">No password to remember. You can sign out any time.</p>
+          </section>
+        </main>
+
+        <footer className="flex items-center justify-between border-t border-white/[0.08] pt-4 text-[11px] text-muted-foreground/65">
+          <span>Build with focus.</span>
+          <span className="mono">v0.1</span>
+        </footer>
       </div>
     </div>
   );

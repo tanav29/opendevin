@@ -1,6 +1,7 @@
 # OpenDevin
 
 # GH APP LINK - https://github.com/settings/apps/tp-opendevin
+# SHADCN theme - bdvw9qPg
 
 OpenDevin is a local autonomous coding workspace. It uses an AI model (via OpenRouter) to plan and edit code inside an isolated sandbox, with a Next.js interface.
 
