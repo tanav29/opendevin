@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -18,6 +16,7 @@ import { ArrowUpRight, Command, GitBranch, LockKeyhole } from "lucide-react";
 import { convex } from "@/lib/convex";
 import { Button } from "@/components/ui/button";
 import { api } from "@convex/_generated/api";
+import { sessionUISelectors, useSessionUIStore } from "@/lib/session-ui-store";
 
 export type Session = {
   id: string;
@@ -128,10 +127,6 @@ export function useWorkspaceData() {
   };
 }
 
-const SessionSelectionContext = createContext<{
-  activeSessionId: string | null;
-  selectSession: (id: string | null) => void;
-} | null>(null);
 
 function AuthGate({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
@@ -205,24 +200,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
         },
       }),
   );
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-
-  useEffect(() => {
-    queueMicrotask(() => setActiveSessionId(window.localStorage.getItem("opendevin:active-session")));
-  }, []);
-
-  const selectSession = useCallback((id: string | null) => {
-    setActiveSessionId(id);
-    if (id) window.localStorage.setItem("opendevin:active-session", id);
-    else window.localStorage.removeItem("opendevin:active-session");
-  }, []);
-
   return (
     <ConvexAuthProvider client={convex}>
       <QueryClientProvider client={queryClient}>
-        <SessionSelectionContext.Provider value={{ activeSessionId, selectSession }}>
-          <AuthGate>{children}</AuthGate>
-        </SessionSelectionContext.Provider>
+        <AuthGate>{children}</AuthGate>
       </QueryClientProvider>
     </ConvexAuthProvider>
   );
@@ -267,7 +248,7 @@ export function useGitHubSession() {
 }
 
 export function useSessionSelection() {
-  const value = useContext(SessionSelectionContext);
-  if (!value) throw new Error("useSessionSelection must be used inside AppProviders");
-  return value;
+  const activeSessionId = useSessionUIStore(sessionUISelectors.activeSessionId);
+  const selectSession = useSessionUIStore(sessionUISelectors.selectSession);
+  return { activeSessionId, selectSession };
 }

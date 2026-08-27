@@ -2,17 +2,17 @@
 
 ## 1. Define behavior and data requirements
 
-[ ] Document the right-panel states: hidden, unavailable, loading, preview, and changes
-[ ] Define when a session is considered sandbox-enabled/running and what happens when the sandbox stops
-[ ] Define the session status model: created time, sandbox status, streaming status, and error state
-[ ] Decide which state belongs in Convex/server data and which state belongs in client UI state
+[x] Document the right-panel states: hidden, unavailable, loading, preview, and changes
+[x] Define when a session is considered sandbox-enabled/running and what happens when the sandbox stops
+[x] Define the session status model: created time, sandbox status, streaming status, and error state
+[x] Decide which state belongs in Convex/server data and which state belongs in client UI state
 
 ## 2. Establish client state management
 
-[ ] Add Zustand for shared UI state only (active right-panel tab, open/collapsed state, selected session)
-[ ] Keep server/session state sourced from Convex instead of duplicating it in Zustand
-[ ] Add typed actions/selectors and reset state when switching sessions
-[ ] Handle loading, stale, disconnected, and error states without showing misleading status
+[x] Add Zustand for shared UI state only (active right-panel tab, open/collapsed state, selected session)
+[x] Keep server/session state sourced from Convex instead of duplicating it in Zustand
+[x] Add typed actions/selectors and reset state when switching sessions
+[x] Handle loading, stale, disconnected, and error states without showing misleading status
 
 ## 3. Clean up the navigation
 

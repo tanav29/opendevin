@@ -15,24 +15,13 @@ import { ReviewPane } from "@/components/review/review-pane";
 import { PreviewPane } from "@/components/preview/preview-pane";
 import { SessionHeader } from "@/components/session/session-header";
 import { Button } from "@/components/ui/button";
-import { usePersisted } from "@/lib/persisted";
-import { useMediaQuery } from "@/lib/media";
+
+import { sessionUISelectors, useSessionUIStore } from "@/lib/session-ui-store";
 import { cn } from "@/lib/utils";
 
 const MIN_PANE = 25;
 const MAX_PANE = 62;
-const DEFAULT_PANE = 40;
-const WIDTH_KEY = "opendevin:pane-width";
-const COLLAPSED_KEY = "opendevin:pane-collapsed";
-
 const clamp = (value: number) => Math.min(MAX_PANE, Math.max(MIN_PANE, Math.round(value)));
-
-const readWidth = (raw: string | null) => {
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? clamp(value) : DEFAULT_PANE;
-};
-
-const readCollapsed = (raw: string | null) => (raw === null ? window.innerWidth < 768 : raw === "true");
 
 export function Home() {
   const router = useRouter();
@@ -42,20 +31,20 @@ export function Home() {
   const active = sessions.find((s) => s.id === activeSessionId) ?? null;
   const project = active?.projectId ? projects.find((item) => item.id === active.projectId) : undefined;
 
-  const [savedWidth, saveWidth] = usePersisted(WIDTH_KEY, DEFAULT_PANE, readWidth);
-  const [savedCollapsed, setSavedCollapsed] = usePersisted(COLLAPSED_KEY, false, readCollapsed);
-  const wide = useMediaQuery("(min-width: 768px)");
-  const [showingDiff, setShowingDiff] = useState(false);
-  const [showingPreview, setShowingPreview] = useState(false);
-  const collapsed = wide ? savedCollapsed : !showingDiff;
+
+  const rightPanelOpen = useSessionUIStore(sessionUISelectors.rightPanelOpen);
+  const rightPanelTab = useSessionUIStore(sessionUISelectors.rightPanelTab);
+  const savedWidth = useSessionUIStore(sessionUISelectors.rightPanelWidth);
+  const setRightPanelOpen = useSessionUIStore(sessionUISelectors.setRightPanelOpen);
+  const setRightPanelTab = useSessionUIStore(sessionUISelectors.setRightPanelTab);
+  const saveWidth = useSessionUIStore(sessionUISelectors.setRightPanelWidth);
+  const collapsed = !rightPanelOpen;
   function togglePane() {
-    if (wide) setSavedCollapsed(!savedCollapsed);
-    else setShowingDiff(!showingDiff);
+    setRightPanelOpen(!rightPanelOpen);
   }
   function togglePreview() {
-    if (wide) setSavedCollapsed(false);
-    else setShowingDiff(true);
-    setShowingPreview((value) => !value);
+    setRightPanelOpen(true);
+    setRightPanelTab(rightPanelTab === "preview" ? "changes" : "preview");
   }
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const paneWidth = dragWidth ?? savedWidth;
@@ -129,17 +118,18 @@ export function Home() {
             className="relative hidden w-px shrink-0 cursor-col-resize bg-border transition-colors duration-100 after:absolute after:inset-y-0 after:-left-1 after:-right-1 after:content-[''] hover:bg-brand focus-visible:bg-brand md:block"
           />
         )}
-        {showingPreview ? (
+        {rightPanelTab === "preview" ? (
           <aside className={cn("flex min-h-0 min-w-0 flex-1 flex-col border-l bg-background", collapsed ? "hidden" : "w-full md:w-[var(--pane)] md:flex-none")} style={collapsed ? undefined : ({ "--pane": `${paneWidth}%` } as CSSProperties)}>
             <header className="flex h-11 shrink-0 items-center gap-1.5 border-b bg-background px-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setShowingPreview(false)}>Changes</Button>
+              <Button variant="ghost" size="sm" onClick={() => setRightPanelTab("changes")}>Changes</Button>
               <span className="rounded-md bg-surface-2 px-2 py-1 text-[13px] font-medium">Preview</span>
               <div className="flex-1" />
-              <Button variant="ghost" size="sm" onClick={() => setShowingPreview(false)}>Close</Button>
+              <Button variant="ghost" size="sm" onClick={() => setRightPanelOpen(false)}>Close</Button>
             </header>
-            <PreviewPane sessionId={active.id} />
+            <PreviewPane key={active.id} sessionId={active.id} />
           </aside>
         ) : <ReviewPane
+          key={active.id}
           session={active}
           collapsed={collapsed}
           onToggle={togglePane}
