@@ -22,21 +22,23 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "z-10 flex h-12 shrink-0 items-center gap-1.5 border-b bg-background/95 px-2 backdrop-blur-sm sm:px-3",
+        "z-10 flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-card px-2 sm:px-3",
         className,
       )}
     >
       <Tooltip>
-        <TooltipTrigger render={<SidebarTrigger />} />
-        <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+        <TooltipTrigger render={<SidebarTrigger className="size-7" />} />
+        <TooltipContent side="bottom">Toggle sidebar — ⌘B</TooltipContent>
       </Tooltip>
+      <span className="mx-1 hidden h-4 w-px shrink-0 bg-border sm:inline" aria-hidden />
+
       {icon && <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span>}
       {title && (
-        <h1 className="min-w-0 truncate text-[13px] font-medium tracking-[-0.01em]">{title}</h1>
+        <h1 className="min-w-0 truncate font-serif text-[13px] font-medium tracking-[-0.02em] text-foreground">{title}</h1>
       )}
       {description && (
-        <span className="mono hidden min-w-0 truncate text-[11.5px] text-muted-foreground sm:inline">
-          {description}
+        <span className="mono hidden min-w-0 truncate text-[11.5px] text-muted-foreground/70 sm:inline">
+          · {description}
         </span>
       )}
       {children}

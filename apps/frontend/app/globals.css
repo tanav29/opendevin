@@ -6,18 +6,16 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ---------------------------------------------------------------------------
- * Design tokens
- *
- * Surfaces climb a five-step ladder so elevation reads without borders doing
- * all the work. Text descends a three-step ramp. One accent — the cyan git
- * uses for diff hunk headers — carries every interactive and in-progress
- * state, which leaves green and red to mean only "added" and "removed".
+ * Design tokens — Premium Utilitarian Minimalism (warm monochrome)
+ * Canvas: warm bone #FBFBFA, Surfaces: #FFFFFF, Borders: #EAEAEA
+ * Text: #111111 / #787774, Accents: washed pastels only
  * ------------------------------------------------------------------------- */
 
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
 
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
@@ -86,10 +84,10 @@
 }
 
 :root {
-  --surface-1: oklch(1 0 0);
-  --surface-2: oklch(0.985 0 0);
-  --surface-3: oklch(0.965 0 0);
-  --surface-4: oklch(0.94 0 0);
+  --surface-1: #FFFFFF;
+  --surface-2: #F7F6F3;
+  --surface-3: #FBFBFA;
+  --surface-4: #F0EFEC;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
@@ -104,19 +102,19 @@
   --accent-foreground: oklch(0.21 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.92 0.004 286.32);
-  --border-strong: oklch(0 0 0 / 16%);
+  --border-strong: #DDDDDD;
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
 
-  --brand: oklch(0.55 0.12 216);
-  --brand-muted: oklch(0.55 0.12 216 / 10%);
-  --brand-foreground: oklch(0.99 0 0);
-  --success: oklch(0.52 0.14 148);
-  --success-muted: oklch(0.52 0.14 148 / 10%);
-  --warning: oklch(0.62 0.14 70);
-  --warning-muted: oklch(0.62 0.14 70 / 12%);
-  --danger: oklch(0.55 0.2 25);
-  --danger-muted: oklch(0.55 0.2 25 / 10%);
+  --brand: #111111;
+  --brand-muted: #F7F6F3;
+  --brand-foreground: #FFFFFF;
+  --success: #346538;
+  --success-muted: #EDF3EC;
+  --warning: #956400;
+  --warning-muted: #FBF3DB;
+  --danger: #9F2F2D;
+  --danger-muted: #FDEBEC;
 
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
@@ -124,7 +122,7 @@
   --chart-4: oklch(0.37 0.013 285.805);
   --chart-5: oklch(0.274 0.006 286.033);
 
-  --radius: 0.625rem;
+  --radius: 0.45rem;
 
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
@@ -135,27 +133,24 @@
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
 
-  --shadow-raised:
-    inset 0 1px 0 0 oklch(1 0 0 / 60%), 0 1px 2px 0 oklch(0 0 0 / 8%);
-  --shadow-overlay:
-    0 1px 2px 0 oklch(0 0 0 / 6%), 0 12px 32px -8px oklch(0 0 0 / 18%);
+  --shadow-raised: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-overlay: 0 4px 16px rgba(0,0,0,0.04);
+  --shadow-inset: inset 0 0 0 1px #EAEAEA;
 
-  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-swift: cubic-bezier(0.65, 0, 0.35, 1);
-  --motion-fast: 120ms;
-  --motion-normal: 200ms;
-  --motion-slow: 320ms;
+  --motion-fast: 100ms;
+  --motion-normal: 160ms;
+  --motion-slow: 260ms;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
 }
 
 .dark {
-  /* Surfaces: #0a0a0a → #131313 → #1a1a1a → #232323 → #2c2c2c */
-  --surface-1: oklch(0.178 0 0);
-  --surface-2: oklch(0.205 0 0);
-  --surface-3: oklch(0.245 0 0);
-  --surface-4: oklch(0.285 0 0);
-
+  --surface-1: #1A1A19;
+  --surface-2: #232221;
+  --surface-3: #2A2928;
+  --surface-4: #31302F;
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.006 285.885);
@@ -172,27 +167,18 @@
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
-  --border-strong: oklch(1 0 0 / 14%);
+  --border-strong: rgba(255,255,255,0.12);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
-
-  /* The cyan git prints on `@@` hunk headers. */
-  --brand: oklch(0.76 0.115 216);
-  --brand-muted: oklch(0.76 0.115 216 / 14%);
-  --brand-foreground: oklch(0.16 0 0);
-  --success: oklch(0.76 0.16 148);
-  --success-muted: oklch(0.76 0.16 148 / 13%);
-  --warning: oklch(0.82 0.14 80);
-  --warning-muted: oklch(0.82 0.14 80 / 14%);
-  --danger: oklch(0.7 0.19 24);
-  --danger-muted: oklch(0.7 0.19 24 / 13%);
-
-  --chart-1: oklch(0.871 0.006 286.286);
-  --chart-2: oklch(0.552 0.016 285.938);
-  --chart-3: oklch(0.442 0.017 285.786);
-  --chart-4: oklch(0.37 0.013 285.805);
-  --chart-5: oklch(0.274 0.006 286.033);
-
+  --brand: #FBFBFA;
+  --brand-muted: #232221;
+  --brand-foreground: #111111;
+  --success: #7AB87F;
+  --success-muted: rgba(122,184,127,0.12);
+  --warning: #D4A843;
+  --warning-muted: rgba(212,168,67,0.12);
+  --danger: #E07A78;
+  --danger-muted: rgba(224,122,120,0.12);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -201,186 +187,11 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.552 0.016 285.938);
-
-  --shadow-raised:
-    inset 0 1px 0 0 oklch(1 0 0 / 5%), 0 1px 2px 0 oklch(0 0 0 / 40%);
-  --shadow-overlay:
-    0 1px 2px 0 oklch(0 0 0 / 40%), 0 16px 48px -12px oklch(0 0 0 / 70%);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  html {
-    @apply font-sans;
-    -webkit-tap-highlight-color: transparent;
-  }
-  body {
-    @apply bg-background text-foreground;
-    text-rendering: optimizeLegibility;
-  }
-  /* One focus treatment for the whole product. */
-  :focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 1px;
-    border-radius: var(--radius-sm);
-  }
-  ::selection {
-    background-color: var(--brand-muted);
-  }
-  /* Numbers that change in place must not reflow. */
-  :where(code, kbd, samp, pre, [data-numeric]) {
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-/* ---------------------------------------------------------------------------
- * Utilities
- * ------------------------------------------------------------------------- */
-
-/* Small caps label for machine-authored section headings. */
-@utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-}
-
-/* Paths, commands, ids — anything the machine wrote. */
-@utility mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-}
-
-/* Panels that sit above the page: composer, cards, popovers. */
-@utility raised {
-  box-shadow: var(--shadow-raised);
-}
-
-@utility overlay {
-  box-shadow: var(--shadow-overlay);
-}
-
-/* Truncates a path from the left so the filename stays visible. */
-@utility truncate-start {
-  direction: rtl;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  unicode-bidi: plaintext;
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-/* The halo around the spine node the agent is working on right now. */
-@keyframes halo {
-  0% {
-    box-shadow: 0 0 0 0 var(--brand-muted);
-  }
-  70% {
-    box-shadow: 0 0 0 5px transparent;
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
-
-@keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-
-/* Light travelling down the spine rail while a turn is live. */
-@keyframes crawl {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 0 12px;
-  }
-}
-
-@keyframes shimmer {
-  0% { opacity: 0.55; }
-  50% { opacity: 1; }
-  100% { opacity: 0.55; }
-}
-
-.shimmer {
-  animation: shimmer 1.4s ease-in-out infinite;
-}
-
-/* ---------------------------------------------------------------------------
- * Prose
- * ------------------------------------------------------------------------- */
-
-.typeset-chat {
-  --typeset-font-mono: var(--font-mono);
-  --typeset-size: 13.5px;
-  --typeset-leading: 1.65;
-  --typeset-flow: 0.9em;
-}
-
-/* ---------------------------------------------------------------------------
- * Scrollbars — present on hover, out of the way otherwise.
- * ------------------------------------------------------------------------- */
-
-* {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--foreground) 14%, transparent)
-    transparent;
-}
-
-::-webkit-scrollbar {
-  width: 11px;
-  height: 11px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: color-mix(in oklab, var(--foreground) 14%, transparent);
-  border: 3px solid transparent;
-  background-clip: padding-box;
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in oklab, var(--foreground) 26%, transparent);
-  background-clip: padding-box;
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
+  --shadow-raised: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-overlay: 0 8px 24px rgba(0,0,0,0.4);
+  --chart-1: oklch(0.871 0.006 286.286);
+  --chart-2: oklch(0.552 0.016 285.938);
+  --chart-3: oklch(0.442 0.017 285.786);
+  --chart-4: oklch(0.37 0.013 285.805);
+  --chart-5: oklch(0.274 0.006 286.033);
 }

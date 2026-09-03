@@ -17,16 +17,16 @@ export function EmptyState({
   return (
     <div className={cn("flex flex-col items-center justify-center px-6 py-10 text-center", className)}>
       {icon && (
-        <span className="flex size-9 items-center justify-center rounded-lg border bg-surface-2 text-muted-foreground">
+        <span className="flex size-9 items-center justify-center rounded-[8px] border border-border bg-card text-muted-foreground">
           {icon}
         </span>
       )}
-      <h3 className={cn("text-[13px] font-medium tracking-[-0.01em]", icon && "mt-4")}>{title}</h3>
+      <h3 className={cn("font-serif text-[13px] font-medium tracking-[-0.02em] text-foreground", icon && "mt-4")}>{title}</h3>
       {description && (
-        <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+        <p className="mt-1.5 max-w-sm text-[13px] leading-[1.6] text-muted-foreground">{description}</p>
       )}
       {action && (
-        <Button size="sm" className="mt-4" onClick={action.onClick}>
+        <Button size="sm" className="mt-4 rounded-[6px] bg-foreground text-background hover:bg-background/80" onClick={action.onClick}>
           {action.icon}
           {action.label}
         </Button>
@@ -45,7 +45,7 @@ export function InlineEmpty({
   return (
     <div
       className={cn(
-        "rounded-lg border border-dashed px-3 py-5 text-center text-[13px] text-muted-foreground",
+        "rounded-[8px] border border-dashed border-border bg-card px-3 py-5 text-center text-[13px] leading-relaxed text-muted-foreground",
         className,
       )}
     >

@@ -10,10 +10,10 @@ export type StatusTone = "running" | "idle" | "stopped" | "failed";
  * at-rest keeps a glance down the sidebar meaningful.
  */
 const TONE: Record<StatusTone, { dot: string; label: string }> = {
-  running: { dot: "bg-brand", label: "Working" },
-  idle: { dot: "bg-muted-foreground", label: "Idle" },
-  stopped: { dot: "bg-muted-foreground/40", label: "Stopped" },
-  failed: { dot: "bg-danger", label: "Failed" },
+  running: { dot: "bg-foreground shadow-[0_0_0_1px_var(--surface-2)]", label: "Working" },
+  idle: { dot: "bg-muted-foreground/70", label: "Idle" },
+  stopped: { dot: "bg-muted-foreground/30", label: "Stopped" },
+  failed: { dot: "bg-destructive", label: "Failed" },
 };
 
 export function statusTone(status: string | undefined): StatusTone {

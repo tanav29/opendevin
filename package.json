@@ -9,18 +9,12 @@
     "lint": "turbo lint",
     "format": "turbo fmt:check",
     "format:fix": "turbo fmt",
-    "convex:dev": "convex dev",
-    "convex:codegen": "convex codegen && node scripts/copy-convex-generated.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
     "husky": "^9.1.7",
     "turbo": "^2.5.6"
   },
-  "dependencies": {
-    "@auth/core": "0.41.1",
-    "@convex-dev/auth": "^0.0.95",
-    "convex": "^1.43.0",
-    "jose": "^6.2.10"
-  }
+  "dependencies": {},
+  "workspaces": ["apps/*"]
 }
