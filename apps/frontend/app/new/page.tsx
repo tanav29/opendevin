@@ -3,4 +3,53 @@
 import Link from "next/link";
 import { useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-export default function NewProject() { const [name, setName] = useState(""); const [repo, setRepo] = useState(""); const [error, setError] = useState(""); async function createProject(event: React.FormEvent) { event.preventDefault(); const response = await fetch(`${API}/api/projects`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, repo }) }); if (!response.ok) { setError("Could not create project."); return; } window.location.href = "/"; } return <main className="mx-auto min-h-screen max-w-xl px-6 py-10"><Link href="/" className="text-sm text-muted-foreground">← Back</Link><h1 className="mt-10 font-serif text-4xl">New project</h1><form onSubmit={createProject} className="mt-8 space-y-4"><label className="block text-sm">Name<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2" /></label><label className="block text-sm">Repository URL <span className="text-muted-foreground">(optional)</span><input value={repo} onChange={(event) => setRepo(event.target.value)} className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2" /></label>{error && <p className="text-sm text-destructive">{error}</p>}<button className="rounded-md bg-foreground px-4 py-2 text-sm text-background">Create project</button></form></main>; }
+export default function NewProject() {
+  const [name, setName] = useState("");
+  const [repo, setRepo] = useState("");
+  const [error, setError] = useState("");
+  async function createProject(event: React.FormEvent) {
+    event.preventDefault();
+    const response = await fetch(`${API}/api/projects`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, repo }),
+    });
+    if (!response.ok) {
+      setError("Could not create project.");
+      return;
+    }
+    window.location.href = "/";
+  }
+  return (
+    <main className="mx-auto min-h-screen max-w-xl px-6 py-10">
+      <Link href="/" className="text-sm text-muted-foreground">
+        ← Back
+      </Link>
+      <h1 className="mt-10 text-4xl font-semibold tracking-tight">New project</h1>
+      <form onSubmit={createProject} className="mt-8 space-y-4">
+        <label className="block text-sm">
+          Name
+          <input
+            required
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm">
+          Repository URL <span className="text-muted-foreground">(optional)</span>
+          <input
+            value={repo}
+            onChange={(event) => setRepo(event.target.value)}
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2"
+          />
+        </label>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <button className="rounded-md bg-foreground px-4 py-2 text-sm text-background">
+          Create project
+        </button>
+      </form>
+    </main>
+  );
+}
