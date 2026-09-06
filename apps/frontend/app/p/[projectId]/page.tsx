@@ -26,8 +26,11 @@ import { Separator } from "@/components/ui/separator";
 import { StatusDot } from "@/components/ui/status-dot";
 import { ConfirmProvider, useConfirm } from "@/components/ui/confirm";
 import { timeAgo, repoName } from "@/lib/format";
+<<<<<<< HEAD
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+=======
+>>>>>>> cd934e0 (full testing and bug fixes)
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -211,6 +214,12 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             icon={<IconFolder className="size-4" />}
             actions={
               <div className="flex items-center gap-1.5">
+<<<<<<< HEAD
+=======
+                <Badge variant="secondary" className="hidden sm:inline-flex">
+                  <IconClock className="size-3" /> {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+                </Badge>
+>>>>>>> cd934e0 (full testing and bug fixes)
                 <Button variant="ghost" size="sm" onClick={() => void deleteProject()} disabled={deleting} className="text-muted-foreground hover:text-destructive">
                   <IconTrash className="size-4" /> <span className="hidden sm:inline">{deleting ? "Deleting…" : "Delete"}</span>
                 </Button>
@@ -220,11 +229,16 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
         }
       >
         <PageContainer size="wide" className="py-6">
+<<<<<<< HEAD
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+=======
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+>>>>>>> cd934e0 (full testing and bug fixes)
             <Link href="/" className="hover:text-foreground">
               Dashboard
             </Link>
             <span>·</span>
+<<<<<<< HEAD
             {project.repo && (
                 <a href={project.repo} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
                   <IconBrandGithub className="size-3" /> {repoName(project.repo)} ↗
@@ -282,6 +296,28 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
               </div>
 
               <div className="rounded-xl border overflow-hidden my-3">
+=======
+            <span className="text-foreground">{project.name}</span>
+            {project.repo && (
+              <>
+                <span>·</span>
+                <a href={project.repo} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
+                  <IconBrandGithub className="size-3" /> {repoName(project.repo)} ↗
+                </a>
+              </>
+            )}
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
+            {/* Sessions */}
+            <div>
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Sessions</h2>
+                <span className="font-mono text-[11px] text-muted-foreground">{sessions.length} total</span>
+              </div>
+
+              <Card className="mt-3">
+>>>>>>> cd934e0 (full testing and bug fixes)
                 {sessions.length === 0 ? (
                   <EmptyState
                     icon={<IconTerminal className="size-4" />}
@@ -324,7 +360,93 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                     })}
                   </div>
                 )}
+<<<<<<< HEAD
               </div>
+=======
+              </Card>
+
+              {sessions.length > 0 && (
+                <p className="mt-3 text-xs text-muted-foreground">Sessions stay while their sandbox lives. Kill or delete from inside the session.</p>
+              )}
+            </div>
+
+            {/* New session */}
+            <div className="lg:sticky lg:top-6 lg:self-start">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-8 items-center justify-center rounded-md border bg-muted">
+                      <IconPlus className="size-4" />
+                    </span>
+                    <div>
+                      <CardTitle className="text-[14px]">New session</CardTitle>
+                      <CardDescription className="text-[12px]">The agent gets shell + file access in a fresh sandbox.</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={createSession} className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium">First message</label>
+                      <Textarea
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder="Inspect the repo and propose a plan…"
+                        rows={5}
+                        className="mt-2 min-h-[110px] resize-none"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Tip: be concrete. “Fix the login redirect” beats “improve auth”.</p>
+                    </div>
+
+                    {showBranchPicker && (
+                      <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                        <p className="text-xs font-medium">Branch</p>
+                        {branches.length > 0 ? (
+                          <select
+                            value={branch}
+                            onChange={(e) => setBranch(e.target.value)}
+                            className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-sm"
+                          >
+                            <option value="">Default branch</option>
+                            {branches.map((b) => (
+                              <option key={b} value={b}>
+                                {b}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Default branch (e.g. main)" />
+                        )}
+                        <Input value={customBranch} onChange={(e) => setCustomBranch(e.target.value)} placeholder="Or type a new/exact branch name" />
+                        <p className="text-[11px] text-muted-foreground">Cloned into the sandbox before the agent starts.</p>
+                      </div>
+                    )}
+
+                    {error && <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+
+                    <Button type="submit" disabled={creating || !prompt.trim()} className="w-full">
+                      {creating ? "Opening sandbox…" : "Open session"}
+                    </Button>
+
+                    <Separator />
+
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <IconTerminal className="size-3.5" />
+                      Sandboxes expire after inactivity — reconnect anytime.
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <Card className="mt-3 border-dashed bg-muted/30">
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium">Productive tip</p>
+                  <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                    Start with a read-only task: “Audit the repo and list where auth is handled.” You&apos;ll get a grounded plan without touching files yet.
+                  </p>
+                </CardContent>
+              </Card>
+>>>>>>> cd934e0 (full testing and bug fixes)
             </div>
           </div>
         </PageContainer>
