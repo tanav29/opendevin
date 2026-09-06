@@ -27,11 +27,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { StatusDot } from "@/components/ui/status-dot";
 import { timeAgo, repoName } from "@/lib/format";
-<<<<<<< HEAD
 import NewProjectForm from "@/components/new-project-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-=======
->>>>>>> cd934e0 (full testing and bug fixes)
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -48,11 +45,7 @@ type Session = {
   project?: { id: string; name: string };
 };
 
-<<<<<<< HEAD
 function SignedOut({ onNewProject }: { onNewProject: () => void }) {
-=======
-function SignedOut() {
->>>>>>> cd934e0 (full testing and bug fixes)
   return (
     <PageContainer size="wide" className="py-8">
       <div className="relative overflow-hidden rounded-2xl border bg-card">
@@ -69,11 +62,7 @@ function SignedOut() {
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             <Button onClick={() => (window.location.href = "/login")}>Continue with GitHub</Button>
-<<<<<<< HEAD
              <Button variant="outline" onClick={onNewProject}>
-=======
-            <Button variant="outline" onClick={() => (window.location.href = "/new")}>
->>>>>>> cd934e0 (full testing and bug fixes)
               Create local project
             </Button>
           </div>
@@ -140,16 +129,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [q, setQ] = useState("");
-<<<<<<< HEAD
-  const [newProjectOpen, setNewProjectOpen] = useState(false);
+   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   useEffect(() => {
     const cancelled = false;
-=======
-
-  useEffect(() => {
-    let cancelled = false;
->>>>>>> cd934e0 (full testing and bug fixes)
     async function load() {
       try {
         const pr = await fetch(`${API}/api/projects`, { credentials: "include" });
@@ -206,7 +189,6 @@ export default function Home() {
               actions={<Button size="sm" onClick={() => (window.location.href = "/login")}>Sign in</Button>}
             />
           }
-<<<<<<< HEAD
          >
              <SignedOut onNewProject={() => setNewProjectOpen(true)} />
          </PageShell>
@@ -220,12 +202,6 @@ export default function Home() {
            </DialogContent>
          </Dialog>
        </AppShell>
-=======
-        >
-          <SignedOut />
-        </PageShell>
-      </AppShell>
->>>>>>> cd934e0 (full testing and bug fixes)
     );
   }
 
@@ -238,17 +214,10 @@ export default function Home() {
             description={signedIn ? `${projects.length} projects · ${activeSessions} active` : "Loading…"}
             actions={
               <div className="flex items-center gap-1.5">
-<<<<<<< HEAD
                  <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => setNewProjectOpen(true)}>
                   <IconPlus className="size-4" /> New project
                 </Button>
                  <Button size="sm" className="sm:hidden" onClick={() => setNewProjectOpen(true)}>
-=======
-                <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => (window.location.href = "/new")}>
-                  <IconPlus className="size-4" /> New project
-                </Button>
-                <Button size="sm" className="sm:hidden" onClick={() => (window.location.href = "/new")}>
->>>>>>> cd934e0 (full testing and bug fixes)
                   <IconPlus className="size-4" />
                 </Button>
               </div>
@@ -257,26 +226,6 @@ export default function Home() {
         }
       >
         <PageContainer size="wide" className="py-6">
-<<<<<<< HEAD
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative max-w-sm flex-1">
-              <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Filter projects and sessions…"
-                className="h-8 pl-8 text-[13px]"
-              />
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Projects</h2>
-               <button type="button" onClick={() => setNewProjectOpen(true)} className="text-xs text-muted-foreground hover:text-foreground">
-                 Add project
-               </button>
-=======
           <div className="grid gap-3 sm:grid-cols-3">
             <Card>
               <CardContent className="p-4">
@@ -336,7 +285,6 @@ export default function Home() {
               <Link href="/new" className="text-xs text-muted-foreground hover:text-foreground">
                 Add project →
               </Link>
->>>>>>> cd934e0 (full testing and bug fixes)
             </div>
 
             {loading ? (
@@ -355,11 +303,7 @@ export default function Home() {
                   icon={<IconFolder className="size-4" />}
                   title={projects.length === 0 ? "No projects yet" : "No matches"}
                   description={projects.length === 0 ? "Create a project from a repo or start blank. The agent works inside an isolated sandbox." : `No projects match “${q}”.`}
-<<<<<<< HEAD
-                   action={projects.length === 0 ? { label: "New project", onClick: () => setNewProjectOpen(true), icon: <IconPlus className="size-4" /> } : undefined}
-=======
                   action={projects.length === 0 ? { label: "New project", onClick: () => (window.location.href = "/new"), icon: <IconPlus className="size-4" /> } : undefined}
->>>>>>> cd934e0 (full testing and bug fixes)
                 />
               </Card>
             ) : (
@@ -409,11 +353,8 @@ export default function Home() {
             </div>
 
             {loading ? (
-<<<<<<< HEAD
               <div className="divide-y">
-=======
-              <Card className="mt-3 divide-y">
->>>>>>> cd934e0 (full testing and bug fixes)
+
                 {[0, 1, 2].map((i) => (
                   <div key={i} className="flex items-center justify-between p-4">
                     <div className="space-y-2">
@@ -423,29 +364,17 @@ export default function Home() {
                     <Skeleton className="h-3 w-16" />
                   </div>
                 ))}
-<<<<<<< HEAD
               </div>
             ) : sessions.length === 0 ? (
               <div>
-=======
-              </Card>
-            ) : sessions.length === 0 ? (
-              <Card className="mt-3">
->>>>>>> cd934e0 (full testing and bug fixes)
                 <EmptyState
                   icon={<IconTerminal className="size-4" />}
                   title="No sessions yet"
                   description="Open a project and give the agent a first task. It will read the repo and start planning right away."
                 />
-<<<<<<< HEAD
               </div>
             ) : (
               <div className="divide-y my-3 border rounded-xl overflow-hidden">
-=======
-              </Card>
-            ) : (
-              <Card className="mt-3 divide-y">
->>>>>>> cd934e0 (full testing and bug fixes)
                 {filteredSessions.map((s) => (
                   <Link key={s.id} href={`/s/${s.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
                     <StatusDot status={s.status} />
@@ -464,7 +393,6 @@ export default function Home() {
                 {filteredSessions.length === 0 && (
                   <div className="px-4 py-6 text-center text-sm text-muted-foreground">No sessions match “{q}”.</div>
                 )}
-<<<<<<< HEAD
               </div>
             )}
           </div>
@@ -480,25 +408,5 @@ export default function Home() {
          </DialogContent>
        </Dialog>
      </AppShell>
-=======
-              </Card>
-            )}
-          </div>
-
-          <div className="mt-10 rounded-xl border bg-card p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Start a new workspace</p>
-                <p className="text-[13px] text-muted-foreground">Any public Git URL works. The agent clones it into a fresh sandbox.</p>
-              </div>
-              <Button onClick={() => (window.location.href = "/new")}>
-                <IconPlus className="size-4" /> New project
-              </Button>
-            </div>
-          </div>
-        </PageContainer>
-      </PageShell>
-    </AppShell>
->>>>>>> cd934e0 (full testing and bug fixes)
   );
 }

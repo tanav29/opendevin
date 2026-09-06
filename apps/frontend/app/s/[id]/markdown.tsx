@@ -27,7 +27,10 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
       const lm = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (lm) {
         const href = lm[2].trim();
-        const safe = /^(https?:|mailto:|\/|#)/i.test(href) && !/^\s*javascript:/i.test(href) && !/^\s*data:/i.test(href);
+        const safe =
+          /^(https?:|mailto:|\/|#)/i.test(href) &&
+          !/^\s*javascript:/i.test(href) &&
+          !/^\s*data:/i.test(href);
         if (safe) {
           parts.push(
             <a

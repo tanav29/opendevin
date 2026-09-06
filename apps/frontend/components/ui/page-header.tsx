@@ -31,7 +31,9 @@ export function PageHeader({
 
       {icon && <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span>}
       {title && (
-        <h1 className="min-w-0 truncate font-serif text-[13px] font-medium tracking-[-0.02em] text-foreground">{title}</h1>
+        <h1 className="min-w-0 truncate font-serif text-[13px] font-medium tracking-[-0.02em] text-foreground">
+          {title}
+        </h1>
       )}
       {description && (
         <span className="mono hidden min-w-0 truncate text-[11.5px] text-muted-foreground/70 sm:inline">

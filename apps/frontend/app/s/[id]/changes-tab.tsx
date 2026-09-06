@@ -98,7 +98,7 @@ export default function ChangesTab({
       lineDiffType: "word-alt",
       overflow: "scroll",
     }),
-    []
+    [],
   );
   const parsedFiles = useMemo<FileDiffMetadata[]>(() => {
     if (!diff) return [];

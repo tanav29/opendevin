@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 
 import {
   AlertDialog,
@@ -29,9 +22,7 @@ export type ConfirmOptions = {
 
 type Pending = { options: ConfirmOptions; resolve: (ok: boolean) => void };
 
-const ConfirmContext = createContext<
-  ((options: ConfirmOptions) => Promise<boolean>) | null
->(null);
+const ConfirmContext = createContext<((options: ConfirmOptions) => Promise<boolean>) | null>(null);
 
 /**
  * Promise-based replacement for `window.confirm`, so destructive actions get
@@ -73,9 +64,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           <AlertDialogContent>
             <AlertDialogTitle>{pending.options.title}</AlertDialogTitle>
             {pending.options.description && (
-              <AlertDialogDescription>
-                {pending.options.description}
-              </AlertDialogDescription>
+              <AlertDialogDescription>{pending.options.description}</AlertDialogDescription>
             )}
             <AlertDialogFooter>
               <Button variant="ghost" size="sm" onClick={() => settle(false)}>

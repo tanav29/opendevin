@@ -63,7 +63,10 @@ export function basename(path: string) {
 
 /** `https://github.com/vercel/next.js.git` → `vercel/next.js` */
 export function repoName(git: string) {
-  const parts = git.replace(/\.git$/, "").split(/[\\/]/).filter(Boolean);
+  const parts = git
+    .replace(/\.git$/, "")
+    .split(/[\\/]/)
+    .filter(Boolean);
   return parts.slice(-2).join("/") || git;
 }
 

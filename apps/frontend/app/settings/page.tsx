@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { IconSettings, IconLogout, IconUser, IconShield, IconArrowLeft, IconBrandGithub } from "@tabler/icons-react";
+import {
+  IconSettings,
+  IconLogout,
+  IconUser,
+  IconShield,
+  IconArrowLeft,
+  IconBrandGithub,
+} from "@tabler/icons-react";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
@@ -55,7 +62,8 @@ export default function Settings() {
                 <div className="rounded-lg border bg-muted/50 p-3">
                   <p className="text-sm font-medium">Session data</p>
                   <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                    Projects, sessions and sandbox metadata live locally (SQLite/Prisma). Sandboxes are ephemeral — they expire and can be reconnected if needed.
+                    Projects, sessions and sandbox metadata live locally (SQLite/Prisma). Sandboxes
+                    are ephemeral — they expire and can be reconnected if needed.
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -83,7 +91,9 @@ export default function Settings() {
               </CardHeader>
               <CardContent className="space-y-3 text-[13px] leading-5 text-muted-foreground">
                 <p>
-                  The agent has shell, file, and web search tools scoped to the session sandbox. It never touches your local filesystem. Each sandbox is isolated — clone, build, and discard.
+                  The agent has shell, file, and web search tools scoped to the session sandbox. It
+                  never touches your local filesystem. Each sandbox is isolated — clone, build, and
+                  discard.
                 </p>
                 <Separator />
                 <div className="flex flex-wrap gap-2">
@@ -102,11 +112,15 @@ export default function Settings() {
               <CardContent className="grid gap-2 text-sm">
                 <div className="flex items-center justify-between rounded-md border px-3 py-2">
                   <span className="text-muted-foreground">Toggle sidebar</span>
-                  <span className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">⌘ B</span>
+                  <span className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">
+                    ⌘ B
+                  </span>
                 </div>
                 <div className="flex items-center justify-between rounded-md border px-3 py-2">
                   <span className="text-muted-foreground">Focus search</span>
-                  <span className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">⌘ K</span>
+                  <span className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">
+                    ⌘ K
+                  </span>
                 </div>
                 <div className="flex items-center justify-between rounded-md border px-3 py-2">
                   <span className="text-muted-foreground">New project</span>

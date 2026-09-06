@@ -78,7 +78,8 @@ app.get("/api/github/repos", async (req, res) => {
     if (!ghRes.ok) {
       const text = await ghRes.text().catch(() => "");
       console.error("GitHub repos fetch failed", ghRes.status, text.slice(0, 400));
-      if (ghRes.status === 401) return res.status(401).json({ error: "GitHub token expired. Sign in again.", repos: [] });
+      if (ghRes.status === 401)
+        return res.status(401).json({ error: "GitHub token expired. Sign in again.", repos: [] });
       return res.status(502).json({ error: `GitHub error ${ghRes.status}`, repos: [] });
     }
     const data = (await ghRes.json()) as Array<{
@@ -197,9 +198,13 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
     // Try to get default branch via symref first (handles canary/develop etc)
     let defaultBranch = "";
     try {
-      const { stdout: symrefOut } = await execFileAsync("git", ["ls-remote", "--symref", "--", repo, "HEAD"], {
-        timeout: 8000,
-      });
+      const { stdout: symrefOut } = await execFileAsync(
+        "git",
+        ["ls-remote", "--symref", "--", repo, "HEAD"],
+        {
+          timeout: 8000,
+        },
+      );
       const match = symrefOut.match(/ref:\s*refs\/heads\/([^\s]+)\s+HEAD/);
       if (match) defaultBranch = match[1].trim();
     } catch {
@@ -362,13 +367,14 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   if (!prompt) return res.status(400).json({ error: "A message is required" });
   const usingOpenRouter = Boolean(process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY);
   const aiApiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-  if (!aiApiKey)
-    return res.status(503).json({ error: "OPENAI_API_KEY is not configured" });
+  if (!aiApiKey) return res.status(503).json({ error: "OPENAI_API_KEY is not configured" });
   // Mock fallback for dev when OpenRouter has no credits (the default key in .env is empty-credits)
   const isMockKey = aiApiKey === "";
   if (isMockKey) {
-    const mock = `Mock agent (no credits): You said "${prompt.slice(0,120)}". Sandbox at ${owner.workspacePath || WORKSPACE_PATH} is ready (${owner.sandboxStatus}). Repo: ${owner.project.repo || "no repo"}. Try asking to list files — in production the agent would use its tools.`;
-    await prisma.message.create({ data: { sessionId: owner.id, role: "assistant", content: mock } });
+    const mock = `Mock agent (no credits): You said "${prompt.slice(0, 120)}". Sandbox at ${owner.workspacePath || WORKSPACE_PATH} is ready (${owner.sandboxStatus}). Repo: ${owner.project.repo || "no repo"}. Try asking to list files — in production the agent would use its tools.`;
+    await prisma.message.create({
+      data: { sessionId: owner.id, role: "assistant", content: mock },
+    });
     await prisma.projectSession.update({ where: { id: owner.id }, data: { status: "idle" } });
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     return res.end(mock);
@@ -407,7 +413,8 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     model: createOpenAI({
       apiKey: aiApiKey,
       baseURL:
-        process.env.OPENAI_BASE_URL || (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
+        process.env.OPENAI_BASE_URL ||
+        (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
     })(process.env.OPENAI_MODEL || process.env.MODEL || "gpt-4o-mini"),
     system: `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${owner.workspacePath || WORKSPACE_PATH}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. Keep replies short.`,
     messages: history.map(({ role, content }) => ({ role: role as "user" | "assistant", content })),
@@ -475,12 +482,17 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
       data: { status: clientGone ? "idle" : "failed" },
     });
     if (!res.headersSent) return res.status(500).json({ error: "Agent run failed" });
-    const msg = error instanceof Error && (error as { statusCode?: number }).statusCode === 402
-      ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or set OPENAI_API_KEY."
-      : "Agent run failed — please retry.";
-    try { if (!res.writableEnded) res.write(`\n\n${msg}\n`); } catch {}
+    const msg =
+      error instanceof Error && (error as { statusCode?: number }).statusCode === 402
+        ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or set OPENAI_API_KEY."
+        : "Agent run failed — please retry.";
     try {
-      await prisma.message.create({ data: { sessionId: owner.id, role: "assistant", content: msg } });
+      if (!res.writableEnded) res.write(`\n\n${msg}\n`);
+    } catch {}
+    try {
+      await prisma.message.create({
+        data: { sessionId: owner.id, role: "assistant", content: msg },
+      });
     } catch {}
     return res.end();
   }
@@ -537,11 +549,9 @@ app.get("/api/sessions/:id/diff", async (req, res) => {
   } catch {
     if (persisted)
       return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
-    return res
-      .status(503)
-      .json({
-        error: "Changes unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
-      });
+    return res.status(503).json({
+      error: "Changes unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
+    });
   }
 });
 
@@ -567,11 +577,9 @@ app.get("/api/sessions/:id/preview", async (req, res) => {
     const url = `https://${sandbox.getHost(port)}${path}`;
     return res.json({ url, host: sandbox.getHost(port), port, path });
   } catch {
-    return res
-      .status(503)
-      .json({
-        error: "Preview unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
-      });
+    return res.status(503).json({
+      error: "Preview unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
+    });
   }
 });
 
@@ -593,11 +601,9 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
       .json({ error: "Publish unavailable: project repo is not a GitHub https URL." });
   const token = await githubTokenForUser(owner.project.userId);
   if (!token) {
-    return res
-      .status(400)
-      .json({
-        error: "Publish unavailable: no GitHub access token. Sign in with GitHub and retry.",
-      });
+    return res.status(400).json({
+      error: "Publish unavailable: no GitHub access token. Sign in with GitHub and retry.",
+    });
   }
   const branch = sanitizeBranch(req.body.branch) || `opendevin/session-${owner.id.slice(-8)}`;
   const title =
@@ -624,20 +630,16 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
       `git add -A && git -c ${shellQuote(`user.name=${name}`)} -c ${shellQuote(`user.email=${email}`)} commit -m ${shellQuote(title)}`,
     );
     if (commit.exitCode !== 0) {
-      return res
-        .status(409)
-        .json({
-          error: `Publish failed: ${(commit.stderr || commit.stdout || "git commit failed").slice(0, 500)}`,
-        });
+      return res.status(409).json({
+        error: `Publish failed: ${(commit.stderr || commit.stdout || "git commit failed").slice(0, 500)}`,
+      });
     }
     const authedPushUrl = `https://oauth2:${token}@github.com/${slug.owner}/${slug.name}.git`;
     const push = await run(`git push ${shellQuote(authedPushUrl)} HEAD:${shellQuote(branch)}`);
     if (push.exitCode !== 0) {
-      return res
-        .status(409)
-        .json({
-          error: `Publish failed: ${(push.stderr || push.stdout || "git push failed").slice(0, 500)}`,
-        });
+      return res.status(409).json({
+        error: `Publish failed: ${(push.stderr || push.stdout || "git push failed").slice(0, 500)}`,
+      });
     }
     const headers = {
       Authorization: `Bearer ${token}`,
@@ -657,11 +659,9 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
     });
     const prData = (await pr.json().catch(() => ({}))) as { html_url?: string; message?: string };
     if (!pr.ok || !prData.html_url) {
-      return res
-        .status(409)
-        .json({
-          error: `Branch pushed, but the pull request failed: ${(prData.message || "GitHub rejected the PR").slice(0, 500)}`,
-        });
+      return res.status(409).json({
+        error: `Branch pushed, but the pull request failed: ${(prData.message || "GitHub rejected the PR").slice(0, 500)}`,
+      });
     }
     return res.json({ branch, prUrl: prData.html_url });
   } catch (error) {

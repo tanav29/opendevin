@@ -20,11 +20,7 @@ function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
   return <SelectPrimitive.Value data-slot="select-value" className={cn(className)} {...props} />;
 }
 
-function SelectTrigger({
-  className,
-  children,
-  ...props
-}: SelectPrimitive.Trigger.Props) {
+function SelectTrigger({ className, children, ...props }: SelectPrimitive.Trigger.Props) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"

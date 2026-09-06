@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { IconBrandGithub, IconCode, IconShieldCheck, IconArrowLeft, IconSparkles } from "@tabler/icons-react";
+import {
+  IconBrandGithub,
+  IconCode,
+  IconShieldCheck,
+  IconArrowLeft,
+  IconSparkles,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +30,10 @@ export default function Login() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-md">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+        >
           <IconArrowLeft className="size-4" /> Back to dashboard
         </Link>
 
@@ -35,7 +44,9 @@ export default function Login() {
             </div>
             <div>
               <CardTitle className="text-center text-xl">Sign in to OpenDevin</CardTitle>
-              <CardDescription className="text-center">Use GitHub to access your workspaces.</CardDescription>
+              <CardDescription className="text-center">
+                Use GitHub to access your workspaces.
+              </CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -44,7 +55,9 @@ export default function Login() {
               Continue with GitHub
             </Button>
 
-            <p className="text-center text-xs text-muted-foreground">We only request read access to your profile. Repos are cloned via the URL you provide.</p>
+            <p className="text-center text-xs text-muted-foreground">
+              We only request read access to your profile. Repos are cloned via the URL you provide.
+            </p>
 
             <Separator />
 
@@ -53,14 +66,18 @@ export default function Login() {
                 <IconShieldCheck className="size-4 shrink-0 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">No vendor lock-in</p>
-                  <p className="text-xs leading-5 text-muted-foreground">Your code stays in short-lived sandboxes. Nothing is kept longer than you need.</p>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Your code stays in short-lived sandboxes. Nothing is kept longer than you need.
+                  </p>
                 </div>
               </div>
               <div className="flex gap-2 rounded-lg border bg-muted/50 p-3">
                 <IconSparkles className="size-4 shrink-0 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">Human in the loop</p>
-                  <p className="text-xs leading-5 text-muted-foreground">The agent proposes, you approve. Inspect the diff before shipping.</p>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    The agent proposes, you approve. Inspect the diff before shipping.
+                  </p>
                 </div>
               </div>
             </div>
@@ -71,7 +88,9 @@ export default function Login() {
           </CardContent>
         </Card>
 
-        <p className="mt-4 text-center font-mono text-[11px] text-muted-foreground">OpenDevin · minimal, productive, yours.</p>
+        <p className="mt-4 text-center font-mono text-[11px] text-muted-foreground">
+          OpenDevin · minimal, productive, yours.
+        </p>
       </div>
     </main>
   );

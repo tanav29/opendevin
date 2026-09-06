@@ -52,16 +52,23 @@ export async function cloneRepo(
   );
   if (result.exitCode !== 0 && token && isGitHub) {
     // Retry with token embedded via oauth2 URL (works for private repos, token is valid via API)
-    const authedUrl = url.replace(/^https:\/\/github\.com\//i, `https://oauth2:${token}@github.com/`);
+    const authedUrl = url.replace(
+      /^https:\/\/github\.com\//i,
+      `https://oauth2:${token}@github.com/`,
+    );
     // Clean workspace before retry
-    await sandbox.commands.run(`rm -rf ${shellQuote(workspacePath)} && mkdir -p ${shellQuote(workspacePath)}`);
+    await sandbox.commands.run(
+      `rm -rf ${shellQuote(workspacePath)} && mkdir -p ${shellQuote(workspacePath)}`,
+    );
     result = await sandbox.commands.run(
       `git clone --depth 1${branchArg} ${shellQuote(authedUrl)} ${shellQuote(workspacePath)}`,
       { timeoutMs: 120_000 },
     );
     // Remove token from remote URL immediately so it doesn't persist in .git/config
     if (result.exitCode === 0) {
-      await sandbox.commands.run(`git -C ${shellQuote(workspacePath)} remote set-url origin ${shellQuote(url)}`).catch(() => undefined);
+      await sandbox.commands
+        .run(`git -C ${shellQuote(workspacePath)} remote set-url origin ${shellQuote(url)}`)
+        .catch(() => undefined);
     }
   }
   if (result.exitCode !== 0) {
