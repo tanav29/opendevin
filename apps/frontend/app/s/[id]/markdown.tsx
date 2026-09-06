@@ -26,17 +26,23 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     } else {
       const lm = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (lm) {
-        parts.push(
-          <a
-            key={`${keyPrefix}-${k++}`}
-            href={lm[2]}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            {lm[1]}
-          </a>,
-        );
+        const href = lm[2].trim();
+        const safe = /^(https?:|mailto:|\/|#)/i.test(href) && !/^\s*javascript:/i.test(href) && !/^\s*data:/i.test(href);
+        if (safe) {
+          parts.push(
+            <a
+              key={`${keyPrefix}-${k++}`}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              {lm[1]}
+            </a>,
+          );
+        } else {
+          parts.push(`${lm[1]} (${href})`);
+        }
       } else {
         parts.push(tok);
       }

@@ -26,10 +26,7 @@ export function PageHeader({
         className,
       )}
     >
-      <Tooltip>
-        <TooltipTrigger render={<SidebarTrigger className="size-7" />} />
-        <TooltipContent side="bottom">Toggle sidebar — ⌘B</TooltipContent>
-      </Tooltip>
+      <SidebarTrigger className="size-7" />
       <span className="mx-1 hidden h-4 w-px shrink-0 bg-border sm:inline" aria-hidden />
 
       {icon && <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span>}

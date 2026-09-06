@@ -10,7 +10,7 @@ const UNITS: [limit: number, divisor: number, suffix: string][] = [
 /** Compact relative time: "just now", "4m", "3h", "2d", "Mar 4". */
 export function timeAgo(value: string | number | Date) {
   const then = new Date(value).getTime();
-  if (!Number.isFinite(then)) return "";
+  if (!Number.isFinite(then)) return "—";
   const seconds = Math.max(0, (Date.now() - then) / 1000);
   if (seconds < 45) return "just now";
   for (const [limit, divisor, suffix] of UNITS) {

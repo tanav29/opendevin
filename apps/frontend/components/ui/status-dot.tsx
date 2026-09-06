@@ -45,9 +45,9 @@ export function StatusDot({
       role="img"
       aria-label={TONE[tone].label}
       className={cn(
-        "relative inline-flex size-1.5 shrink-0 rounded-full",
+        "relative w-2 h-2 shrink-0 rounded-full ml-auto hidden group-data-[collapsible=icon]:hidden xl:inline-flex",
         TONE[tone].dot,
-        tone === "running" && "animate-halo",
+        // tone === "running" && "animate-halo",
         className,
       )}
     />

@@ -4,6 +4,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import ChangesTab from "./changes-tab";
 import PreviewTab from "./preview-tab";
 import TerminalTab from "./terminal-tab";
+import { Button } from "@/components/ui/button";
 
 type Tab = "terminal" | "changes" | "preview";
 
@@ -143,26 +144,15 @@ export default function SessionPanel({
         <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
           <div className="flex gap-1">
             {tabs.map((tab) => (
-              <button
+              <Button
                 key={tab.id}
                 onClick={() => selectTab(tab.id)}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                  activeTab === tab.id
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                variant={activeTab === tab.id ? "outline" : "ghost"}
               >
                 {tab.label}
-              </button>
+              </Button>
             ))}
           </div>
-          <button
-            onClick={() => onPrefs({ ...prefs, tab: activeTab, open: false })}
-            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-            aria-label="Collapse panel"
-          >
-            →
-          </button>
         </div>
         <div className="min-h-0 flex-1">
           <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
