@@ -142,19 +142,7 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <Dialog>
-                  <DialogTrigger render={<SidebarMenuButton tooltip="New project" />}>
-                    <IconPlus className="size-4" />
-                    <span>New project</span>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Create a workspace</DialogTitle>
-                      <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
-                    </DialogHeader>
-                    <NewProjectForm />
-                  </DialogContent>
-                </Dialog>
+                <NewProjectForm />
               </SidebarMenuItem>
               {signedIn === false && (
                 <SidebarMenuItem>

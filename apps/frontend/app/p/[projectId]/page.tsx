@@ -232,14 +232,10 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             )}
           </div>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
+          <div className="mt-6">
             {/* New session */}
             <div className="lg:sticky lg:top-6 lg:self-start">
-              <Card>
-                <CardHeader>
-                    <CardTitle>New session</CardTitle>
-                </CardHeader>
-                <CardContent>
+
                   <form onSubmit={createSession} className="space-y-3">
                     <div>
                       <Textarea
@@ -276,12 +272,10 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                       {creating ? "Opening sandbox…" : "New session"}
                     </Button>
                   </form>
-                </CardContent>
-              </Card>
             </div>
 
             {/* Sessions */}
-            <div>
+            <div className="mt-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-medium text-muted-foreground">Sessions</h2>
                 <span className="font-mono text-[11px] text-muted-foreground">{sessions.length} total</span>

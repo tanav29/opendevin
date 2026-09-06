@@ -12,6 +12,7 @@ import {
   IconRefresh,
   IconAlertCircle,
   IconExternalLink,
+  IconPlus,
 } from "@tabler/icons-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/format";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { SidebarMenuButton } from "./ui/sidebar";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -168,7 +171,18 @@ export default function NewProjectForm() {
   }
 
   return (
-              <form onSubmit={createProject} className="space-y-5">
+
+  <Dialog>
+    <DialogTrigger render={<SidebarMenuButton tooltip="New project" />}>
+      <IconPlus className="size-4" />
+      <span>New project</span>
+    </DialogTrigger>
+    <DialogContent className="w-108">
+      <DialogHeader>
+        <DialogTitle>Create a workspace</DialogTitle>
+        <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
+      </DialogHeader>
+    <form onSubmit={createProject} className="space-y-5 min-h-0">
                 <label className="block">
                   <span className="text-sm font-medium">Project name</span>
                   <Input
@@ -190,16 +204,15 @@ export default function NewProjectForm() {
                   </div>
 
                   {/* GitHub repo picker */}
-                  <div ref={pickerRef} className="relative">
+                  <div ref={pickerRef}>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => setPickerOpen((o) => !o)}
                       disabled={reposLoading && repos.length === 0}
                       className={cn(
-                        "w-full justify-between font-normal h-8 px-2.5 text-sm",
+                        "w-full justify-between font-normal px-2.5 text-sm",
                         !repo && "text-muted-foreground",
-                        pickerOpen && "ring-2 ring-ring/20 border-ring/40",
                       )}
                     >
                       <span className="flex min-w-0 items-center gap-2 truncate">
@@ -222,7 +235,7 @@ export default function NewProjectForm() {
                     </Button>
 
                     {pickerOpen && (
-                      <div className="absolute z-50 mt-2 w-full rounded-xl border bg-popover text-popover-foreground shadow-lg">
+                      <div className="relative z-50 mt-2 w-full rounded-xl border bg-popover text-popover-foreground shadow-lg">
                         {/* search */}
                         <div className="p-2">
                           <div className="relative">
@@ -238,7 +251,7 @@ export default function NewProjectForm() {
                         </div>
 
                         {/* content */}
-                        <div className="h-72 overflow-scroll">
+                        <div className="h-fit max-h-72 overflow-y-auto">
                           {reposLoading ? (
                             <div className="space-y-2 p-2">
                               {[0, 1, 2].map((i) => (
@@ -280,7 +293,6 @@ export default function NewProjectForm() {
                               No repositories match “{filter}”.
                             </div>
                           ) : (
-                            <ScrollArea className="max-h-64 z-50">
                               <div className="p-1">
                                 {filteredRepos.map((r) => {
                                   const isSelected = selectedRepo?.id === r.id || repo === r.htmlUrl || repo === r.cloneUrl;
@@ -312,54 +324,19 @@ export default function NewProjectForm() {
                                           )}
                                         </span>
                                         {r.description ? (
-                                          <span className="mt-1 line-clamp-1 block text-xs leading-4 text-muted-foreground">
+                                          <span className="mt-1 line-clamp-3 truncate text-xs text-muted-foreground">
                                             {r.description}
                                           </span>
                                         ) : (
                                           <span className="mt-1 block text-xs text-muted-foreground/60">No description</span>
                                         )}
-                                        <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                          {r.language && (
-                                            <span className="inline-flex items-center gap-1">
-                                              <span className="size-2 rounded-full bg-primary/60" />
-                                              {r.language}
-                                            </span>
-                                          )}
-                                          {r.stars > 0 && (
-                                            <span className="inline-flex items-center gap-0.5">
-                                              <IconStar className="size-3" />
-                                              {r.stars}
-                                            </span>
-                                          )}
-                                          <span className="inline-flex items-center gap-1">
-                                            <IconGitBranch className="size-3" />
-                                            {timeAgo(r.updatedAt)}
-                                          </span>
-                                        </span>
                                       </span>
                                       {isSelected && <IconCheck className="mt-1 size-4 shrink-0 text-primary" />}
                                     </button>
                                   );
                                 })}
                               </div>
-                            </ScrollArea>
                           )}
-                        </div>
-
-                        {/* footer */}
-                        <div className="flex items-center justify-between border-t bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                          <span className="font-mono text-[11px]">
-                            {filteredRepos.length !== repos.length
-                              ? `${filteredRepos.length} of ${repos.length} repos`
-                              : `${repos.length} repos • sorted by updated`}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void fetchRepos()}
-                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 hover:bg-background hover:text-foreground"
-                          >
-                            <IconRefresh className="size-3" /> Refresh
-                          </button>
                         </div>
                       </div>
                     )}
@@ -432,5 +409,7 @@ export default function NewProjectForm() {
                   </Button>
                 </div>
               </form>
+    </DialogContent>
+  </Dialog>
   );
 }
