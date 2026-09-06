@@ -82,6 +82,7 @@ export default function ChangesTab({
   type DiffPayload = { diff?: string; truncated?: boolean; persisted?: boolean; error?: string };
 
   const readDiff = useCallback(async (): Promise<{ ok: boolean; payload: DiffPayload }> => {
+    if (!sessionId) return { ok: false, payload: { error: "" } };
     try {
       const response = await fetch(`${API}/api/sessions/${sessionId}/diff`, {
         credentials: "include",
@@ -111,6 +112,7 @@ export default function ChangesTab({
   // Load persisted diff on mount even when the sandbox is gone; refetch live
   // whenever the tab becomes active or the sandbox changes.
   useEffect(() => {
+    if (!sessionId) return;
     let cancelled = false;
     void readDiff().then((result) => {
       if (!cancelled) applyDiff(result);
@@ -121,7 +123,7 @@ export default function ChangesTab({
   }, [sessionId, readDiff, applyDiff]);
 
   useEffect(() => {
-    if (!active || !available) return;
+    if (!sessionId || !active || !available) return;
     let cancelled = false;
     void readDiff().then((result) => {
       if (!cancelled) applyDiff(result);
@@ -129,7 +131,7 @@ export default function ChangesTab({
     return () => {
       cancelled = true;
     };
-  }, [active, available, sandboxId, readDiff, applyDiff]);
+  }, [sessionId, active, available, sandboxId, readDiff, applyDiff]);
 
   function refresh() {
     setLoading(true);
@@ -148,8 +150,10 @@ export default function ChangesTab({
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `session-${sessionId.slice(-8)}.patch`;
+    document.body.appendChild(anchor);
     anchor.click();
-    URL.revokeObjectURL(url);
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async function publish() {
@@ -175,7 +179,7 @@ export default function ChangesTab({
     }
   }
 
-  if (!available && !diff) {
+  if (!available && !diff && !loading && !error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-sm font-medium">Changes unavailable</p>

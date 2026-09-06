@@ -2,8 +2,33 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  IconArrowLeft,
+  IconPlus,
+  IconGitBranch,
+  IconTrash,
+  IconFolder,
+  IconClock,
+  IconTerminal,
+  IconBrandGithub,
+} from "@tabler/icons-react";
+
+import { AppShell } from "@/components/layout/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { StatusDot } from "@/components/ui/status-dot";
+import { ConfirmProvider, useConfirm } from "@/components/ui/confirm";
+import { timeAgo, repoName } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
 type Project = { id: string; name: string; repo: string | null };
 type ProjectSession = {
   id: string;
@@ -12,6 +37,7 @@ type ProjectSession = {
   sandboxStatus: string;
   branch: string;
   createdAt: string;
+  updatedAt: string;
 };
 
 const PROVISIONING_SANDBOX = new Set(["pending", "creating", "cloning"]);
@@ -21,6 +47,15 @@ function isProvisioning(session: ProjectSession) {
 }
 
 export default function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
+  return (
+    <ConfirmProvider>
+      <ProjectPageInner params={params} />
+    </ConfirmProvider>
+  );
+}
+
+function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }) {
+  const confirm = useConfirm();
   const [projectId, setProjectId] = useState("");
   const [project, setProject] = useState<Project | null>(null);
   const [sessions, setSessions] = useState<ProjectSession[]>([]);
@@ -44,13 +79,15 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     void params.then(({ projectId: id }) => {
       setProjectId(id);
       void Promise.all([
-        fetch(`${API}/api/projects/${id}`, { credentials: "include" }).then((r) => {
-          if (r.status === 404) return null;
-          return r.ok ? r.json() : null;
-        }),
-        fetch(`${API}/api/projects/${id}/sessions`, { credentials: "include" }).then((r) =>
-          r.ok ? r.json() : [],
-        ),
+        fetch(`${API}/api/projects/${id}`, { credentials: "include" })
+          .then((r) => {
+            if (r.status === 404) return null;
+            return r.ok ? r.json() : null;
+          })
+          .catch(() => null),
+        fetch(`${API}/api/projects/${id}/sessions`, { credentials: "include" })
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []),
         fetch(`${API}/api/projects/${id}/branches`, { credentials: "include" })
           .then((r) => (r.ok ? r.json() : { branches: [], defaultBranch: "" }))
           .catch(() => ({ branches: [], defaultBranch: "" })),
@@ -70,12 +107,12 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     };
   }, [params]);
 
-  // Poll while any session is provisioning so loaders resolve without refresh.
+  const hasProvisioning = sessions.some(isProvisioning);
   useEffect(() => {
-    if (!projectId || !sessions.some(isProvisioning)) return;
+    if (!projectId || !hasProvisioning) return;
     const timer = setInterval(() => void loadSessions(projectId), 3000);
     return () => clearInterval(timer);
-  }, [projectId, sessions, loadSessions]);
+  }, [projectId, hasProvisioning, loadSessions]);
 
   async function createSession(event: FormEvent) {
     event.preventDefault();
@@ -99,14 +136,14 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   }
 
   async function deleteProject() {
-    if (
-      !projectId ||
-      deleting ||
-      !window.confirm(
-        "Delete this project, all its sessions, and their sandboxes? This cannot be undone.",
-      )
-    )
-      return;
+    if (!projectId || deleting) return;
+    const ok = await confirm({
+      title: "Delete project?",
+      description: "This removes the project, all sessions, and their sandboxes. This cannot be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     setDeleting(true);
     const response = await fetch(`${API}/api/projects/${projectId}`, {
       method: "DELETE",
@@ -122,168 +159,222 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 
   if (loading) {
     return (
-      <main className="mx-auto min-h-screen max-w-5xl px-6 py-8 sm:py-12">
-        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-          OpenDevin / projects
-        </p>
-        <div className="mt-10 animate-pulse border-b border-border pb-7">
-          <div className="h-4 w-24 rounded bg-card" />
-          <div className="mt-3 h-10 w-64 rounded bg-card" />
-          <div className="mt-3 h-4 w-48 rounded bg-card" />
-        </div>
-        <div className="grid gap-10 pt-8 lg:grid-cols-[1fr_360px]">
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-16 animate-pulse rounded-md bg-card" />
-            ))}
-          </div>
-          <div className="h-64 animate-pulse rounded-lg bg-card" />
-        </div>
-      </main>
+      <AppShell>
+        <PageShell header={<PageHeader title="Loading…" description="Workspace" />}>
+          <PageContainer size="wide" className="py-8">
+            <div className="animate-pulse space-y-6">
+              <div className="h-9 w-48 rounded bg-muted" />
+              <div className="h-4 w-64 rounded bg-muted" />
+              <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+                <div className="space-y-3">
+                  {[0, 1, 2].map((i) => (
+                    <Skeleton key={i} className="h-16" />
+                  ))}
+                </div>
+                <Skeleton className="h-64" />
+              </div>
+            </div>
+          </PageContainer>
+        </PageShell>
+      </AppShell>
     );
   }
 
   if (notFound || !project) {
     return (
-      <main className="mx-auto min-h-screen max-w-5xl px-6 py-10 text-sm text-muted-foreground">
-        <Link href="/" className="text-xs uppercase tracking-[0.16em] hover:text-foreground">
-          OpenDevin / projects
-        </Link>
-        <p className="mt-10 font-serif text-2xl text-foreground">Project not found.</p>
-        <p className="mt-2">It may have been deleted, or you don&apos;t have access.</p>
-      </main>
+      <AppShell>
+        <PageShell header={<PageHeader title="Not found" />}>
+          <PageContainer className="py-16 text-center">
+            <EmptyState
+              icon={<IconFolder className="size-4" />}
+              title="Project not found"
+              description="It may have been deleted or you don't have access."
+              action={{ label: "Back to dashboard", onClick: () => (window.location.href = "/") }}
+            />
+          </PageContainer>
+        </PageShell>
+      </AppShell>
     );
   }
 
   const showBranchPicker = Boolean(project.repo);
 
   return (
-    <main className="mx-auto min-h-screen max-w-5xl px-6 py-8 sm:py-12">
-      <Link
-        href="/"
-        className="text-xs uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"
+    <AppShell>
+      <PageShell
+        header={
+          <PageHeader
+            title={project.name}
+            description={project.repo ? repoName(project.repo) : "Local workspace"}
+            icon={<IconFolder className="size-4" />}
+            actions={
+              <div className="flex items-center gap-1.5">
+                <Badge variant="secondary" className="hidden sm:inline-flex">
+                  <IconClock className="size-3" /> {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+                </Badge>
+                <Button variant="ghost" size="sm" onClick={() => void deleteProject()} disabled={deleting} className="text-muted-foreground hover:text-destructive">
+                  <IconTrash className="size-4" /> <span className="hidden sm:inline">{deleting ? "Deleting…" : "Delete"}</span>
+                </Button>
+              </div>
+            }
+          />
+        }
       >
-        OpenDevin / projects
-      </Link>
-      <header className="mt-10 flex flex-col gap-4 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Workspace</p>
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight">{project.name}</h1>
-          <p className="mt-2 font-mono text-xs text-muted-foreground">
-            {project.repo || "local workspace"}
-          </p>
-        </div>
-        <span className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
-          {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
-        </span>
-        <button
-          onClick={() => void deleteProject()}
-          disabled={deleting}
-          className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:text-danger disabled:opacity-40"
-        >
-          {deleting ? "Deleting…" : "Delete project"}
-        </button>
-      </header>
-      <div className="grid gap-10 pt-8 lg:grid-cols-[1fr_360px]">
-        <section>
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Sessions</p>
-          <div className="mt-4 divide-y divide-border border-y border-border">
-            {sessions.map((session) => {
-              const provisioning = isProvisioning(session);
-              return (
-                <Link
-                  key={session.id}
-                  href={`/s/${session.id}`}
-                  className="flex items-center justify-between gap-4 py-4 hover:bg-card/50"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm">{session.title}</span>
-                    <span className="mt-1 flex flex-wrap items-center gap-2">
-                      {session.branch && (
-                        <span className="inline-block rounded-full border border-border px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                          {session.branch}
-                        </span>
-                      )}
-                      {provisioning ? (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                          <span className="h-3 w-3 animate-spin rounded-full border border-muted-foreground border-t-transparent" />
-                          Provisioning sandbox…
-                        </span>
-                      ) : (
-                        <span className="font-mono text-[11px] text-muted-foreground">
-                          {session.status}
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                    {session.sandboxStatus}
-                  </span>
-                </Link>
-              );
-            })}
-            {sessions.length === 0 && (
-              <p className="py-10 text-sm text-muted-foreground">
-                No sessions yet. Start with a task on the right.
-              </p>
+        <PageContainer size="wide" className="py-6">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Link href="/" className="hover:text-foreground">
+              Dashboard
+            </Link>
+            <span>·</span>
+            <span className="text-foreground">{project.name}</span>
+            {project.repo && (
+              <>
+                <span>·</span>
+                <a href={project.repo} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
+                  <IconBrandGithub className="size-3" /> {repoName(project.repo)} ↗
+                </a>
+              </>
             )}
           </div>
-        </section>
-        <section className="h-fit rounded-lg border border-border bg-card p-5 shadow-[var(--shadow-raised)]">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">New session</p>
-          <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-            Give the agent a first move.
-          </h2>
-          <form onSubmit={createSession} className="mt-5">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Inspect this repo and tell me where to start..."
-              rows={5}
-              className="w-full resize-none rounded-md border border-input bg-background p-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
-            />
-            {showBranchPicker && (
-              <label className="mt-3 block text-xs text-muted-foreground">
-                Branch to check out in sandbox
-                {branches.length > 0 ? (
-                  <select
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
-                  >
-                    <option value="">Default branch</option>
-                    {branches.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    placeholder="Default branch (e.g. main)"
-                    className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
+            {/* Sessions */}
+            <div>
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Sessions</h2>
+                <span className="font-mono text-[11px] text-muted-foreground">{sessions.length} total</span>
+              </div>
+
+              <Card className="mt-3">
+                {sessions.length === 0 ? (
+                  <EmptyState
+                    icon={<IconTerminal className="size-4" />}
+                    title="No sessions yet"
+                    description="Give the agent a first task. It will clone the repo (if any) and start reading the codebase."
                   />
+                ) : (
+                  <div className="divide-y">
+                    {sessions.map((session) => {
+                      const provisioning = isProvisioning(session);
+                      return (
+                        <Link key={session.id} href={`/s/${session.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
+                          <StatusDot status={session.status} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-medium">{session.title}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              {session.branch && (
+                                <Badge variant="outline" className="h-5 px-1.5 font-mono text-[11px]">
+                                  <IconGitBranch className="size-3" /> {session.branch}
+                                </Badge>
+                              )}
+                              {provisioning ? (
+                                <Badge variant="secondary" className="gap-1 text-[11px]">
+                                  <span className="size-2 animate-spin rounded-full border border-muted-foreground border-t-transparent" />
+                                  Provisioning
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="font-mono text-[11px] capitalize">
+                                  {session.status}
+                                </Badge>
+                              )}
+                              <span className="font-mono text-[11px] text-muted-foreground">· {timeAgo(session.updatedAt)}</span>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="hidden shrink-0 font-mono text-[11px] sm:inline-flex">
+                            {session.sandboxStatus}
+                          </Badge>
+                        </Link>
+                      );
+                    })}
+                  </div>
                 )}
-                <input
-                  value={customBranch}
-                  onChange={(e) => setCustomBranch(e.target.value)}
-                  placeholder="Or type a new/exact branch name"
-                  className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
-                />
-              </label>
-            )}
-            <button
-              disabled={creating || !prompt.trim()}
-              className="mt-3 w-full rounded-md bg-foreground px-4 py-2.5 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {creating ? "Opening sandbox..." : "Open session"}
-            </button>
-            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-          </form>
-        </section>
-      </div>
-    </main>
+              </Card>
+
+              {sessions.length > 0 && (
+                <p className="mt-3 text-xs text-muted-foreground">Sessions stay while their sandbox lives. Kill or delete from inside the session.</p>
+              )}
+            </div>
+
+            {/* New session */}
+            <div className="lg:sticky lg:top-6 lg:self-start">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-8 items-center justify-center rounded-md border bg-muted">
+                      <IconPlus className="size-4" />
+                    </span>
+                    <div>
+                      <CardTitle className="text-[14px]">New session</CardTitle>
+                      <CardDescription className="text-[12px]">The agent gets shell + file access in a fresh sandbox.</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={createSession} className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium">First message</label>
+                      <Textarea
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder="Inspect the repo and propose a plan…"
+                        rows={5}
+                        className="mt-2 min-h-[110px] resize-none"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Tip: be concrete. “Fix the login redirect” beats “improve auth”.</p>
+                    </div>
+
+                    {showBranchPicker && (
+                      <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                        <p className="text-xs font-medium">Branch</p>
+                        {branches.length > 0 ? (
+                          <select
+                            value={branch}
+                            onChange={(e) => setBranch(e.target.value)}
+                            className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-sm"
+                          >
+                            <option value="">Default branch</option>
+                            {branches.map((b) => (
+                              <option key={b} value={b}>
+                                {b}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Default branch (e.g. main)" />
+                        )}
+                        <Input value={customBranch} onChange={(e) => setCustomBranch(e.target.value)} placeholder="Or type a new/exact branch name" />
+                        <p className="text-[11px] text-muted-foreground">Cloned into the sandbox before the agent starts.</p>
+                      </div>
+                    )}
+
+                    {error && <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+
+                    <Button type="submit" disabled={creating || !prompt.trim()} className="w-full">
+                      {creating ? "Opening sandbox…" : "Open session"}
+                    </Button>
+
+                    <Separator />
+
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <IconTerminal className="size-3.5" />
+                      Sandboxes expire after inactivity — reconnect anytime.
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <Card className="mt-3 border-dashed bg-muted/30">
+                <CardContent className="p-3">
+                  <p className="text-xs font-medium">Productive tip</p>
+                  <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                    Start with a read-only task: “Audit the repo and list where auth is handled.” You&apos;ll get a grounded plan without touching files yet.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </PageContainer>
+      </PageShell>
+    </AppShell>
   );
 }

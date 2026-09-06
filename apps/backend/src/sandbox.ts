@@ -43,23 +43,31 @@ export async function cloneRepo(
   await sandbox.commands.run(
     `rm -rf ${shellQuote(workspacePath)} && mkdir -p ${shellQuote(workspacePath)}`,
   );
-  // Pass the OAuth token via an auth header so it never lands in .git/config or logs.
-  const headerArg = token
-    ? ` -c ${shellQuote(`http.extraHeader=AUTHORIZATION: bearer ${token}`)}`
-    : "";
+  const isGitHub = /^https:\/\/github\.com\//i.test(url);
   const branchArg = branch ? ` --branch ${shellQuote(branch)}` : "";
-  const result = await sandbox.commands.run(
-    `git${headerArg} clone --depth 1${branchArg} ${shellQuote(url)} ${shellQuote(workspacePath)}`,
-    {
-      timeoutMs: 120_000,
-    },
+  // First try unauthenticated clone (works for public repos, avoids leaking token or 401 for invalid token)
+  let result = await sandbox.commands.run(
+    `git clone --depth 1${branchArg} ${shellQuote(url)} ${shellQuote(workspacePath)}`,
+    { timeoutMs: 120_000 },
   );
+  if (result.exitCode !== 0 && token && isGitHub) {
+    // Retry with token embedded via oauth2 URL (works for private repos, token is valid via API)
+    const authedUrl = url.replace(/^https:\/\/github\.com\//i, `https://oauth2:${token}@github.com/`);
+    // Clean workspace before retry
+    await sandbox.commands.run(`rm -rf ${shellQuote(workspacePath)} && mkdir -p ${shellQuote(workspacePath)}`);
+    result = await sandbox.commands.run(
+      `git clone --depth 1${branchArg} ${shellQuote(authedUrl)} ${shellQuote(workspacePath)}`,
+      { timeoutMs: 120_000 },
+    );
+    // Remove token from remote URL immediately so it doesn't persist in .git/config
+    if (result.exitCode === 0) {
+      await sandbox.commands.run(`git -C ${shellQuote(workspacePath)} remote set-url origin ${shellQuote(url)}`).catch(() => undefined);
+    }
+  }
   if (result.exitCode !== 0) {
     const raw = (result.stderr || result.stdout || "git clone failed").slice(0, 2000);
     const hint =
-      !token && /^https:\/\/github\.com\//i.test(url)
-        ? " The repository may be private — sign in with GitHub and retry."
-        : "";
+      !token && isGitHub ? " The repository may be private — sign in with GitHub and retry." : "";
     throw new Error(`${raw}${hint}`);
   }
 }

@@ -2,6 +2,24 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  IconArrowLeft,
+  IconCopy,
+  IconCheck,
+  IconPlayerStop,
+  IconSend2,
+  IconRefresh,
+  IconTrash,
+  IconTerminal,
+  IconLayoutSidebarRight,
+  IconGitBranch,
+  IconClock,
+} from "@tabler/icons-react";
+
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { EmptyState } from "@/components/ui/empty-state";
 import Markdown from "./markdown";
 import SessionPanel, { usePanelPrefs } from "./session-panel";
 import SessionSidebar from "./session-sidebar";
@@ -16,22 +34,12 @@ import {
   type SidebarSession,
 } from "./lib";
 
-function AgentBadge({
-  working,
-  failed,
-  streaming,
-}: {
-  working: boolean;
-  failed: boolean;
-  streaming: boolean;
-}) {
+function AgentBadge({ working, failed, streaming }: { working: boolean; failed: boolean; streaming: boolean }) {
   const label = streaming || working ? "Working" : failed ? "Failed" : "Idle";
   const dot = streaming || working ? "bg-warning" : failed ? "bg-danger" : "bg-success";
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${dot} ${streaming || working ? "animate-pulse" : ""}`}
-      />
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
+      <span className={`h-1.5 w-1.5 rounded-full ${dot} ${streaming || working ? "animate-pulse" : ""}`} />
       {label}
     </span>
   );
@@ -56,7 +64,7 @@ function SandboxBadge({ status }: { status: SessionStatus | null }) {
         : "bg-warning";
   const pulse = sandboxStatus !== "ready" && sandboxStatus !== "error";
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
       <span className={`h-1.5 w-1.5 rounded-full ${dot} ${pulse ? "animate-pulse" : ""}`} />
       {label}
     </span>
@@ -82,21 +90,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   function copyMessage(id: string, content: string) {
     void navigator.clipboard
       ?.writeText(content)
-      .then(() => {
+      ?.then(() => {
         setCopiedId(id);
         setTimeout(() => setCopiedId((c) => (c === id ? "" : c)), 1500);
       })
-      .catch(() => undefined);
+      ?.catch(() => undefined);
   }
 
   const refresh = useCallback(async (id: string, includeMessages: boolean) => {
     const [nextDetail, nextStatus, nextSessions] = await Promise.all([
-      fetch(`${API}/api/sessions/${id}`, { credentials: "include" }).then((r) =>
-        r.ok ? r.json() : null,
-      ),
-      fetch(`${API}/api/sessions/${id}/status`, { credentials: "include" }).then((r) =>
-        r.ok ? r.json() : null,
-      ),
+      fetch(`${API}/api/sessions/${id}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${API}/api/sessions/${id}/status`, { credentials: "include" }).then((r) => (r.ok ? r.json() : null)),
       fetch(`${API}/api/sessions`, { credentials: "include" }).then((r) => (r.ok ? r.json() : [])),
     ]);
     if (nextDetail) setDetail(nextDetail);
@@ -116,9 +120,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setSessionId(id);
       try {
         window.localStorage.setItem("opendevin:selected-session", id);
-      } catch {
-        // Ignore persistence failures.
-      }
+      } catch {}
       void refresh(id, true);
     });
   }, [params, refresh]);
@@ -127,7 +129,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const agentStatus = status?.status ?? detail?.status ?? "idle";
   const busy = isWorking(agentStatus, sandboxStatus) || sending;
 
-  // Poll every 3s while creating/cloning/running (navbar + sidebar stay live).
   useEffect(() => {
     if (!sessionId || !busy) return;
     const timer = setInterval(() => void refresh(sessionId, !sending), 3000);
@@ -188,11 +189,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         setMessages((current) =>
-          current.map((message) =>
-            message.id === "streaming" ? { ...message, content: message.content + chunk } : message,
-          ),
+          current.map((message) => (message.id === "streaming" ? { ...message, content: message.content + chunk } : message)),
+        );
+      }
+      // Flush any remaining bytes
+      const tail = decoder.decode();
+      if (tail) {
+        setMessages((current) =>
+          current.map((message) => (message.id === "streaming" ? { ...message, content: message.content + tail } : message)),
         );
       }
     } catch (err) {
@@ -205,7 +211,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     } finally {
       abortRef.current = null;
       setSending(false);
-      // Backend is source of truth — refetch the persisted transcript.
       await refresh(sessionId, true);
     }
   }
@@ -220,12 +225,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   async function kill() {
-    if (
-      !sessionId ||
-      killing ||
-      !window.confirm("Kill this sandbox? The terminal and preview stop; chat history stays.")
-    )
-      return;
+    if (!sessionId || killing || !window.confirm("Kill this sandbox? The terminal and preview stop; chat history stays.")) return;
     setKilling(true);
     setError("");
     try {
@@ -247,12 +247,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   async function removeSession() {
-    if (
-      !sessionId ||
-      deleting ||
-      !window.confirm("Delete this session and its sandbox? This cannot be undone.")
-    )
-      return;
+    if (!sessionId || deleting || !window.confirm("Delete this session and its sandbox? This cannot be undone.")) return;
     setDeleting(true);
     try {
       const response = await fetch(`${API}/api/sessions/${sessionId}`, {
@@ -283,186 +278,154 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   return (
     <main className="flex h-screen flex-col bg-background">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2.5 sm:px-5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <Link
-            href={detail ? `/p/${detail.projectId}` : "/"}
-            className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
-          >
-            ← Back
-          </Link>
-          <span className="h-4 w-px shrink-0 bg-border" />
-          <h1 className="truncate text-sm font-medium">{detail?.title || "Loading session…"}</h1>
-          {detail?.branch && (
-            <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[11px] text-muted-foreground sm:inline">
-              {detail.branch}
-            </span>
-          )}
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Button variant="ghost" size="xs" onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}>
+            <IconArrowLeft className="size-4" /> <span className="hidden sm:inline">Back</span>
+          </Button>
+          <span className="hidden h-4 w-px bg-border sm:inline" />
+          <div className="min-w-0">
+            <h1 className="truncate text-[13px] font-medium leading-none">{detail?.title || "Loading session…"} </h1>
+            <div className="hidden items-center gap-1.5 pt-1 sm:flex">
+              {detail?.branch && (
+                <Badge variant="outline" className="h-4 gap-1 px-1.5 font-mono text-[11px]">
+                  <IconGitBranch className="size-3" /> {detail.branch}
+                </Badge>
+              )}
+              {detail && (
+                <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                  <IconClock className="size-3" /> {formatDate(detail.createdAt)}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {detail && (
-            <span
-              className="hidden font-mono text-[11px] text-muted-foreground xl:inline"
-              title="Session created"
-            >
-              {formatDate(detail.createdAt)}
-            </span>
-          )}
-          <AgentBadge
-            working={agentStatus === "running"}
-            failed={agentStatus === "failed"}
-            streaming={sending}
-          />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <AgentBadge working={agentStatus === "running"} failed={agentStatus === "failed"} streaming={sending} />
           <SandboxBadge status={status} />
           {(failed || (sandboxStatus === "ready" && !status?.sandboxAvailable)) && (
-            <button
-              onClick={() => void reconnect()}
-              disabled={reconnecting}
-              className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-            >
+            <Button variant="outline" size="xs" onClick={() => void reconnect()} disabled={reconnecting}>
               {reconnecting ? "…" : "Reconnect"}
-            </button>
+            </Button>
           )}
           {(status?.sandboxId || detail?.sandboxId) && !failed && (
-            <button
-              onClick={() => void kill()}
-              disabled={killing}
-              title="Stop the cloud sandbox now instead of waiting for timeout"
-              className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-            >
+            <Button variant="ghost" size="xs" onClick={() => void kill()} disabled={killing} className="hidden sm:inline-flex">
               {killing ? "…" : "Kill"}
-            </button>
+            </Button>
           )}
-          <button
-            onClick={() => void removeSession()}
-            disabled={deleting}
-            title="Delete this session and its sandbox"
-            className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-danger disabled:opacity-40"
-          >
-            {deleting ? "…" : "Delete"}
-          </button>
-          <button
-            onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
-            className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-          >
-            {prefs.open ? "Hide panel" : "Panel"}
-          </button>
+          <Button variant="ghost" size="xs" onClick={() => void removeSession()} disabled={deleting} className="text-muted-foreground hover:text-destructive">
+            <IconTrash className="size-3.5" />
+            <span className="hidden lg:inline">{deleting ? "…" : "Delete"}</span>
+          </Button>
+          <Button variant="outline" size="xs" onClick={() => setPrefs({ ...prefs, open: !prefs.open })}>
+            <IconLayoutSidebarRight className="size-3.5" />
+            {prefs.open ? "Hide" : "Panel"}
+          </Button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <SessionSidebar
-          sessions={allSessions}
-          activeId={sessionId}
-          projectId={detail?.projectId || ""}
-        />
+        <SessionSidebar sessions={allSessions} activeId={sessionId} projectId={detail?.projectId || ""} />
 
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="flex min-w-0 flex-1 flex-col bg-background">
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
             {provisioning && (
-              <div className="mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-                <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                Spinning up cloud sandbox and cloning repo… the agent gets full workspace access
-                once this turns ready.
+              <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-[13px] text-muted-foreground">
+                <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                Spinning up sandbox and cloning repo… the agent gets full workspace access once ready.
               </div>
             )}
             {failed && (
-              <div className="mb-5 rounded-lg border border-danger/40 bg-card p-4 text-sm">
-                <p className="font-medium text-danger">
-                  Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}
-                </p>
-                <button
-                  onClick={() => void reconnect()}
-                  disabled={reconnecting}
-                  className="mt-3 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-40"
-                >
-                  {reconnecting ? "Reconnecting…" : "Reconnect sandbox"}
-                </button>
+              <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
+                <p className="text-sm font-medium text-destructive">Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}</p>
+                <Button size="sm" className="mt-3" onClick={() => void reconnect()} disabled={reconnecting}>
+                  <IconRefresh className="size-4" /> {reconnecting ? "Reconnecting…" : "Reconnect sandbox"}
+                </Button>
               </div>
             )}
             {agentStatus === "failed" && !sending && (
-              <div className="mb-5 rounded-lg border border-danger/40 bg-card p-4 text-sm">
-                <p className="font-medium text-danger">Agent run failed.</p>
-                <button
-                  onClick={retry}
-                  className="mt-3 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background"
-                >
-                  Retry last message
-                </button>
+              <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
+                <p className="text-sm font-medium text-destructive">Agent run failed.</p>
+                <Button size="sm" className="mt-3" onClick={retry}>
+                  <IconRefresh className="size-4" /> Retry last message
+                </Button>
               </div>
             )}
-            <div className="flex-1 space-y-5">
+
+            <div className="flex-1 space-y-4">
               {messages.length === 0 && (
-                <div className="rounded-lg border border-dashed border-border p-8 text-sm text-muted-foreground">
-                  Your agent is ready. Ask it to inspect files, make a plan, or start building.
-                </div>
+                <EmptyState
+                  icon={<IconTerminal className="size-4" />}
+                  title="Agent is ready"
+                  description="Ask it to inspect files, make a plan, or start building. It can read, edit, run commands, and show you the diff."
+                />
               )}
               {messages.map((message) => (
                 <article
                   key={message.id}
                   className={
                     message.role === "user"
-                      ? "ml-8 rounded-lg bg-card px-4 py-3 text-sm"
-                      : "group mr-8 px-1 py-2 text-sm leading-7 text-foreground/85"
+                      ? "ml-6 rounded-xl border bg-card px-4 py-3 sm:ml-10"
+                      : "group mr-2 sm:mr-8"
                   }
                 >
                   <div className="mb-1 flex items-center justify-between">
-                    <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       {message.role === "user" ? "You" : "OpenDevin"}
                     </p>
                     {message.role === "assistant" && message.content && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={() => copyMessage(message.id, message.content)}
-                        className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+                        className="h-6 gap-1 px-1.5 text-[11px] opacity-0 group-hover:opacity-100"
                       >
+                        {copiedId === message.id ? <IconCheck className="size-3" /> : <IconCopy className="size-3" />}
                         {copiedId === message.id ? "Copied" : "Copy"}
-                      </button>
+                      </Button>
                     )}
                   </div>
                   {message.role === "user" ? (
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    <p className="whitespace-pre-wrap text-[13.5px] leading-6">{message.content}</p>
                   ) : (
-                    <Markdown content={message.content || "Thinking…"} />
+                    <div className="rounded-none border-0 bg-transparent p-0 text-[13.5px] leading-7">
+                      <Markdown content={message.content || "Thinking…"} />
+                    </div>
                   )}
                 </article>
               ))}
             </div>
-            <form onSubmit={(e) => void send(e)} className="mt-8 border-t border-border pt-4">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (sending) stop();
-                    else void send(e as unknown as FormEvent);
-                  }
-                }}
-                rows={3}
-                placeholder="Tell the agent what to do next… (Enter to send, Shift+Enter for a new line)"
-                className="w-full resize-none rounded-md border border-input bg-card px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
-              />
-              <div className="mt-2 flex items-center justify-between">
-                <p className="text-[11px] text-muted-foreground">
-                  {sending ? "Agent is working…" : " "}
-                </p>
-                {sending ? (
-                  <button
-                    onClick={stop}
-                    className="rounded-md border border-danger/50 px-4 py-2 text-sm font-medium text-danger"
-                  >
-                    Stop
-                  </button>
-                ) : (
-                  <button
-                    disabled={!input.trim()}
-                    className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-40"
-                  >
-                    Send
-                  </button>
-                )}
+
+            <form onSubmit={(e) => void send(e)} className="sticky bottom-0 -mx-4 mt-6 border-t bg-background px-4 pt-4 sm:mx-0 sm:px-0">
+              <div className="rounded-xl border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring">
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (sending) stop();
+                      else void send(e as unknown as FormEvent);
+                    }
+                  }}
+                  rows={3}
+                  placeholder="Tell the agent what to do next… (Enter to send, Shift+Enter for a new line)"
+                  className="min-h-[72px] resize-none border-0 bg-transparent px-3 py-3 shadow-none focus-visible:ring-0"
+                />
+                <div className="flex items-center justify-between gap-2 border-t px-2 py-2">
+                  <p className="px-2 text-[11px] text-muted-foreground">{sending ? "Agent is working… esc to stop" : "↵ send · ⇧↵ new line"}</p>
+                  {sending ? (
+                    <Button type="button" variant="outline" size="sm" onClick={stop} className="gap-1.5">
+                      <IconPlayerStop className="size-4" /> Stop
+                    </Button>
+                  ) : (
+                    <Button type="submit" size="sm" disabled={!input.trim()} className="gap-1.5">
+                      <IconSend2 className="size-4" /> Send
+                    </Button>
+                  )}
+                </div>
               </div>
-              {error && <p className="mt-2 text-right text-sm text-danger">{error}</p>}
+              {error && <p className="mt-2 text-right text-sm text-destructive">{error}</p>}
             </form>
           </div>
         </section>

@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog"
+import { cn } from "cn"
 
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
@@ -22,7 +22,10 @@ function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {
   )
 }
 
-function AlertDialogOverlay({ className, ...props }: AlertDialogPrimitive.Backdrop.Props) {
+function AlertDialogOverlay({
+  className,
+  ...props
+}: AlertDialogPrimitive.Backdrop.Props) {
   return (
     <AlertDialogPrimitive.Backdrop
       data-slot="alert-dialog-overlay"
@@ -58,7 +61,10 @@ function AlertDialogContent({
   )
 }
 
-function AlertDialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+function AlertDialogHeader({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-dialog-header"
@@ -87,7 +93,10 @@ function AlertDialogFooter({
   )
 }
 
-function AlertDialogMedia({ className, ...props }: React.ComponentProps<"div">) {
+function AlertDialogMedia({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-dialog-media"
@@ -132,7 +141,10 @@ function AlertDialogDescription({
   )
 }
 
-function AlertDialogAction({ className, ...props }: React.ComponentProps<typeof Button>) {
+function AlertDialogAction({
+  className,
+  ...props
+}: React.ComponentProps<typeof Button>) {
   return (
     <Button
       data-slot="alert-dialog-action"

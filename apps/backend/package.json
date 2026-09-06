@@ -12,16 +12,19 @@
     "@ai-sdk/openai": "^2.0.0",
     "@prisma/client": "^6.16.2",
     "ai": "^5.0.0",
-    "better-auth": "^1.7.2",
+    "better-auth": "^1.7.3",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "e2b": "^2.46.1",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "ws": "^8.18.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
     "@types/node": "^26.1.1",
+    "@types/ws": "^8.18.1",
     "prisma": "^6.16.2",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"

@@ -7,3 +7,5 @@ We uses convex as db https://convex.dev
 We use pnpm
 
 Dont edit shadcn files in components/ui/
+
+We need a basic minimal shadcnish ui in `/apps/frontend`
