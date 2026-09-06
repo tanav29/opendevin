@@ -33,15 +33,18 @@ import {
   type SessionStatus,
   type SidebarSession,
 } from "./lib";
+import DeliveryBox01Icon from "@hugeicons/core-free-icons/DeliveryBox01Icon";
+import { DeliveryBox01FreeIcons, DeliveryBox02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Bot, Box } from "lucide-react";
 
 function AgentBadge({ working, failed, streaming }: { working: boolean; failed: boolean; streaming: boolean }) {
   const label = streaming || working ? "Working" : failed ? "Failed" : "Idle";
-  const dot = streaming || working ? "bg-warning" : failed ? "bg-danger" : "bg-success";
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
-      <span className={`h-1.5 w-1.5 rounded-full ${dot} ${streaming || working ? "animate-pulse" : ""}`} />
+    <Badge variant={"ghost"}>
+      <Bot className="w-3" />
       {label}
-    </span>
+    </Badge>
   );
 }
 
@@ -56,19 +59,12 @@ function SandboxBadge({ status }: { status: SessionStatus | null }) {
         ? "Failed"
         : "Provisioning"
     : "…";
-  const dot =
-    sandboxStatus === "ready" && status?.sandboxAvailable
-      ? "bg-success"
-      : sandboxStatus === "error" || (sandboxStatus === "ready" && !status?.sandboxAvailable)
-        ? "bg-danger"
-        : "bg-warning";
-  const pulse = sandboxStatus !== "ready" && sandboxStatus !== "error";
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-      <span className={`h-1.5 w-1.5 rounded-full ${dot} ${pulse ? "animate-pulse" : ""}`} />
+    <Badge variant={"ghost"}>
+      <Box className="w-3" />
       {label}
-    </span>
-  );
+    </Badge>
+    );
 }
 
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -280,52 +276,44 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     <main className="flex h-screen flex-col bg-background">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-3 py-2.5 sm:px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <Button variant="ghost" size="xs" onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}>
-            <IconArrowLeft className="size-4" /> <span className="hidden sm:inline">Back</span>
+          <Button variant="ghost" size="icon-sm" onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}>
+            <IconArrowLeft />
           </Button>
-          <span className="hidden h-4 w-px bg-border sm:inline" />
-          <div className="min-w-0">
-            <h1 className="truncate text-[13px] font-medium leading-none">{detail?.title || "Loading session…"} </h1>
-            <div className="hidden items-center gap-1.5 pt-1 sm:flex">
+          <div className="min-w-0 flex gap-2 items-center">
+            <h1 className="truncate text-sm font-medium leading-none">{detail?.title || "Loading session…"} </h1>
               {detail?.branch && (
-                <Badge variant="outline" className="h-4 gap-1 px-1.5 font-mono text-[11px]">
-                  <IconGitBranch className="size-3" /> {detail.branch}
+                <Badge variant="outline">
+                  {detail.branch}
                 </Badge>
               )}
-              {detail && (
-                <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                  <IconClock className="size-3" /> {formatDate(detail.createdAt)}
-                </span>
-              )}
-            </div>
+
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <AgentBadge working={agentStatus === "running"} failed={agentStatus === "failed"} streaming={sending} />
           <SandboxBadge status={status} />
           {(failed || (sandboxStatus === "ready" && !status?.sandboxAvailable)) && (
-            <Button variant="outline" size="xs" onClick={() => void reconnect()} disabled={reconnecting}>
+            <Button variant="ghost" size="sm" onClick={() => void reconnect()} disabled={reconnecting}>
               {reconnecting ? "…" : "Reconnect"}
             </Button>
           )}
           {(status?.sandboxId || detail?.sandboxId) && !failed && (
-            <Button variant="ghost" size="xs" onClick={() => void kill()} disabled={killing} className="hidden sm:inline-flex">
+            <Button variant="ghost" size="sm" onClick={() => void kill()} disabled={killing} className="hidden sm:inline-flex">
               {killing ? "…" : "Kill"}
             </Button>
           )}
-          <Button variant="ghost" size="xs" onClick={() => void removeSession()} disabled={deleting} className="text-muted-foreground hover:text-destructive">
-            <IconTrash className="size-3.5" />
+          <Button variant="ghost" size="icon-sm" onClick={() => void removeSession()} disabled={deleting}>
+            <IconTrash />
             <span className="hidden lg:inline">{deleting ? "…" : "Delete"}</span>
           </Button>
-          <Button variant="outline" size="xs" onClick={() => setPrefs({ ...prefs, open: !prefs.open })}>
-            <IconLayoutSidebarRight className="size-3.5" />
-            {prefs.open ? "Hide" : "Panel"}
+          <Button variant="ghost" size="icon-sm" onClick={() => setPrefs({ ...prefs, open: !prefs.open })}>
+            <IconLayoutSidebarRight />
           </Button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <SessionSidebar sessions={allSessions} activeId={sessionId} projectId={detail?.projectId || ""} />
+        {/*<SessionSidebar sessions={allSessions} activeId={sessionId} projectId={detail?.projectId || ""} />*/}
 
         <section className="flex min-w-0 flex-1 flex-col bg-background">
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
@@ -365,14 +353,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   key={message.id}
                   className={
                     message.role === "user"
-                      ? "ml-6 rounded-xl border bg-card px-4 py-3 sm:ml-10"
-                      : "group mr-2 sm:mr-8"
+                      ? ""
+                      : ""
                   }
                 >
-                  <div className="mb-1 flex items-center justify-between">
-                    <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  <div className="mb-0.5 flex items-center justify-between">
+                    {/*<p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       {message.role === "user" ? "You" : "OpenDevin"}
-                    </p>
+                    </p>*/}
                     {message.role === "assistant" && message.content && (
                       <Button
                         variant="ghost"
@@ -396,8 +384,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               ))}
             </div>
 
-            <form onSubmit={(e) => void send(e)} className="sticky bottom-0 -mx-4 mt-6 border-t bg-background px-4 pt-4 sm:mx-0 sm:px-0">
-              <div className="rounded-xl border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring">
+            <form onSubmit={(e) => void send(e)} className="sticky bottom-0 bg-card rounded-xl">
+              <div className="">
                 <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -410,10 +398,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   }}
                   rows={3}
                   placeholder="Tell the agent what to do next… (Enter to send, Shift+Enter for a new line)"
-                  className="min-h-[72px] resize-none border-0 bg-transparent px-3 py-3 shadow-none focus-visible:ring-0"
+                  className="min-h-16 rounded-xl bg-transparent resize-none border-0 px-3 py-2 text-sm focus-visible:ring-0"
                 />
-                <div className="flex items-center justify-between gap-2 border-t px-2 py-2">
-                  <p className="px-2 text-[11px] text-muted-foreground">{sending ? "Agent is working… esc to stop" : "↵ send · ⇧↵ new line"}</p>
+                <div className="flex items-center justify-between gap-2 px-2 p-2">
+                  <p className="px-2 text-[11px] text-muted-foreground">{sending && "Agent is working… esc to stop"}</p>
                   {sending ? (
                     <Button type="button" variant="outline" size="sm" onClick={stop} className="gap-1.5">
                       <IconPlayerStop className="size-4" /> Stop

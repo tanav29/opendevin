@@ -35,6 +35,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { timeAgo } from "@/lib/format";
+import NewProjectForm from "@/components/new-project-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -103,23 +105,15 @@ export function AppSidebar() {
   }, [sessions, query]);
 
   const isDashboard = pathname === "/";
-  const isNew = pathname === "/new";
   const isSettings = pathname === "/settings";
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
       <SidebarHeader className="gap-0">
-        <div className="flex h-10 items-center gap-2 px-1">
+        <div className="flex items-center gap-2 px-1 h-8">
           <Link href="/" className="flex min-w-0 items-center gap-2">
-            <span className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
-              <IconCode className="size-4" />
-            </span>
-            <span className="truncate text-[13px] font-semibold tracking-[-0.02em] group-data-[collapsible=icon]:hidden">OpenDevin</span>
+            <span className="truncate text-md font-semibold tracking-[-0.02em] group-data-[collapsible=icon]:hidden">OpenDevin</span>
           </Link>
-          <Tooltip>
-            <TooltipTrigger render={<SidebarTrigger className="ml-auto size-7 group-data-[collapsible=icon]:hidden" />} />
-            <TooltipContent side="right">Toggle — ⌘B</TooltipContent>
-          </Tooltip>
         </div>
 
         {signedIn !== false && (
@@ -132,9 +126,6 @@ export function AppSidebar() {
                 onChange={(e) => setQuery(e.target.value)}
                 className="h-7 pl-7 text-[13px]"
               />
-              <span className="pointer-events-none absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">
-                ⌘K
-              </span>
             </div>
           </div>
         )}
@@ -145,20 +136,29 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={isDashboard} tooltip="Dashboard" render={<Link href="/" />}>
+                <SidebarMenuButton isActive={isDashboard} tooltip="Dashboard" render={<Link href="/" prefetch />}>
                   <IconLayoutDashboard className="size-4" />
                   <span>Dashboard</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={isNew} tooltip="New project" render={<Link href="/new" />}>
-                  <IconPlus className="size-4" />
-                  <span>New project</span>
-                </SidebarMenuButton>
+                <Dialog>
+                  <DialogTrigger render={<SidebarMenuButton tooltip="New project" />}>
+                    <IconPlus className="size-4" />
+                    <span>New project</span>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Create a workspace</DialogTitle>
+                      <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
+                    </DialogHeader>
+                    <NewProjectForm />
+                  </DialogContent>
+                </Dialog>
               </SidebarMenuItem>
               {signedIn === false && (
                 <SidebarMenuItem>
-                  <SidebarMenuButton isActive={pathname === "/login"} tooltip="Sign in" render={<Link href="/login" />}>
+                  <SidebarMenuButton isActive={pathname === "/login"} tooltip="Sign in" render={<Link href="/login" prefetch />}>
                     <IconSparkles className="size-4" />
                     <span>Sign in</span>
                   </SidebarMenuButton>
@@ -182,7 +182,7 @@ export function AppSidebar() {
           <>
             <SidebarGroup>
               <SidebarGroupLabel className="flex items-center gap-1.5">
-                <IconFolder className="size-3.5" />
+                {/*<IconFolder className="size-3.5" />*/}
                 Projects
                 <span className="ml-auto font-mono text-[11px] text-muted-foreground">{projects.length}</span>
               </SidebarGroupLabel>
@@ -216,16 +216,16 @@ export function AppSidebar() {
 
             <SidebarGroup>
               <SidebarGroupLabel className="flex items-center gap-1.5">
-                <IconTerminal className="size-3.5" />
+                {/*<IconTerminal className="size-3.5" />*/}
                 Sessions
-                <span className="ml-auto flex items-center gap-1.5">
+                {/*<span className="ml-auto flex items-center gap-1.5">
                   {sessions.filter((s) => s.status === "running").length > 0 && (
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                       <span className="size-1.5 animate-pulse rounded-full bg-warning" />
                       {sessions.filter((s) => s.status === "running").length}
                     </span>
                   )}
-                </span>
+                </span>*/}
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
@@ -237,14 +237,14 @@ export function AppSidebar() {
                       return (
                         <SidebarMenuItem key={s.id}>
                           <SidebarMenuButton isActive={active} tooltip={s.title} render={<Link href={`/s/${s.id}`} />}>
-                            <StatusDot status={s.status} />
                             <span className="truncate">{s.title}</span>
-                            {s.branch && (
+                            {/*{s.branch && (
                               <Badge variant="outline" className="ml-auto hidden h-4 px-1 font-mono text-[10px] group-data-[collapsible=icon]:hidden xl:inline-flex">
                                 <IconGitBranch className="size-3" />
                                 {s.branch.length > 12 ? `${s.branch.slice(0, 12)}…` : s.branch}
                               </Badge>
-                            )}
+                            )}*/}
+                            <StatusDot status={s.status} />
                           </SidebarMenuButton>
                         </SidebarMenuItem>
                       );
@@ -261,15 +261,16 @@ export function AppSidebar() {
         <SidebarSeparator className="mx-0" />
         <div className="flex items-center gap-2 p-2 group-data-[collapsible=icon]:justify-center">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card group-data-[collapsible=icon]:size-8">
-            <IconCode className="size-3.5 text-muted-foreground" />
+            {/*your avatar*/}
           </div>
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-[13px] font-medium leading-none">{signedIn ? "Workspace" : "Guest"}</p>
-            <p className="truncate font-mono text-[11px] text-muted-foreground">{signedIn ? `${projects.length} projects` : "Sign in required"}</p>
+            <p className="truncate text-[13px] font-medium leading-none">{signedIn ? "Your Name sir" : "Guest"}</p>
           </div>
-          <Button variant="ghost" size="icon-sm" className="size-7 shrink-0 group-data-[collapsible=icon]:hidden" onClick={() => (window.location.href = "/settings")}>
+          <Link href="/settings">
+            <Button variant="ghost" size="icon-sm" className="size-7 shrink-0 group-data-[collapsible=icon]:hidden">
             <IconSettings className="size-4" />
-          </Button>
+            </Button>
+          </Link>
         </div>
       </SidebarFooter>
     </Sidebar>

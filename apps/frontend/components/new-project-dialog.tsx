@@ -2,11 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconArrowLeft,
-  IconFolder,
   IconGitBranch,
-  IconPlus,
-  IconCode,
   IconBrandGithub,
   IconLock,
   IconStar,
@@ -18,12 +14,9 @@ import {
   IconExternalLink,
 } from "@tabler/icons-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -47,7 +40,7 @@ type Repo = {
   owner: string;
 };
 
-export default function NewProject() {
+export default function NewProjectForm() {
   const [name, setName] = useState("");
   const [repo, setRepo] = useState("");
   const [error, setError] = useState("");
@@ -175,35 +168,6 @@ export default function NewProject() {
   }
 
   return (
-    <AppShell>
-      <PageShell
-        header={
-          <PageHeader
-            title="New project"
-            description="From repo or blank"
-            icon={<IconFolder className="size-4" />}
-            actions={
-              <Button variant="ghost" size="sm" onClick={() => (window.location.href = "/")}>
-                <IconArrowLeft className="size-4" /> Back
-              </Button>
-            }
-          />
-        }
-      >
-        <PageContainer size="sm" className="py-8">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <span className="flex size-8 items-center justify-center rounded-md border bg-muted">
-                  <IconPlus className="size-4" />
-                </span>
-                <div>
-                  <CardTitle>Create a workspace</CardTitle>
-                  <CardDescription>A project groups sessions. Start from a Git URL or an empty directory.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
               <form onSubmit={createProject} className="space-y-5">
                 <label className="block">
                   <span className="text-sm font-medium">Project name</span>
@@ -248,7 +212,7 @@ export default function NewProject() {
                           <span className="truncate font-mono text-[13px] text-foreground">{repo}</span>
                         ) : (
                           <span className="truncate">
-                            {needsAuth ? "Connect GitHub to browse" : `Select a repository${repos.length ? ` — ${repos.length} found` : ""}`}
+                            {needsAuth ? "Connect GitHub to browse" : `Select a repository${repos.length ? ` - ${repos.length} found` : ""}`}
                           </span>
                         )}
                       </span>
@@ -258,9 +222,9 @@ export default function NewProject() {
                     </Button>
 
                     {pickerOpen && (
-                      <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg">
+                      <div className="absolute z-50 mt-2 w-full rounded-xl border bg-popover text-popover-foreground shadow-lg">
                         {/* search */}
-                        <div className="border-b p-2">
+                        <div className="p-2">
                           <div className="relative">
                             <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                             <Input
@@ -274,7 +238,7 @@ export default function NewProject() {
                         </div>
 
                         {/* content */}
-                        <div className="max-h-72 overflow-hidden">
+                        <div className="h-72 overflow-scroll">
                           {reposLoading ? (
                             <div className="space-y-2 p-2">
                               {[0, 1, 2].map((i) => (
@@ -316,7 +280,7 @@ export default function NewProject() {
                               No repositories match “{filter}”.
                             </div>
                           ) : (
-                            <ScrollArea className="max-h-64">
+                            <ScrollArea className="max-h-64 z-50">
                               <div className="p-1">
                                 {filteredRepos.map((r) => {
                                   const isSelected = selectedRepo?.id === r.id || repo === r.htmlUrl || repo === r.cloneUrl;
@@ -409,7 +373,7 @@ export default function NewProject() {
 
                   <div className="flex items-center gap-2 py-1">
                     <Separator className="flex-1" />
-                    <span className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">or paste URL</span>
+                    <span className="text-xs text-muted-foreground">or paste URL</span>
                     <Separator className="flex-1" />
                   </div>
 
@@ -433,9 +397,6 @@ export default function NewProject() {
                       </a>
                     )}
                   </div>
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <IconGitBranch className="size-3" /> Supports GitHub, GitLab, Bitbucket — any public repo. Private GitHub repos work when you’re signed in.
-                  </span>
 
                   {selectedRepo && (
                     <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
@@ -466,34 +427,10 @@ export default function NewProject() {
                   <Button type="submit" disabled={creating || !name.trim()} className="min-w-32">
                     {creating ? "Creating…" : "Create project"}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
+                   <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
                     Cancel
                   </Button>
                 </div>
               </form>
-
-              <Separator className="my-6" />
-
-              <div className="flex gap-3 rounded-lg border bg-muted/50 p-3">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background border">
-                  <IconCode className="size-4 text-muted-foreground" />
-                </span>
-                <div>
-                  <p className="text-sm font-medium">What happens next?</p>
-                  <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                    You will get a project page where you can open a session. Each session spins up a fresh sandbox, clones the branch, and gives the agent shell + file access.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="mt-6 flex justify-center gap-2 text-xs text-muted-foreground">
-            <span>Need a different branch?</span>
-            <span className="text-foreground">You can pick it when opening a session.</span>
-          </div>
-        </PageContainer>
-      </PageShell>
-    </AppShell>
   );
 }

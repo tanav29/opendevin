@@ -1,58 +1,9 @@
 "use client";
 
+import { FileDiff } from "@pierre/diffs/react";
+import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API } from "./lib";
-
-type DiffFile = {
-  header: string;
-  path: string;
-  additions: number;
-  deletions: number;
-  lines: string[];
-};
-
-function parseDiff(raw: string): DiffFile[] {
-  const files: DiffFile[] = [];
-  let current: DiffFile | null = null;
-  for (const line of raw.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      current = {
-        header: line,
-        path: line.replace(/^diff --git a\/(.*?) b\/.*$/, "$1"),
-        additions: 0,
-        deletions: 0,
-        lines: [],
-      };
-      files.push(current);
-    } else if (current) {
-      current.lines.push(line);
-      if (line.startsWith("+") && !line.startsWith("+++")) current.additions += 1;
-      else if (line.startsWith("-") && !line.startsWith("---")) current.deletions += 1;
-    }
-  }
-  return files;
-}
-
-function DiffLine({ line }: { line: string }) {
-  const className =
-    line.startsWith("+") && !line.startsWith("+++")
-      ? "bg-success-muted text-success"
-      : line.startsWith("-") && !line.startsWith("---")
-        ? "bg-danger-muted text-danger"
-        : line.startsWith("@@")
-          ? "bg-muted font-medium text-muted-foreground"
-          : line.startsWith("diff --git") ||
-              line.startsWith("index ") ||
-              line.startsWith("+++") ||
-              line.startsWith("---")
-            ? "font-medium text-muted-foreground"
-            : "text-muted-foreground";
-  return (
-    <div className={`whitespace-pre px-3 font-mono text-xs leading-5 ${className}`}>
-      {line || " "}
-    </div>
-  );
-}
 
 export default function ChangesTab({
   sessionId,
@@ -139,9 +90,24 @@ export default function ChangesTab({
     void readDiff().then(applyDiff);
   }
 
-  const files = useMemo(() => parseDiff(diff || ""), [diff]);
-  const totalAdd = files.reduce((n, f) => n + f.additions, 0);
-  const totalDel = files.reduce((n, f) => n + f.deletions, 0);
+  const diffOptions = useMemo<FileDiffOptions<undefined, undefined>>(
+    () => ({
+      theme: { dark: "pierre-dark", light: "pierre-light" },
+      diffStyle: "unified",
+      hunkSeparators: "line-info",
+      lineDiffType: "word-alt",
+      overflow: "scroll",
+    }),
+    []
+  );
+  const parsedFiles = useMemo<FileDiffMetadata[]>(() => {
+    if (!diff) return [];
+    try {
+      return parsePatchFiles(diff, `session-${sessionId}`).flatMap((patch) => patch.files);
+    } catch {
+      return [];
+    }
+  }, [diff, sessionId]);
 
   async function downloadPatch() {
     if (!diff) return;
@@ -203,7 +169,7 @@ export default function ChangesTab({
           {loading
             ? "Loading diff…"
             : diff
-              ? `${files.length} files · +${totalAdd} −${totalDel}${truncated ? " · truncated" : ""}${persisted ? " · saved" : ""}`
+              ? `${parsedFiles.length} files${truncated ? " · truncated" : ""}${persisted ? " · saved" : ""}`
               : "No diff loaded"}
         </p>
         <div className="flex gap-1.5">
@@ -245,7 +211,7 @@ export default function ChangesTab({
             Open this tab to load the workspace diff.
           </p>
         )}
-        {diff !== null && files.length === 0 && (
+        {diff !== null && !diff && (
           <div className="px-3 py-6 text-center">
             <p className="text-sm font-medium">No changes</p>
             <p className="mt-1 text-[13px] text-muted-foreground">
@@ -253,19 +219,18 @@ export default function ChangesTab({
             </p>
           </div>
         )}
-        {files.map((file, i) => (
-          <div key={`${file.path}-${i}`} className="mb-3 overflow-x-auto border-y border-border">
-            <div className="sticky left-0 flex items-center justify-between gap-2 bg-muted px-3 py-1.5">
-              <span className="truncate font-mono text-xs font-medium">{file.path}</span>
-              <span className="shrink-0 font-mono text-[11px]">
-                <span className="text-success">+{file.additions}</span>{" "}
-                <span className="text-danger">−{file.deletions}</span>
-              </span>
-            </div>
-            {file.lines.map((line, j) => (
-              <DiffLine key={j} line={line} />
-            ))}
-          </div>
+        {diff && parsedFiles.length === 0 && (
+          <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+            The saved diff could not be parsed.
+          </p>
+        )}
+        {parsedFiles.map((fileDiff, index) => (
+          <FileDiff
+            key={`${fileDiff.name}-${index}`}
+            fileDiff={fileDiff}
+            options={diffOptions}
+            className="mb-3 min-w-max"
+          />
         ))}
       </div>
       <div className="border-t border-border p-3">

@@ -27,6 +27,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { StatusDot } from "@/components/ui/status-dot";
 import { timeAgo, repoName } from "@/lib/format";
+import NewProjectForm from "@/components/new-project-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -43,7 +45,7 @@ type Session = {
   project?: { id: string; name: string };
 };
 
-function SignedOut() {
+function SignedOut({ onNewProject }: { onNewProject: () => void }) {
   return (
     <PageContainer size="wide" className="py-8">
       <div className="relative overflow-hidden rounded-2xl border bg-card">
@@ -60,7 +62,7 @@ function SignedOut() {
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             <Button onClick={() => (window.location.href = "/login")}>Continue with GitHub</Button>
-            <Button variant="outline" onClick={() => (window.location.href = "/new")}>
+             <Button variant="outline" onClick={onNewProject}>
               Create local project
             </Button>
           </div>
@@ -127,9 +129,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [q, setQ] = useState("");
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
     async function load() {
       try {
         const pr = await fetch(`${API}/api/projects`, { credentials: "include" });
@@ -186,10 +189,19 @@ export default function Home() {
               actions={<Button size="sm" onClick={() => (window.location.href = "/login")}>Sign in</Button>}
             />
           }
-        >
-          <SignedOut />
-        </PageShell>
-      </AppShell>
+         >
+             <SignedOut onNewProject={() => setNewProjectOpen(true)} />
+         </PageShell>
+         <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
+           <DialogContent>
+             <DialogHeader>
+               <DialogTitle>Create a workspace</DialogTitle>
+               <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
+             </DialogHeader>
+             <NewProjectForm />
+           </DialogContent>
+         </Dialog>
+       </AppShell>
     );
   }
 
@@ -202,10 +214,10 @@ export default function Home() {
             description={signedIn ? `${projects.length} projects · ${activeSessions} active` : "Loading…"}
             actions={
               <div className="flex items-center gap-1.5">
-                <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => (window.location.href = "/new")}>
+                 <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={() => setNewProjectOpen(true)}>
                   <IconPlus className="size-4" /> New project
                 </Button>
-                <Button size="sm" className="sm:hidden" onClick={() => (window.location.href = "/new")}>
+                 <Button size="sm" className="sm:hidden" onClick={() => setNewProjectOpen(true)}>
                   <IconPlus className="size-4" />
                 </Button>
               </div>
@@ -214,39 +226,6 @@ export default function Home() {
         }
       >
         <PageContainer size="wide" className="py-6">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Projects</p>
-                  <IconFolder className="size-3.5 text-muted-foreground" />
-                </div>
-                <p className="mt-2 text-2xl font-semibold tracking-[-0.02em]">{loading ? "—" : projects.length}</p>
-                <p className="text-[12px] text-muted-foreground">Across {new Set(sessions.map((s) => s.projectId)).size} workspaces</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Active sessions</p>
-                  <StatusDot status={activeSessions > 0 ? "running" : "idle"} />
-                </div>
-                <p className="mt-2 text-2xl font-semibold tracking-[-0.02em]">{loading ? "—" : activeSessions}</p>
-                <p className="text-[12px] text-muted-foreground">{sessions.length} total · working now</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Quick start</p>
-                  <IconBolt className="size-3.5 text-muted-foreground" />
-                </div>
-                <p className="mt-2 text-sm font-medium">Paste a repo URL</p>
-                <p className="text-[12px] text-muted-foreground">GitHub, GitLab, Bitbucket — any public repo.</p>
-              </CardContent>
-            </Card>
-          </div>
-
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative max-w-sm flex-1">
               <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -257,22 +236,14 @@ export default function Home() {
                 className="h-8 pl-8 text-[13px]"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="hidden text-xs text-muted-foreground sm:inline">Press</span>
-              <span className="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px] sm:inline">n</span>
-              <span className="hidden text-xs text-muted-foreground sm:inline">for new project</span>
-              <Button variant="ghost" size="sm" className="ml-1" onClick={() => (window.location.href = "/settings")}>
-                <IconEye className="size-4" /> Settings
-              </Button>
-            </div>
           </div>
 
           <div className="mt-8">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Projects</h2>
-              <Link href="/new" className="text-xs text-muted-foreground hover:text-foreground">
-                Add project →
-              </Link>
+               <button type="button" onClick={() => setNewProjectOpen(true)} className="text-xs text-muted-foreground hover:text-foreground">
+                 Add project
+               </button>
             </div>
 
             {loading ? (
@@ -291,7 +262,7 @@ export default function Home() {
                   icon={<IconFolder className="size-4" />}
                   title={projects.length === 0 ? "No projects yet" : "No matches"}
                   description={projects.length === 0 ? "Create a project from a repo or start blank. The agent works inside an isolated sandbox." : `No projects match “${q}”.`}
-                  action={projects.length === 0 ? { label: "New project", onClick: () => (window.location.href = "/new"), icon: <IconPlus className="size-4" /> } : undefined}
+                   action={projects.length === 0 ? { label: "New project", onClick: () => setNewProjectOpen(true), icon: <IconPlus className="size-4" /> } : undefined}
                 />
               </Card>
             ) : (
@@ -341,7 +312,7 @@ export default function Home() {
             </div>
 
             {loading ? (
-              <Card className="mt-3 divide-y">
+              <div className="divide-y">
                 {[0, 1, 2].map((i) => (
                   <div key={i} className="flex items-center justify-between p-4">
                     <div className="space-y-2">
@@ -351,17 +322,17 @@ export default function Home() {
                     <Skeleton className="h-3 w-16" />
                   </div>
                 ))}
-              </Card>
+              </div>
             ) : sessions.length === 0 ? (
-              <Card className="mt-3">
+              <div>
                 <EmptyState
                   icon={<IconTerminal className="size-4" />}
                   title="No sessions yet"
                   description="Open a project and give the agent a first task. It will read the repo and start planning right away."
                 />
-              </Card>
+              </div>
             ) : (
-              <Card className="mt-3 divide-y">
+              <div className="divide-y my-3 border rounded-xl overflow-hidden">
                 {filteredSessions.map((s) => (
                   <Link key={s.id} href={`/s/${s.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
                     <StatusDot status={s.status} />
@@ -380,23 +351,20 @@ export default function Home() {
                 {filteredSessions.length === 0 && (
                   <div className="px-4 py-6 text-center text-sm text-muted-foreground">No sessions match “{q}”.</div>
                 )}
-              </Card>
+              </div>
             )}
           </div>
-
-          <div className="mt-10 rounded-xl border bg-card p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Start a new workspace</p>
-                <p className="text-[13px] text-muted-foreground">Any public Git URL works. The agent clones it into a fresh sandbox.</p>
-              </div>
-              <Button onClick={() => (window.location.href = "/new")}>
-                <IconPlus className="size-4" /> New project
-              </Button>
-            </div>
-          </div>
-        </PageContainer>
-      </PageShell>
-    </AppShell>
+         </PageContainer>
+       </PageShell>
+       <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
+         <DialogContent>
+           <DialogHeader>
+             <DialogTitle>Create a workspace</DialogTitle>
+             <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
+           </DialogHeader>
+           <NewProjectForm />
+         </DialogContent>
+       </Dialog>
+     </AppShell>
   );
 }
