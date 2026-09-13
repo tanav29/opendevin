@@ -12,8 +12,6 @@ import {
   IconTrash,
   IconTerminal,
   IconLayoutSidebarRight,
-  IconGitBranch,
-  IconClock,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,12 +31,17 @@ import {
   type SessionStatus,
   type SidebarSession,
 } from "./lib";
-import DeliveryBox01Icon from "@hugeicons/core-free-icons/DeliveryBox01Icon";
-import { DeliveryBox01FreeIcons, DeliveryBox02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Bot, Box } from "lucide-react";
 
-function AgentBadge({ working, failed, streaming }: { working: boolean; failed: boolean; streaming: boolean }) {
+function AgentBadge({
+  working,
+  failed,
+  streaming,
+}: {
+  working: boolean;
+  failed: boolean;
+  streaming: boolean;
+}) {
   const label = streaming || working ? "Working" : failed ? "Failed" : "Idle";
   return (
     <Badge variant={"ghost"}>
@@ -64,7 +67,7 @@ function SandboxBadge({ status }: { status: SessionStatus | null }) {
       <Box className="w-3" />
       {label}
     </Badge>
-    );
+  );
 }
 
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -80,7 +83,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copiedId, setCopiedId] = useState("");
+  const [degraded, setDegraded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
 
   function copyMessage(id: string, content: string) {
@@ -94,23 +100,39 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   const refresh = useCallback(async (id: string, includeMessages: boolean) => {
-    const [nextDetail, nextStatus, nextSessions] = await Promise.all([
-      fetch(`${API}/api/sessions/${id}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${API}/api/sessions/${id}/status`, { credentials: "include" }).then((r) => (r.ok ? r.json() : null)),
+    const [nextDetail, nextStatus, nextSessions, history] = await Promise.all([
+      fetch(`${API}/api/sessions/${id}`, { credentials: "include" }).then((r) =>
+        r.ok ? r.json() : null,
+      ),
+      fetch(`${API}/api/sessions/${id}/status`, { credentials: "include" }).then((r) =>
+        r.ok ? r.json() : null,
+      ),
       fetch(`${API}/api/sessions`, { credentials: "include" }).then((r) => (r.ok ? r.json() : [])),
+      includeMessages
+        ? fetch(`${API}/api/sessions/${id}/messages`, { credentials: "include" }).then((r) =>
+            r.ok ? r.json() : null,
+          )
+        : Promise.resolve(null),
     ]);
     if (nextDetail) setDetail(nextDetail);
     if (nextStatus) setStatus(nextStatus);
     setAllSessions(nextSessions);
-    if (includeMessages) {
-      const history = await fetch(`${API}/api/sessions/${id}/messages`, {
-        credentials: "include",
-      }).then((r) => (r.ok ? r.json() : []));
-      setMessages(history);
-    }
+    if (history) setMessages(history);
     return nextDetail as SessionDetail | null;
   }, []);
 
+  // Keep the latest turn visible while streaming or after history loads.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, sending]);
+
+  // Autogrow the composer instead of a fixed 3-row box.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
   useEffect(() => {
     void params.then(({ id }) => {
       setSessionId(id);
@@ -180,6 +202,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         setMessages((current) => current.filter((message) => message.id !== "streaming"));
         return;
       }
+      setDegraded(response.headers.get("x-sandbox-degraded") === "1");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       for (;;) {
@@ -187,14 +210,18 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         setMessages((current) =>
-          current.map((message) => (message.id === "streaming" ? { ...message, content: message.content + chunk } : message)),
+          current.map((message) =>
+            message.id === "streaming" ? { ...message, content: message.content + chunk } : message,
+          ),
         );
       }
       // Flush any remaining bytes
       const tail = decoder.decode();
       if (tail) {
         setMessages((current) =>
-          current.map((message) => (message.id === "streaming" ? { ...message, content: message.content + tail } : message)),
+          current.map((message) =>
+            message.id === "streaming" ? { ...message, content: message.content + tail } : message,
+          ),
         );
       }
     } catch (err) {
@@ -221,7 +248,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   async function kill() {
-    if (!sessionId || killing || !window.confirm("Kill this sandbox? The terminal and preview stop; chat history stays.")) return;
+    if (
+      !sessionId ||
+      killing ||
+      !window.confirm("Kill this sandbox? The terminal and preview stop; chat history stays.")
+    )
+      return;
     setKilling(true);
     setError("");
     try {
@@ -243,7 +275,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   async function removeSession() {
-    if (!sessionId || deleting || !window.confirm("Delete this session and its sandbox? This cannot be undone.")) return;
+    if (
+      !sessionId ||
+      deleting ||
+      !window.confirm("Delete this session and its sandbox? This cannot be undone.")
+    )
+      return;
     setDeleting(true);
     try {
       const response = await fetch(`${API}/api/sessions/${sessionId}`, {
@@ -276,24 +313,34 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     <main className="flex h-screen flex-col bg-background">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-3 py-2.5 sm:px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <Button variant="ghost" size="icon-sm" onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
+          >
             <IconArrowLeft />
           </Button>
           <div className="min-w-0 flex gap-2 items-center">
-            <h1 className="truncate text-sm font-medium leading-none">{detail?.title || "Loading session…"} </h1>
-              {detail?.branch && (
-                <Badge variant="outline">
-                  {detail.branch}
-                </Badge>
-              )}
-
+            <h1 className="truncate text-sm font-medium leading-none">
+              {detail?.title || "Loading session…"}{" "}
+            </h1>
+            {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <AgentBadge working={agentStatus === "running"} failed={agentStatus === "failed"} streaming={sending} />
+          <AgentBadge
+            working={agentStatus === "running"}
+            failed={agentStatus === "failed"}
+            streaming={sending}
+          />
           <SandboxBadge status={status} />
           {(failed || (sandboxStatus === "ready" && !status?.sandboxAvailable)) && (
-            <Button variant="ghost" size="sm" onClick={() => void reconnect()} disabled={reconnecting}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void reconnect()}
+              disabled={reconnecting}
+            >
               {reconnecting ? "…" : "Reconnect"}
             </Button>
           )}
@@ -302,11 +349,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               {killing ? "…" : "Kill"}
             </Button>
           )}*/}
-          <Button variant="secondary" size="icon-sm" onClick={() => void removeSession()} disabled={deleting}>
+          <Button
+            variant="secondary"
+            size="icon-sm"
+            onClick={() => void removeSession()}
+            disabled={deleting}
+          >
             <IconTrash />
             <span className="hidden lg:inline">{deleting ? "…" : "Delete"}</span>
           </Button>
-          <Button variant="secondary" size="icon-sm" onClick={() => setPrefs({ ...prefs, open: !prefs.open })}>
+          <Button
+            variant="secondary"
+            size="icon-sm"
+            onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
+          >
             <IconLayoutSidebarRight />
           </Button>
         </div>
@@ -320,14 +376,29 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             {provisioning && (
               <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-[13px] text-muted-foreground">
                 <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                Spinning up sandbox and cloning repo… the agent gets full workspace access once ready.
+                Spinning up sandbox and cloning repo… the agent gets full workspace access once
+                ready.
+              </div>
+            )}
+            {degraded && !failed && (
+              <div className="mb-5 rounded-lg border border-warning/40 bg-warning-muted/40 px-3 py-2.5 text-[13px]">
+                Sandbox unreachable — this answer is from general knowledge. Reconnect for workspace
+                tools.
               </div>
             )}
             {failed && (
               <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
-                <p className="text-sm font-medium text-destructive">Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}</p>
-                <Button size="sm" className="mt-3" onClick={() => void reconnect()} disabled={reconnecting}>
-                  <IconRefresh className="size-4" /> {reconnecting ? "Reconnecting…" : "Reconnect sandbox"}
+                <p className="text-sm font-medium text-destructive">
+                  Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}
+                </p>
+                <Button
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => void reconnect()}
+                  disabled={reconnecting}
+                >
+                  <IconRefresh className="size-4" />{" "}
+                  {reconnecting ? "Reconnecting…" : "Reconnect sandbox"}
                 </Button>
               </div>
             )}
@@ -349,40 +420,44 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 />
               )}
               {messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={
-                    message.role === "user"
-                      ? ""
-                      : ""
-                  }
-                >
-                  <div className="mb-0.5 flex items-center justify-between">
-                    {/*<p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      {message.role === "user" ? "You" : "OpenDevin"}
-                    </p>*/}
-                    {message.role === "assistant" && message.content && (
+                <article key={message.id} className="group">
+                  {message.role === "assistant" && message.content && (
+                    <div className="mb-0.5 flex items-center justify-end">
                       <Button
                         variant="ghost"
                         size="xs"
                         onClick={() => copyMessage(message.id, message.content)}
                         className="h-6 gap-1 px-1.5 text-[11px] opacity-0 group-hover:opacity-100"
                       >
-                        {copiedId === message.id ? <IconCheck className="size-3" /> : <IconCopy className="size-3" />}
+                        {copiedId === message.id ? (
+                          <IconCheck className="size-3" />
+                        ) : (
+                          <IconCopy className="size-3" />
+                        )}
                         {copiedId === message.id ? "Copied" : "Copy"}
                       </Button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   {message.role === "user" ? (
                     <p className="whitespace-pre-wrap text-[13.5px] leading-6">{message.content}</p>
-                  ) : (
+                  ) : message.content ? (
                     <div className="rounded-none border-0 bg-transparent p-0 text-[13.5px] leading-7">
-                      <Markdown content={message.content || "Thinking…"} />
+                      <Markdown
+                        content={message.content}
+                        onAnswer={(text) => void sendMessage(text)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 py-1" aria-label="Thinking">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
                     </div>
                   )}
                 </article>
               ))}
             </div>
+            <div ref={bottomRef} />
 
             <form onSubmit={(e) => void send(e)} className="sticky bottom-0 bg-card rounded-xl">
               <div className="">
@@ -396,14 +471,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       else void send(e as unknown as FormEvent);
                     }
                   }}
-                  rows={3}
-                  placeholder="Tell the agent what to do…"
+                  rows={1}
+                  ref={textareaRef}
+                  placeholder="Tell the agent what to do… (Enter to send, Shift+Enter for a new line)"
                   className="min-h-16 rounded-xl bg-transparent resize-none border-0 px-3 py-2 text-sm focus-visible:ring-0"
                 />
                 <div className="flex items-center justify-between gap-2 px-2 p-2">
-                  <p className="px-2 text-[11px] text-muted-foreground">{sending && "Agent is working… esc to stop"}</p>
+                  <p className="px-2 text-[11px] text-muted-foreground">
+                    {sending && "Agent is working… esc to stop"}
+                  </p>
                   {sending ? (
-                    <Button type="button" variant="outline" size="sm" onClick={stop} className="gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={stop}
+                      className="gap-1.5"
+                    >
                       <IconPlayerStop className="size-4" /> Stop
                     </Button>
                   ) : (

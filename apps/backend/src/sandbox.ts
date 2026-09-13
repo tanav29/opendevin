@@ -6,6 +6,16 @@ import { prisma } from "./db/prisma.js";
 export const WORKSPACE_PATH = "/home/user/workspace";
 export const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 
+// Single place that maps env keys to the model id the chat route passes to
+// the provider. OpenRouter requires a `provider/model` id, so bare ids like
+// `gpt-4o-mini` (the documented default) are prefixed with `openai/`.
+export function resolveChatModel(): { modelId: string; usingOpenRouter: boolean } {
+  const usingOpenRouter = Boolean(process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY);
+  let modelId = process.env.OPENAI_MODEL || process.env.MODEL || "gpt-4o-mini";
+  if (usingOpenRouter && !modelId.includes("/")) modelId = `openai/${modelId}`;
+  return { modelId, usingOpenRouter };
+}
+
 export function isRepoUrl(repo: string | null | undefined): repo is string {
   if (!repo) return false;
   const url = repo.trim();
@@ -204,6 +214,17 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         const rel = path.replace(/^\//, "").replace(/\.\./g, "");
         await sandbox.files.write(`${cwd}/${rel}`, content);
         return `Wrote ${rel} (${content.length} chars)`;
+      },
+    }),
+    ask_user: tool({
+      description:
+        "Ask the user a clarifying question with fixed options. Use when requirements are ambiguous instead of guessing. The question renders as clickable buttons; the answer arrives as the user's next message.",
+      inputSchema: z.object({
+        question: z.string().describe("The clarifying question"),
+        options: z.array(z.string()).min(2).max(6).describe("2-6 short answer options"),
+      }),
+      execute: async ({ question, options }: { question: string; options: string[] }) => {
+        return `Question asked: ${question} Options: ${options.join(" | ")}. Wait for the user's answer in their next message before proceeding.`;
       },
     }),
   };

@@ -21,6 +21,7 @@ import {
   isRepoUrl,
   provisionSandbox,
   readWorkspaceDiff,
+  resolveChatModel,
   sandboxTools,
   sanitizeBranch,
   shellQuote,
@@ -156,14 +157,23 @@ app.get("/api/me", async (req, res) => {
       });
       if (gh.ok) {
         const d = (await gh.json()) as { login?: string; avatar_url?: string; html_url?: string };
-        github = { login: d.login ?? null, avatarUrl: d.avatar_url ?? null, profileUrl: d.html_url ?? null };
+        github = {
+          login: d.login ?? null,
+          avatarUrl: d.avatar_url ?? null,
+          profileUrl: d.html_url ?? null,
+        };
       }
     } catch {
       // Fall back to stored session profile.
     }
   }
   return res.json({
-    user: { id: session.user.id, name: session.user.name, email: session.user.email, image: session.user.image ?? null },
+    user: {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      image: session.user.image ?? null,
+    },
     github,
   });
 });
@@ -409,14 +419,60 @@ app.post("/api/sessions/:id/kill", async (req, res) => {
   return res.json({ ok: true });
 });
 
+// Stream-marker helpers: the chat endpoint streams plain-text markdown with
+// embedded HTML markers for tool/question/error parts. Payloads are truncated
+// so one huge file read can't blow up the live stream or the Message row.
+function truncateMarkerText(value: unknown, max: number): string {
+  let text: string;
+  if (typeof value === "string") {
+    text = value;
+  } else if (value === undefined || value === null) {
+    text = "";
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2) ?? "";
+    } catch {
+      text = String(value);
+    }
+  }
+  if (text.length > max) text = `${text.slice(0, max)}\n…[truncated]`;
+  return text.replace(/<\/details>/g, "<\\/details>");
+}
+
+function truncateMarkerJson(value: unknown, max = 2000): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value ?? {}, null, 2) ?? "{}";
+  } catch {
+    text = "{}";
+  }
+  if (text.length > max) text = `${text.slice(0, max)}\n…[truncated]`;
+  return text.replace(/<\/details>/g, "<\\/details>");
+}
+
+function questionPayload(input: unknown): string {
+  let question = "Question";
+  let options: string[] = [];
+  if (input && typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    if (typeof rec.question === "string" && rec.question.trim())
+      question = rec.question.slice(0, 500);
+    if (Array.isArray(rec.options))
+      options = rec.options
+        .filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+        .slice(0, 6)
+        .map((o) => o.slice(0, 200));
+  }
+  return JSON.stringify({ question, options }).replace(/'/g, "&#39;");
+}
+
 app.post("/api/sessions/:id/chat", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
   const owner = found.owner;
   const prompt = typeof req.body.message === "string" ? req.body.message.trim() : "";
-  if (!prompt) return res.status(400).json({ error: "A message is required" });
-  const usingOpenRouter = Boolean(process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY);
+  const { modelId, usingOpenRouter } = resolveChatModel();
   const aiApiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
   if (!aiApiKey) return res.status(503).json({ error: "OPENAI_API_KEY is not configured" });
 
@@ -461,27 +517,50 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
       baseURL:
         process.env.OPENAI_BASE_URL ||
         (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
-    })(process.env.OPENAI_MODEL || process.env.MODEL || "gpt-4o-mini"),
-    system: `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${owner.workspacePath || WORKSPACE_PATH}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. Keep replies short.`,
+    })(modelId),
+    system: `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${owner.workspacePath || WORKSPACE_PATH}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.`,
     messages: modelHistory,
     ...(tools ? { tools, stopWhen: AGENT_STOP } : {}),
   });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.setHeader("Transfer-Encoding", "chunked");
+  // Lets the UI banner degraded answers (sandbox provisioning/expired) while
+  // still streaming general-knowledge text.
+  if (!tools) res.setHeader("x-sandbox-degraded", "1");
 
   try {
-    // Stream text deltas as-is; surface tool activity as collapsible markers.
+    // Stream text deltas as-is; surface tool activity as collapsible markers
+    // with truncated input/output so the UI can render real tool parts.
     // Always drain the SDK stream so the turn completes and
     // result.response.messages contains the complete assistant/tool turn.
     for await (const part of result.fullStream) {
-      if (!clientGone && part.type === "text-delta") {
+      if (clientGone) continue;
+      if (part.type === "text-delta") {
         res.write(part.text ?? "");
-      } else if (!clientGone && part.type === "tool-call") {
-        res.write(
-          `\n\n<details data-tool="call"><summary>🛠 ${part.toolName || "tool"}</summary>\n\n`,
-        );
-      } else if (!clientGone && (part.type === "tool-result" || part.type === "tool-error")) {
-        res.write(`\n</details>\n\n`);
+      } else if (part.type === "tool-call") {
+        const call = part as { toolName?: unknown; input?: unknown };
+        const name = typeof call.toolName === "string" ? call.toolName : "tool";
+        if (name === "ask_user") {
+          res.write(`\n\n<div data-question='${questionPayload(call.input)}'>\n\n`);
+        } else {
+          res.write(
+            `\n\n<details data-tool="call"><summary>🛠 ${name}</summary>\n\ninput:\n\n\`\`\`json\n${truncateMarkerJson(call.input)}\n\`\`\`\n\n`,
+          );
+        }
+      } else if (part.type === "tool-result" || part.type === "tool-error") {
+        const done = part as { toolName?: unknown; output?: unknown; error?: unknown };
+        const name = typeof done.toolName === "string" ? done.toolName : "";
+        if (name === "ask_user") {
+          res.write(`\n</div>\n\n`);
+        } else if (part.type === "tool-error") {
+          res.write(
+            `\nerror:\n\n\`\`\`\n${truncateMarkerText(done.error, 2000)}\n\`\`\`\n\n</details>\n\n`,
+          );
+        } else {
+          res.write(
+            `\noutput:\n\n\`\`\`\n${truncateMarkerText(done.output, 4000)}\n\`\`\`\n\n</details>\n\n`,
+          );
+        }
       }
     }
     const [completedMessages, completedText] = await Promise.all([result.response, result.text]);
@@ -504,13 +583,14 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
         ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or set OPENAI_API_KEY."
         : "Agent run failed — please retry.";
     try {
-      if (!res.writableEnded) res.write(`\n\n${msg}\n`);
+      if (!res.writableEnded)
+        res.write(
+          `\n\n<details data-tool="error"><summary>⚠️ Agent run failed</summary>\n\n${msg}\n\n</details>\n`,
+        );
     } catch {}
-    try {
-      await prisma.message.create({
-        data: { sessionId: owner.id, role: "assistant", content: msg },
-      });
-    } catch {}
+    // Don't persist the failure text as an assistant message: it would
+    // pollute the timeline and the next turn's context. The failed status
+    // drives the UI's "Retry last message" path instead.
     return res.end();
   }
 });
@@ -526,9 +606,13 @@ async function finishTurn(
   toolMessages: ModelMessage[],
 ) {
   if (replyText.trim()) {
-    await prisma.message.create({
-      data: { sessionId, role: "assistant", content: replyText },
-    });
+    try {
+      await prisma.message.create({
+        data: { sessionId, role: "assistant", content: replyText },
+      });
+    } catch (error) {
+      console.error("Could not persist assistant reply", error);
+    }
   }
   try {
     // modelHistory already ends with this turn's user prompt; append the
@@ -697,9 +781,14 @@ app.get("/api/sessions/:id/file", async (req, res) => {
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
   const rel = cleanWorkspaceRel(req.query.path);
-  if (rel === null || !rel) return res.status(400).json({ error: "File unavailable: path must be a workspace-relative file." });
+  if (rel === null || !rel)
+    return res
+      .status(400)
+      .json({ error: "File unavailable: path must be a workspace-relative file." });
   if (!found.owner.sandboxId) {
-    return res.status(409).json({ error: "File unavailable: sandbox is still provisioning. Retry once it is ready." });
+    return res
+      .status(409)
+      .json({ error: "File unavailable: sandbox is still provisioning. Retry once it is ready." });
   }
   try {
     const sandbox = await Sandbox.connect(found.owner.sandboxId);

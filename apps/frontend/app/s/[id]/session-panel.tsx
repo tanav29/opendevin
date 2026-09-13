@@ -176,6 +176,7 @@ export default function SessionPanel({
               sessionId={sessionId}
               sandboxId={sandboxId}
               available={sandboxReady}
+              active={activeTab === "terminal"}
               onReconnect={onReconnect}
             />
           </div>

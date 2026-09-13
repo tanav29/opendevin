@@ -9,18 +9,19 @@ export default function TerminalTab({
   sessionId,
   sandboxId,
   available,
+  active,
   onReconnect,
 }: {
   sessionId: string;
   sandboxId: string;
   available: boolean;
+  active?: boolean;
   onReconnect: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connectError, setConnectError] = useState("");
-
   useEffect(() => {
-    if (!available) return;
+    if (!available || active === false) return;
     let disposed = false;
     let term: { destroy(): void } | null = null;
     let ws: WebSocket | null = null;
@@ -35,8 +36,7 @@ export default function TerminalTab({
           autoResize: true,
           cursorBlink: true,
           onData: (data) => {
-            if (ws?.readyState === WebSocket.OPEN)
-              ws.send(JSON.stringify({ type: "input", data }));
+            if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
           },
           onResize: (cols, rows) => {
             if (ws?.readyState === WebSocket.OPEN)
@@ -71,7 +71,6 @@ export default function TerminalTab({
           if (!disposed)
             setConnectError("Terminal connection failed. The sandbox may have expired.");
         };
-
       } catch {
         if (!disposed)
           setConnectError("Terminal could not start. Reconnect the sandbox and retry.");
@@ -91,7 +90,7 @@ export default function TerminalTab({
         // Terminal already gone.
       }
     };
-  }, [sessionId, sandboxId, available]);
+  }, [sessionId, sandboxId, available, active]);
 
   if (!available) {
     return (
