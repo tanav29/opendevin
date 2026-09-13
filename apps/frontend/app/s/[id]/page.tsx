@@ -297,16 +297,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               {reconnecting ? "…" : "Reconnect"}
             </Button>
           )}
-          {(status?.sandboxId || detail?.sandboxId) && !failed && (
-            <Button variant="ghost" size="sm" onClick={() => void kill()} disabled={killing} className="hidden sm:inline-flex">
+          {/*{(status?.sandboxId || detail?.sandboxId) && !failed && (
+            <Button variant="secondary" size="sm" onClick={() => void kill()} disabled={killing} className="hidden sm:inline-flex">
               {killing ? "…" : "Kill"}
             </Button>
-          )}
-          <Button variant="ghost" size="icon-sm" onClick={() => void removeSession()} disabled={deleting}>
+          )}*/}
+          <Button variant="secondary" size="icon-sm" onClick={() => void removeSession()} disabled={deleting}>
             <IconTrash />
             <span className="hidden lg:inline">{deleting ? "…" : "Delete"}</span>
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => setPrefs({ ...prefs, open: !prefs.open })}>
+          <Button variant="secondary" size="icon-sm" onClick={() => setPrefs({ ...prefs, open: !prefs.open })}>
             <IconLayoutSidebarRight />
           </Button>
         </div>

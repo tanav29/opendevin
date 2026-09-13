@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import ChangesTab from "./changes-tab";
+import FilesTab from "./files-tab";
 import PreviewTab from "./preview-tab";
 import TerminalTab from "./terminal-tab";
 import { Button } from "@/components/ui/button";
 
-type Tab = "terminal" | "changes" | "preview";
+type Tab = "files" | "terminal" | "changes" | "preview";
 
 const PANEL_KEY = "opendevin:panel";
 
@@ -18,7 +19,10 @@ function parsePrefs(raw: string | null): PanelPrefs {
   if (!raw) return DEFAULT_PREFS;
   try {
     const parsed = JSON.parse(raw) as Partial<PanelPrefs>;
-    const tab: Tab = parsed.tab === "changes" || parsed.tab === "preview" ? parsed.tab : "terminal";
+    const tab: Tab =
+      parsed.tab === "files" || parsed.tab === "changes" || parsed.tab === "preview"
+        ? parsed.tab
+        : "terminal";
     const width =
       typeof parsed.width === "number"
         ? Math.max(320, Math.min(800, parsed.width))
@@ -129,6 +133,7 @@ export default function SessionPanel({
   }
 
   const tabs: { id: Tab; label: string }[] = [
+    { id: "files", label: "Files" },
     { id: "terminal", label: "Terminal" },
     { id: "changes", label: "Changes" },
     { id: "preview", label: "Preview" },
@@ -155,6 +160,16 @@ export default function SessionPanel({
           </div>
         </div>
         <div className="min-h-0 flex-1">
+          <div className={activeTab === "files" ? "h-full" : "hidden"}>
+            <FilesTab
+              key={`files-${sessionId}-${sandboxId}`}
+              sessionId={sessionId}
+              sandboxId={sandboxId}
+              available={sandboxReady}
+              active={activeTab === "files"}
+              onReconnect={onReconnect}
+            />
+          </div>
           <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
             <TerminalTab
               key={`term-${sessionId}-${sandboxId}`}

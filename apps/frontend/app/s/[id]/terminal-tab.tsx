@@ -22,34 +22,32 @@ export default function TerminalTab({
   useEffect(() => {
     if (!available) return;
     let disposed = false;
-    let term: { dispose(): void } | null = null;
+    let term: { destroy(): void } | null = null;
     let ws: WebSocket | null = null;
-    let observer: ResizeObserver | null = null;
 
     void (async () => {
       const element = containerRef.current;
       if (!element || disposed) return;
       try {
-        const [{ Terminal }, { FitAddon }] = await Promise.all([
-          import("xterm"),
-          import("xterm-addon-fit"),
-        ]);
+        const { WTerm } = await import("@wterm/dom");
         if (disposed || !containerRef.current) return;
-        const terminal = new Terminal({
+        const terminal = new WTerm(containerRef.current, {
+          autoResize: true,
           cursorBlink: true,
-          fontSize: 13,
-          fontFamily: '"Geist Mono", ui-monospace, monospace',
-          theme: {
-            background: "#0a0a0b",
-            foreground: "#e7e7e7",
-            cursor: "#e7e7e7",
-            selectionBackground: "#3a3a3f",
+          onData: (data) => {
+            if (ws?.readyState === WebSocket.OPEN)
+              ws.send(JSON.stringify({ type: "input", data }));
+          },
+          onResize: (cols, rows) => {
+            if (ws?.readyState === WebSocket.OPEN)
+              ws.send(JSON.stringify({ type: "resize", cols, rows }));
           },
         });
-        const fit = new FitAddon();
-        terminal.loadAddon(fit);
-        terminal.open(containerRef.current);
-        fit.fit();
+        await terminal.init();
+        if (disposed) {
+          terminal.destroy();
+          return;
+        }
         term = terminal;
 
         const socket = new WebSocket(
@@ -65,33 +63,15 @@ export default function TerminalTab({
           }
           if (message.type === "data" || message.type === "replay")
             terminal.write(message.data || "");
-          else if (message.type === "reset") terminal.clear();
+          else if (message.type === "reset") terminal.write("\x1bc");
           else if (message.type === "error" || message.error)
-            terminal.writeln(`\r\n\x1b[31m${message.error || "Terminal error"}\x1b[0m`);
+            terminal.write(`\r\n\x1b[31m${message.error || "Terminal error"}\x1b[0m\r\n`);
         };
         socket.onerror = () => {
           if (!disposed)
             setConnectError("Terminal connection failed. The sandbox may have expired.");
         };
-        const dataListener = terminal.onData((data) => {
-          if (socket.readyState === WebSocket.OPEN)
-            socket.send(JSON.stringify({ type: "input", data }));
-        });
-        observer = new ResizeObserver(() => {
-          if (disposed) return;
-          try {
-            fit.fit();
-          } catch {
-            return;
-          }
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(
-              JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }),
-            );
-          }
-        });
-        observer.observe(containerRef.current);
-        void dataListener;
+
       } catch {
         if (!disposed)
           setConnectError("Terminal could not start. Reconnect the sandbox and retry.");
@@ -100,14 +80,13 @@ export default function TerminalTab({
 
     return () => {
       disposed = true;
-      observer?.disconnect();
       try {
         ws?.close();
       } catch {
         // Socket already gone.
       }
       try {
-        term?.dispose();
+        term?.destroy();
       } catch {
         // Terminal already gone.
       }
@@ -132,7 +111,7 @@ export default function TerminalTab({
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#0a0a0b]">
+    <div className="flex h-full flex-col overflow-y-scroll">
       {connectError && (
         <p className="border-b border-white/10 px-3 py-2 text-xs text-red-400">
           {connectError}{" "}
@@ -141,7 +120,7 @@ export default function TerminalTab({
           </button>
         </p>
       )}
-      <div ref={containerRef} className="min-h-0 flex-1 p-2" />
+      <div ref={containerRef} className="min-h-0 flex-1" />
     </div>
   );
 }

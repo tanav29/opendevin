@@ -12,7 +12,7 @@ import { WebSocketServer } from "ws";
 import { auth } from "../auth/auth.js";
 import { prisma } from "../db/prisma.js";
 import { attachPty, detachPty, dropPty, replayPty, resizePty, writePty } from "../pty.js";
-import { loadToolLog, saveToolLog, trimToolLog, TurnRecorder } from "../agent.js";
+import { loadToolLog, saveToolLog, trimToolLog } from "../agent.js";
 import {
   AGENT_STOP,
   WORKSPACE_PATH,
@@ -417,15 +417,10 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   const repoLine = owner.project.repo ? `Project repo: ${owner.project.repo}. ` : "";
   const branchLine = owner.branch ? `Active git branch: ${owner.branch}. ` : "";
   let clientGone = false;
-  // Aborting the model call (not just the response stream) when the client
-  // disconnects lets the SDK finish cleanly so we can still persist the
-  // partial reply and reset the status.
-  const abortController = new AbortController();
+  // A disconnected client must not abort the model turn: the completed SDK
+  // response is the source of truth that gets persisted below.
   req.on("close", () => {
-    if (!res.writableEnded) {
-      clientGone = true;
-      abortController.abort();
-    }
+    if (!res.writableEnded) clientGone = true;
   });
   const result = streamText({
     model: createOpenAI({
@@ -436,36 +431,34 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     })(process.env.OPENAI_MODEL || process.env.MODEL || "gpt-4o-mini"),
     system: `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${owner.workspacePath || WORKSPACE_PATH}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. Keep replies short.`,
     messages: modelHistory,
-    abortSignal: abortController.signal,
     ...(tools ? { tools, stopWhen: AGENT_STOP } : {}),
   });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.setHeader("Transfer-Encoding", "chunked");
 
-  const recorder = new TurnRecorder();
-  const nextTurn: ModelMessage[] = [];
-  let assistantText = "";
   try {
-    // Stream text deltas as-is; surface tool activity as collapsible markers
-    // the frontend renders (persisted transcript keeps text only).
+    // Stream text deltas as-is; surface tool activity as collapsible markers.
+    // Always drain the SDK stream so the turn completes and
+    // result.response.messages contains the complete assistant/tool turn.
     for await (const part of result.fullStream) {
-      if (clientGone) break;
-      recorder.addPart(part);
-      if (part.type === "text-delta") {
-        assistantText += part.text ?? "";
+      if (!clientGone && part.type === "text-delta") {
         res.write(part.text ?? "");
-      } else if (part.type === "tool-call") {
+      } else if (!clientGone && part.type === "tool-call") {
         res.write(
           `\n\n<details data-tool="call"><summary>🛠 ${part.toolName || "tool"}</summary>\n\n`,
         );
-      } else if (part.type === "tool-result" || part.type === "tool-error") {
+      } else if (!clientGone && (part.type === "tool-result" || part.type === "tool-error")) {
         res.write(`\n</details>\n\n`);
-      } else if (part.type === "finish-step") {
-        recorder.flushStep(nextTurn);
       }
     }
-    recorder.flushStep(nextTurn);
-    return finishTurn(res, owner.id, assistantText, modelHistory, nextTurn);
+    const [completedMessages, completedText] = await Promise.all([result.response, result.text]);
+    return finishTurn(
+      res,
+      owner.id,
+      completedText,
+      modelHistory,
+      completedMessages.messages as ModelMessage[],
+    );
   } catch (error) {
     console.error("Chat stream failed", error);
     await prisma.projectSession.update({
@@ -516,10 +509,10 @@ async function finishTurn(
   if (session?.sandboxId) {
     try {
       const sandbox = await Sandbox.connect(session.sandboxId);
-      const diffOut = await sandbox.commands.run(
-        `git -C ${shellQuote(session.workspacePath || WORKSPACE_PATH)} diff HEAD --no-color`,
-        { timeoutMs: 30_000 },
-      );
+      const diffOut = await sandbox.commands.run("git diff HEAD --no-color", {
+        cwd: session.workspacePath || WORKSPACE_PATH,
+        timeoutMs: 30_000,
+      });
       if (diffOut.exitCode === 0) {
         await prisma.projectSession.update({
           where: { id: sessionId },
@@ -569,16 +562,15 @@ app.get("/api/sessions/:id/diff", async (req, res) => {
   }
   try {
     const sandbox = await Sandbox.connect(found.owner.sandboxId);
-    const cwd = found.owner.workspacePath || WORKSPACE_PATH;
-    const result = await sandbox.commands.run(`git -C ${shellQuote(cwd)} diff HEAD --no-color`, {
+    const result = await sandbox.commands.run("git diff HEAD --no-color", {
+      cwd: found.owner.workspacePath || WORKSPACE_PATH,
       timeoutMs: 30_000,
     });
     if (result.exitCode !== 0) {
+      const message = (result.stderr || result.stdout || "git diff failed").slice(0, 500);
       if (persisted)
         return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
-      return res.status(409).json({
-        error: `Changes unavailable: ${(result.stderr || result.stdout || "git diff failed").slice(0, 500)}`,
-      });
+      return res.status(409).json({ error: `Changes unavailable: ${message}` });
     }
     const output = result.stdout || "";
     const truncated = output.length > 100_000;
@@ -588,12 +580,12 @@ app.get("/api/sessions/:id/diff", async (req, res) => {
       .update({ where: { id: found.owner.id }, data: { lastDiff: diff, lastDiffAt: new Date() } })
       .catch(() => undefined);
     return res.json({ diff, truncated, persisted: false });
-  } catch {
+  } catch (error) {
+    console.error("Could not read workspace diff", error);
     if (persisted)
       return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
-    return res.status(503).json({
-      error: "Changes unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
-    });
+    const message = error instanceof Error ? error.message : "unknown error";
+    return res.status(503).json({ error: `Changes unavailable: ${message}` });
   }
 });
 
@@ -622,6 +614,89 @@ app.get("/api/sessions/:id/preview", async (req, res) => {
     return res.status(503).json({
       error: "Preview unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
     });
+  }
+});
+
+function cleanWorkspaceRel(value: unknown): string | null {
+  if (typeof value !== "string") return "";
+  const rel = value.replace(/^\//, "").trim();
+  if (!rel) return "";
+  if (rel.includes("..") || rel.includes("\\") || rel.startsWith("-")) return null;
+  return rel;
+}
+
+const TREE_SKIP_DIRS: Record<string, true> = { ".git": true, node_modules: true };
+
+app.get("/api/sessions/:id/files", async (req, res) => {
+  const found = await ownedSession(req, req.params.id);
+  if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  if (!found.owner.sandboxId) {
+    const reason =
+      found.owner.sandboxStatus === "error" && found.owner.lastError
+        ? `sandbox failed (${found.owner.lastError}). Reconnect the sandbox and retry.`
+        : "sandbox is still provisioning. Retry once it is ready.";
+    return res.status(409).json({ error: `Files unavailable: ${reason}` });
+  }
+  try {
+    const sandbox = await Sandbox.connect(found.owner.sandboxId);
+    const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+    const paths: string[] = [];
+    const queue: string[] = [""];
+    const LIMIT = 5000;
+    let truncated = false;
+    while (queue.length > 0) {
+      const dir = queue.shift() as string;
+      let entries;
+      try {
+        entries = await sandbox.files.list(dir ? `${cwd}/${dir}` : cwd);
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const rel = dir ? `${dir}/${entry.name}` : entry.name;
+        if (rel.split("/").some((part) => TREE_SKIP_DIRS[part])) continue;
+        if (entry.type === "dir") {
+          queue.push(rel);
+        } else {
+          paths.push(rel);
+          if (paths.length >= LIMIT) {
+            truncated = true;
+            break;
+          }
+        }
+      }
+      if (truncated) break;
+    }
+    paths.sort();
+    return res.json({ paths, truncated });
+  } catch (error) {
+    console.error("Could not list workspace files", error);
+    const message = error instanceof Error ? error.message : "unknown error";
+    return res.status(503).json({ error: `Files unavailable: ${message}` });
+  }
+});
+
+app.get("/api/sessions/:id/file", async (req, res) => {
+  const found = await ownedSession(req, req.params.id);
+  if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  const rel = cleanWorkspaceRel(req.query.path);
+  if (rel === null || !rel) return res.status(400).json({ error: "File unavailable: path must be a workspace-relative file." });
+  if (!found.owner.sandboxId) {
+    return res.status(409).json({ error: "File unavailable: sandbox is still provisioning. Retry once it is ready." });
+  }
+  try {
+    const sandbox = await Sandbox.connect(found.owner.sandboxId);
+    const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+    const content = await sandbox.files.read(`${cwd}/${rel}`);
+    const text = typeof content === "string" ? content : "";
+    const truncated = text.length > 100_000;
+    return res.json({ path: rel, content: text.slice(0, 100_000), truncated });
+  } catch (error) {
+    console.error("Could not read workspace file", error);
+    const message = error instanceof Error ? error.message : "unknown error";
+    return res.status(404).json({ error: `File unavailable: ${message.slice(0, 200)}` });
   }
 });
 

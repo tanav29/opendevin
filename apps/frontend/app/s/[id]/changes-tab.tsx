@@ -220,17 +220,19 @@ export default function ChangesTab({
           </div>
         )}
         {diff && parsedFiles.length === 0 && (
-          <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
-            The saved diff could not be parsed.
-          </p>
+          <div className="px-3 py-4">
+            <p className="text-center text-[13px] text-muted-foreground">
+              Pretty view could not parse this diff — showing raw patch.
+            </p>
+            <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-mono text-[11px] whitespace-pre">
+              {diff.slice(0, 20000)}
+            </pre>
+          </div>
         )}
         {parsedFiles.map((fileDiff, index) => (
-          <FileDiff
-            key={`${fileDiff.name}-${index}`}
-            fileDiff={fileDiff}
-            options={diffOptions}
-            className="mb-3 min-w-max"
-          />
+          <div key={`${fileDiff.name}-${index}`} className="mb-3 min-w-0 overflow-x-auto px-3">
+            <FileDiff fileDiff={fileDiff} options={diffOptions} className="w-full" />
+          </div>
         ))}
       </div>
       <div className="border-t border-border p-3">

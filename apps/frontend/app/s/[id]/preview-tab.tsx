@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { API } from "./lib";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function PreviewTab({
   sessionId,
@@ -61,26 +63,25 @@ export default function PreviewTab({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-1.5 border-b border-border p-2">
-        <input
+        <Input
           value={port}
           onChange={(e) => setPort(e.target.value)}
           placeholder="3000"
           inputMode="numeric"
-          className="w-16 rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+          className="w-16"
         />
-        <input
+        <Input
           value={path}
           onChange={(e) => setPath(e.target.value)}
           placeholder="/"
-          className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+          className="min-w-0 flex-1"
         />
-        <button
+        <Button
           onClick={() => void resolve()}
           disabled={resolving}
-          className="shrink-0 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-40"
         >
           {url ? "Reload" : resolving ? "…" : "Open"}
-        </button>
+        </Button>
       </div>
       {error && (
         <p className="border-b border-border bg-danger-muted px-3 py-2 text-xs text-danger">
@@ -91,32 +92,12 @@ export default function PreviewTab({
         </p>
       )}
       {url ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5">
-            <span className="flex gap-1">
-              <span className="h-2 w-2 rounded-full bg-border-strong" />
-              <span className="h-2 w-2 rounded-full bg-border-strong" />
-              <span className="h-2 w-2 rounded-full bg-border-strong" />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-              {url}
-            </span>
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 text-[11px] text-muted-foreground underline hover:text-foreground"
-            >
-              ↗
-            </a>
-          </div>
           <iframe
             title="Sandbox preview"
             src={url}
-            className="min-h-0 flex-1 bg-white"
+            className="min-h-0 flex-1"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
-        </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <p className="text-sm font-medium">No preview loaded</p>
