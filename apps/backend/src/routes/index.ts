@@ -134,6 +134,39 @@ app.get("/api/github/repos", async (req, res) => {
     return res.status(500).json({ error: "Could not fetch GitHub repos", repos: [] });
   }
 });
+app.get("/api/me", async (req, res) => {
+  const session = await currentUser(req);
+  if (!session) return res.status(401).json({ error: "Sign in required" });
+  let github: { login: string | null; avatarUrl: string | null; profileUrl: string | null } = {
+    login: null,
+    avatarUrl: null,
+    profileUrl: null,
+  };
+  const token = await githubTokenForUser(session.user.id);
+  if (token) {
+    try {
+      const gh = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "opendevin",
+        },
+      });
+      if (gh.ok) {
+        const d = (await gh.json()) as { login?: string; avatar_url?: string; html_url?: string };
+        github = { login: d.login ?? null, avatarUrl: d.avatar_url ?? null, profileUrl: d.html_url ?? null };
+      }
+    } catch {
+      // Fall back to stored session profile.
+    }
+  }
+  return res.json({
+    user: { id: session.user.id, name: session.user.name, email: session.user.email, image: session.user.image ?? null },
+    github,
+  });
+});
+
 
 app.get("/api/projects", async (req, res) => {
   const session = await currentUser(req);

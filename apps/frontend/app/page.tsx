@@ -10,8 +10,6 @@ import {
   IconGitBranch,
   IconClock,
   IconArrowUpRight,
-  IconCode,
-  IconSparkles,
   IconBolt,
   IconEye,
 } from "@tabler/icons-react";
@@ -24,7 +22,6 @@ import { Input } from "@/components/ui/input";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import { StatusDot } from "@/components/ui/status-dot";
 import { timeAgo, repoName } from "@/lib/format";
 import NewProjectForm from "@/components/new-project-dialog";
@@ -51,73 +48,19 @@ function SignedOut({ onNewProject }: { onNewProject: () => void }) {
       <div className="relative overflow-hidden rounded-2xl border bg-card">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,theme(colors.border)_1px,transparent_1px),linear-gradient(to_bottom,theme(colors.border)_1px,transparent_1px)] bg-[size:24px_24px] opacity-30 [mask-image:radial-gradient(ellipse_80%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
         <div className="relative px-6 py-12 sm:px-10 sm:py-16">
-          <Badge variant="secondary" className="font-mono text-[11px]">
-            <IconSparkles className="size-3" /> OpenDevin · sandboxed workspace
-          </Badge>
-          <h1 className="mt-4 max-w-2xl text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">
+          <h1 className="max-w-2xl text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">
             Turn any repo into a working session.
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-6 text-muted-foreground">
-            Chat with an agent that can read, edit, run, and preview. Every session gets an isolated sandbox — inspect the diff, run the tests, ship the patch.
+            An agent that reads, edits, and runs code in an isolated sandbox.
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             <Button onClick={() => (window.location.href = "/login")}>Continue with GitHub</Button>
              <Button variant="outline" onClick={onNewProject}>
-              Create local project
+              New project
             </Button>
           </div>
-          <div className="mt-8 flex flex-wrap gap-2 text-[12px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1">
-              <IconCode className="size-3.5" /> Public GitHub · GitLab · Bitbucket
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1">
-              <IconBolt className="size-3.5" /> Minimal tools · no second backend
-            </span>
-          </div>
         </div>
-
-        <div className="grid gap-px border-t bg-border sm:grid-cols-3">
-          <div className="bg-card p-6">
-            <div className="flex size-8 items-center justify-center rounded-md border bg-background">
-              <IconFolder className="size-4 text-muted-foreground" />
-            </div>
-            <h3 className="mt-3 text-sm font-medium">Start from any repo</h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">Paste a URL, pick a branch, open a sandbox that clones it.</p>
-          </div>
-          <div className="bg-card p-6">
-            <div className="flex size-8 items-center justify-center rounded-md border bg-background">
-              <IconTerminal className="size-4 text-muted-foreground" />
-            </div>
-            <h3 className="mt-3 text-sm font-medium">Work in the open</h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">Chat + terminal + diff + preview side by side. No hidden state.</p>
-          </div>
-          <div className="bg-card p-6">
-            <div className="flex size-8 items-center justify-center rounded-md border bg-background">
-              <IconGitBranch className="size-4 text-muted-foreground" />
-            </div>
-            <h3 className="mt-3 text-sm font-medium">Ship cleanly</h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">Download a patch or push a branch and open the PR.</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-8 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Why minimal</p>
-        <Separator className="ml-4 flex-1" />
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px]">Productive by default</CardTitle>
-            <CardDescription className="text-[13px] leading-5">Keyboard-first, dense without being noisy. Every pixel earns its keep.</CardDescription>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px]">Own the loop</CardTitle>
-            <CardDescription className="text-[13px] leading-5">Human-in-the-loop. You inspect files, approve plans, and decide when to publish.</CardDescription>
-          </CardHeader>
-        </Card>
       </div>
     </PageContainer>
   );
@@ -196,7 +139,7 @@ export default function Home() {
            <DialogContent>
              <DialogHeader>
                <DialogTitle>Create a workspace</DialogTitle>
-               <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
+               <DialogDescription>Pick a repo or start blank.</DialogDescription>
              </DialogHeader>
              <NewProjectForm />
            </DialogContent>
@@ -234,7 +177,6 @@ export default function Home() {
                   <IconFolder className="size-3.5 text-muted-foreground" />
                 </div>
                 <p className="mt-2 text-2xl font-semibold tracking-[-0.02em]">{loading ? "—" : projects.length}</p>
-                <p className="text-[12px] text-muted-foreground">Across {new Set(sessions.map((s) => s.projectId)).size} workspaces</p>
               </CardContent>
             </Card>
             <Card>
@@ -244,7 +186,7 @@ export default function Home() {
                   <StatusDot status={activeSessions > 0 ? "running" : "idle"} />
                 </div>
                 <p className="mt-2 text-2xl font-semibold tracking-[-0.02em]">{loading ? "—" : activeSessions}</p>
-                <p className="text-[12px] text-muted-foreground">{sessions.length} total · working now</p>
+                <p className="text-[12px] text-muted-foreground">{sessions.length} total</p>
               </CardContent>
             </Card>
             <Card>
@@ -254,7 +196,6 @@ export default function Home() {
                   <IconBolt className="size-3.5 text-muted-foreground" />
                 </div>
                 <p className="mt-2 text-sm font-medium">Paste a repo URL</p>
-                <p className="text-[12px] text-muted-foreground">GitHub, GitLab, Bitbucket — any public repo.</p>
               </CardContent>
             </Card>
           </div>
@@ -270,9 +211,6 @@ export default function Home() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="hidden text-xs text-muted-foreground sm:inline">Press</span>
-              <span className="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px] sm:inline">n</span>
-              <span className="hidden text-xs text-muted-foreground sm:inline">for new project</span>
               <Button variant="ghost" size="sm" className="ml-1" onClick={() => (window.location.href = "/settings")}>
                 <IconEye className="size-4" /> Settings
               </Button>
@@ -302,7 +240,7 @@ export default function Home() {
                 <EmptyState
                   icon={<IconFolder className="size-4" />}
                   title={projects.length === 0 ? "No projects yet" : "No matches"}
-                  description={projects.length === 0 ? "Create a project from a repo or start blank. The agent works inside an isolated sandbox." : `No projects match “${q}”.`}
+                  description={projects.length === 0 ? "Create a project from a repo or start blank." : `No projects match “${q}”.`}
                   action={projects.length === 0 ? { label: "New project", onClick: () => (window.location.href = "/new"), icon: <IconPlus className="size-4" /> } : undefined}
                 />
               </Card>
@@ -370,7 +308,7 @@ export default function Home() {
                 <EmptyState
                   icon={<IconTerminal className="size-4" />}
                   title="No sessions yet"
-                  description="Open a project and give the agent a first task. It will read the repo and start planning right away."
+                  description="Open a project and give the agent a first task."
                 />
               </div>
             ) : (
@@ -402,7 +340,7 @@ export default function Home() {
          <DialogContent>
            <DialogHeader>
              <DialogTitle>Create a workspace</DialogTitle>
-             <DialogDescription>Start from a GitHub repository or create a blank workspace.</DialogDescription>
+             <DialogDescription>Pick a repo or start blank.</DialogDescription>
            </DialogHeader>
            <NewProjectForm />
          </DialogContent>

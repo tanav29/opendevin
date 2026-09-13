@@ -189,7 +189,7 @@ export default function NewProjectForm() {
         <DialogHeader>
           <DialogTitle>Create a workspace</DialogTitle>
           <DialogDescription>
-            Start from a GitHub repository or create a blank workspace.
+            Pick a repo or start blank.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={createProject} className="space-y-5 min-h-0">
@@ -203,9 +203,6 @@ export default function NewProjectForm() {
               className="mt-2"
               autoFocus
             />
-            <span className="mt-1 block text-xs text-muted-foreground">
-              Shown in the sidebar and on the dashboard.
-            </span>
           </label>
 
           {/* Repo select */}
@@ -290,8 +287,7 @@ export default function NewProjectForm() {
                         </div>
                         <p className="mt-3 text-sm font-medium">GitHub not connected</p>
                         <p className="mx-auto mt-1 max-w-[28ch] text-xs leading-5 text-muted-foreground">
-                          Sign in with GitHub to browse your private and org repos. You can still
-                          paste any public URL below.
+                          Sign in to browse private and org repos.
                         </p>
                         <Button
                           size="sm"
@@ -358,13 +354,9 @@ export default function NewProjectForm() {
                                     </Badge>
                                   )}
                                 </span>
-                                {r.description ? (
+                                {r.description && (
                                   <span className="mt-1 line-clamp-3 truncate text-xs text-muted-foreground">
                                     {r.description}
-                                  </span>
-                                ) : (
-                                  <span className="mt-1 block text-xs text-muted-foreground/60">
-                                    No description
                                   </span>
                                 )}
                               </span>
@@ -414,26 +406,11 @@ export default function NewProjectForm() {
               )}
             </div>
 
-            {selectedRepo && (
-              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
-                <Badge variant="secondary" className="font-mono text-[11px]">
-                  <IconBrandGithub className="size-3" /> {selectedRepo.fullName}
-                </Badge>
-                {selectedRepo.private && (
-                  <span className="inline-flex items-center gap-1 text-muted-foreground">
-                    <IconLock className="size-3" /> Private
-                  </span>
-                )}
-                <span className="ml-auto text-muted-foreground">
-                  {selectedRepo.language || "repo"} · {selectedRepo.stars} ★
-                </span>
-              </div>
-            )}
           </div>
 
           {repo.trim() && !/^https?:\/\//.test(repo.trim()) && (
             <p className="rounded-md border border-warning/30 bg-warning-muted px-3 py-2 text-xs text-warning">
-              The URL should start with https:// — we clone with git, not SSH.
+              Use an https:// URL.
             </p>
           )}
 

@@ -37,6 +37,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { timeAgo } from "@/lib/format";
 import NewProjectForm from "@/components/new-project-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useSession } from "@/hooks/use-session";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -58,6 +59,7 @@ export function AppSidebar() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [query, setQuery] = useState("");
+  const me = useSession();
 
   useEffect(() => {
     let cancelled = false;
@@ -159,8 +161,7 @@ export function AppSidebar() {
         {signedIn === false ? (
           <SidebarGroup>
             <div className="rounded-md border border-dashed border-border bg-card p-3 group-data-[collapsible=icon]:hidden">
-              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Sign in to continue</p>
-              <p className="mt-1 text-[13px] leading-5 text-muted-foreground">Create projects, run sandboxes, ship patches.</p>
+              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Sign in</p>
               <Link href="/login" className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background">
                 Continue with GitHub
               </Link>
@@ -248,11 +249,20 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarSeparator className="mx-0" />
         <div className="flex items-center gap-2 p-2 group-data-[collapsible=icon]:justify-center">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card group-data-[collapsible=icon]:size-8">
-            {/*your avatar*/}
-          </div>
+          {me?.github.avatarUrl || me?.user.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={me.github.avatarUrl || me.user.image || ""}
+              alt=""
+              className="size-7 shrink-0 rounded-full border border-border group-data-[collapsible=icon]:size-8"
+            />
+          ) : (
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs text-muted-foreground group-data-[collapsible=icon]:size-8">
+              {(me?.github.login || me?.user.name || "?").slice(0, 1).toUpperCase()}
+            </div>
+          )}
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-[13px] font-medium leading-none">{signedIn ? "Your Name sir" : "Guest"}</p>
+            <p className="truncate text-[13px] font-medium leading-none">{me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…")}</p>
           </div>
           <Link href="/settings">
             <Button variant="ghost" size="icon-sm" className="size-7 shrink-0 group-data-[collapsible=icon]:hidden">

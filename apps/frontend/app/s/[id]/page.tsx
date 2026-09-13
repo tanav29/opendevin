@@ -345,7 +345,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 <EmptyState
                   icon={<IconTerminal className="size-4" />}
                   title="Agent is ready"
-                  description="Ask it to inspect files, make a plan, or start building. It can read, edit, run commands, and show you the diff."
+                  description="Ask it to inspect, plan, or build."
                 />
               )}
               {messages.map((message) => (
@@ -397,7 +397,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     }
                   }}
                   rows={3}
-                  placeholder="Tell the agent what to do next… (Enter to send, Shift+Enter for a new line)"
+                  placeholder="Tell the agent what to do…"
                   className="min-h-16 rounded-xl bg-transparent resize-none border-0 px-3 py-2 text-sm focus-visible:ring-0"
                 />
                 <div className="flex items-center justify-between gap-2 px-2 p-2">

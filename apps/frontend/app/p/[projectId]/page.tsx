@@ -287,7 +287,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                   <EmptyState
                     icon={<IconTerminal className="size-4" />}
                     title="No sessions yet"
-                    description="Give the agent a first task. It will clone the repo (if any) and start reading the codebase."
+                    description="Give the agent a first task."
                   />
                 ) : (
                   <div className="divide-y">
