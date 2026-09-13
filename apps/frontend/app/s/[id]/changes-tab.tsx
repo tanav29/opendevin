@@ -56,6 +56,7 @@ export default function ChangesTab({
       setDiff(payload.diff ?? "");
       setTruncated(Boolean(payload.truncated));
       setPersisted(Boolean(payload.persisted));
+      setError("");
     }
     setLoading(false);
   }, []);

@@ -20,6 +20,7 @@ import {
   githubTokenForUser,
   isRepoUrl,
   provisionSandbox,
+  readWorkspaceDiff,
   sandboxTools,
   sanitizeBranch,
   shellQuote,
@@ -166,7 +167,6 @@ app.get("/api/me", async (req, res) => {
     github,
   });
 });
-
 
 app.get("/api/projects", async (req, res) => {
   const session = await currentUser(req);
@@ -542,22 +542,13 @@ async function finishTurn(
   if (session?.sandboxId) {
     try {
       const sandbox = await Sandbox.connect(session.sandboxId);
-      const diffOut = await sandbox.commands.run("git diff HEAD --no-color", {
-        cwd: session.workspacePath || WORKSPACE_PATH,
-        timeoutMs: 30_000,
+      const { diff } = await readWorkspaceDiff(sandbox, session.workspacePath || WORKSPACE_PATH);
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: { lastDiff: diff, lastDiffAt: new Date(), status: "idle" },
       });
-      if (diffOut.exitCode === 0) {
-        await prisma.projectSession.update({
-          where: { id: sessionId },
-          data: {
-            lastDiff: (diffOut.stdout || "").slice(0, 100_000),
-            lastDiffAt: new Date(),
-            status: "idle",
-          },
-        });
-        if (!res.writableEnded) res.end();
-        return;
-      }
+      if (!res.writableEnded) res.end();
+      return;
     } catch {
       // Unreachable sandbox is handled by reconnect/kill; just reset status.
     }
@@ -595,19 +586,10 @@ app.get("/api/sessions/:id/diff", async (req, res) => {
   }
   try {
     const sandbox = await Sandbox.connect(found.owner.sandboxId);
-    const result = await sandbox.commands.run("git diff HEAD --no-color", {
-      cwd: found.owner.workspacePath || WORKSPACE_PATH,
-      timeoutMs: 30_000,
-    });
-    if (result.exitCode !== 0) {
-      const message = (result.stderr || result.stdout || "git diff failed").slice(0, 500);
-      if (persisted)
-        return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
-      return res.status(409).json({ error: `Changes unavailable: ${message}` });
-    }
-    const output = result.stdout || "";
-    const truncated = output.length > 100_000;
-    const diff = output.slice(0, 100_000);
+    const { diff, truncated } = await readWorkspaceDiff(
+      sandbox,
+      found.owner.workspacePath || WORKSPACE_PATH,
+    );
     // Snapshot so the tab survives sandbox expiry/refresh.
     void prisma.projectSession
       .update({ where: { id: found.owner.id }, data: { lastDiff: diff, lastDiffAt: new Date() } })

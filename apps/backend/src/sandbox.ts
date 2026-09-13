@@ -1,5 +1,5 @@
 import { tool, stepCountIs } from "ai";
-import { Sandbox } from "e2b";
+import { CommandExitError, Sandbox } from "e2b";
 import { z } from "zod";
 import { prisma } from "./db/prisma.js";
 
@@ -207,6 +207,109 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
       },
     }),
   };
+}
+const MAX_DIFF_BYTES = 100_000;
+const MAX_UNTRACKED_FILES = 100;
+
+// E2B's `commands.run` throws CommandExitError on any non-zero exit, but git
+// signals "differences found" via exit 1 — the normal case for a diff. The
+// thrown error still carries stdout/stderr, so unwrap it instead of losing
+// the output. Genuine transport failures still throw.
+export async function runSandbox(
+  sandbox: Sandbox,
+  command: string,
+  cwd: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  try {
+    const result = await sandbox.commands.run(command, { cwd, timeoutMs: 30_000 });
+    return {
+      exitCode: result.exitCode,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
+  } catch (error) {
+    if (error instanceof CommandExitError) {
+      return {
+        exitCode: error.exitCode,
+        stdout: error.stdout ?? "",
+        stderr: error.stderr ?? "",
+      };
+    }
+    throw error;
+  }
+}
+
+function truncateAtFileBoundary(diff: string): string {
+  if (diff.length <= MAX_DIFF_BYTES) return diff;
+  const cut = diff.lastIndexOf("\ndiff --git ", MAX_DIFF_BYTES);
+  // Single huge file (no later boundary): hard slice, the UI falls back to raw view.
+  return cut <= 0 ? diff.slice(0, MAX_DIFF_BYTES) : diff.slice(0, cut);
+}
+
+// Full workspace diff: tracked changes (`git diff HEAD`) plus untracked new
+// files, which `git diff HEAD` silently omits. Each untracked file is diffed
+// against /dev/null so the result stays a parseable unified patch.
+export async function readWorkspaceDiff(
+  sandbox: Sandbox,
+  cwd: string,
+): Promise<{ diff: string; truncated: boolean }> {
+  const run = (command: string) => runSandbox(sandbox, command, cwd);
+
+  let tracked = "";
+  const head = await run("git diff HEAD --no-color");
+  if (head.exitCode === 0 || head.exitCode === 1) {
+    // git diff exits 1 when differences exist — that IS the output we want.
+    tracked = head.stdout || "";
+  } else {
+    // Unborn HEAD (fresh repo with no commits): staged + unstaged separately.
+    const [staged, unstaged] = await Promise.all([
+      run("git diff --cached --no-color"),
+      run("git diff --no-color"),
+    ]);
+    if (staged.exitCode <= 1 && unstaged.exitCode <= 1) {
+      tracked = [staged.stdout || "", unstaged.stdout || ""].filter(Boolean).join("\n");
+    } else {
+      throw new Error((head.stderr || head.stdout || "git diff failed").slice(0, 500));
+    }
+  }
+
+  let untrackedNames: string[] = [];
+  const listed = await run("git ls-files --others --exclude-standard -z");
+  if (listed.exitCode === 0) {
+    untrackedNames = (listed.stdout || "").split("\0").filter((name) => name.length > 0);
+  }
+  let truncated = untrackedNames.length > MAX_UNTRACKED_FILES;
+  untrackedNames = untrackedNames.slice(0, MAX_UNTRACKED_FILES);
+
+  const patches: string[] = [];
+  if (tracked) patches.push(tracked.endsWith("\n") ? tracked : `${tracked}\n`);
+  for (const name of untrackedNames) {
+    const out = await run(`git diff --no-index --no-color -- /dev/null ${shellQuote(name)}`);
+    let patch = out.stdout || "";
+    if (!patch) {
+      // Empty file: no hunks, header only — still a change worth listing.
+      patch = `new file mode 100644\n--- /dev/null\n+++ b/${name}\n`;
+    }
+    const lines = patch.split("\n");
+    // Normalize to a conventional new-file patch: --no-index emits numeric
+    // prefixes (`1/<name>`, `2/<name>`) that diff viewers may not strip.
+    if (lines[0]?.startsWith("diff --git ")) lines[0] = `diff --git a/${name} b/${name}`;
+    else lines.unshift(`diff --git a/${name} b/${name}`);
+    // Header layout varies (`index …` may sit between mode and ---/+++).
+    for (let i = 1; i < lines.length && i <= 6; i++) {
+      if (lines[i]?.startsWith("--- ")) lines[i] = "--- /dev/null";
+      else if (lines[i]?.startsWith("+++ ")) lines[i] = `+++ b/${name}`;
+    }
+    patches.push(`${lines.join("\n").trimEnd()}\n`);
+    if (patches.join("").length > MAX_DIFF_BYTES) {
+      truncated = true;
+      break;
+    }
+  }
+
+  const combined = patches.join("");
+  if (combined.length <= MAX_DIFF_BYTES && !truncated) return { diff: combined, truncated: false };
+  return { diff: truncateAtFileBoundary(combined), truncated: true };
 }
 
 export const AGENT_STOP = stepCountIs(8);
