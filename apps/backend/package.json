@@ -11,7 +11,7 @@
     "fmt:check": "oxfmt --check"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^2.0.0",
+    "@openrouter/ai-sdk-provider": "^1.5.4",
     "@prisma/client": "^6.16.2",
     "ai": "^5.0.0",
     "better-auth": "^1.7.3",

@@ -1,5 +1,0 @@
-[x] test: push to github form changes tab
-[x] we are not cloning the repo, and checking out the selected branch in new session form
-[x] for diffs changes/terminal pnels use the repective working folder
-[x] the ai chat must must work, have ai the tools and must stream
-[x] use streamdown for markdown if you need to

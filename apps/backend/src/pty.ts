@@ -13,11 +13,20 @@ type PtyEntry = {
   decoder: TextDecoder;
   ring: string[];
   ringBytes: number;
+  cols: number;
+  rows: number;
 };
 
 const entries = new Map<string, PtyEntry>();
 const connecting = new Map<string, Promise<PtyEntry>>();
 const RING_MAX_BYTES = 64 * 1024;
+
+function clampTermSize(cols: number, rows: number): { cols: number; rows: number } {
+  return {
+    cols: Math.max(20, Math.min(500, cols || 80)),
+    rows: Math.max(5, Math.min(200, rows || 24)),
+  };
+}
 
 function broadcast(entry: PtyEntry, text: string) {
   entry.ring.push(text);
@@ -46,6 +55,7 @@ async function createEntry(
   rows: number,
 ): Promise<PtyEntry> {
   const sandbox = await Sandbox.connect(sandboxId);
+  const size = clampTermSize(cols, rows);
   const entry: PtyEntry = {
     sandboxId,
     pid: -1,
@@ -53,12 +63,14 @@ async function createEntry(
     decoder: new TextDecoder(),
     ring: [],
     ringBytes: 0,
+    cols: size.cols,
+    rows: size.rows,
   };
   entries.set(sessionId, entry);
   try {
     const handle = await sandbox.pty.create({
-      cols: Math.max(20, Math.min(500, cols || 80)),
-      rows: Math.max(5, Math.min(200, rows || 24)),
+      cols: entry.cols,
+      rows: entry.rows,
       timeoutMs: 0,
       cwd: workspacePath || WORKSPACE_PATH,
       onData: (chunk) => onSandboxData(sessionId, chunk),
@@ -118,9 +130,11 @@ async function sendToPty(
     await sandbox.pty.sendInput(entry.pid, bytes);
     return false;
   } catch {
-    // PTY died while the sandbox lives on: recreate once and retry.
+    // PTY died while the sandbox lives on: recreate at the last known size
+    // and retry once.
+    const size = { cols: entry.cols, rows: entry.rows };
     entries.delete(sessionId);
-    const fresh = await createEntry(sessionId, sandboxId, workspacePath, 80, 24);
+    const fresh = await createEntry(sessionId, sandboxId, workspacePath, size.cols, size.rows);
     const sandbox = await Sandbox.connect(sandboxId);
     await sandbox.pty.sendInput(fresh.pid, bytes);
     return true;
@@ -140,12 +154,12 @@ export async function writePty(
 export async function resizePty(sessionId: string, sandboxId: string, cols: number, rows: number) {
   const entry = entries.get(sessionId);
   if (!entry || entry.sandboxId !== sandboxId || entry.pid < 0) return;
+  const size = clampTermSize(cols, rows);
+  entry.cols = size.cols;
+  entry.rows = size.rows;
   try {
     const sandbox = await Sandbox.connect(sandboxId);
-    await sandbox.pty.resize(entry.pid, {
-      cols: Math.max(20, Math.min(500, cols || 80)),
-      rows: Math.max(5, Math.min(200, rows || 24)),
-    });
+    await sandbox.pty.resize(entry.pid, size);
   } catch {
     // Resize is best-effort; a dead PTY recreates on next input.
   }

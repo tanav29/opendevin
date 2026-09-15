@@ -7,13 +7,13 @@ export const WORKSPACE_PATH = "/home/user/workspace";
 export const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 
 // Single place that maps env keys to the model id the chat route passes to
-// the provider. OpenRouter requires a `provider/model` id, so bare ids like
-// `gpt-4o-mini` (the documented default) are prefixed with `openai/`.
-export function resolveChatModel(): { modelId: string; usingOpenRouter: boolean } {
-  const usingOpenRouter = Boolean(process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY);
-  let modelId = process.env.OPENAI_MODEL || process.env.MODEL || "gpt-4o-mini";
-  if (usingOpenRouter && !modelId.includes("/")) modelId = `openai/${modelId}`;
-  return { modelId, usingOpenRouter };
+// OpenRouter. OPENROUTER_API_KEY is the key, MODEL is the model id.
+// OpenRouter requires a `provider/model` id, so bare ids like `gpt-4o-mini`
+// are prefixed with `openai/`.
+export function resolveChatModel(): { modelId: string; apiKey: string | undefined } {
+  const raw = process.env.MODEL?.trim() || "openai/gpt-4o-mini";
+  const modelId = raw.includes("/") ? raw : `openai/${raw}`;
+  return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }
 
 export function isRepoUrl(repo: string | null | undefined): repo is string {
@@ -34,6 +34,20 @@ export function sanitizeBranch(branch: unknown): string {
   if (!/^[\w.\-\/]+$/.test(name)) return "";
   if (name.includes("..") || name.startsWith("/") || name.startsWith("-")) return "";
   return name;
+}
+
+// Workspace-relative path guard for tools and file routes. Rejects absolute
+// paths, traversal (`..` segments), and backslashes. Returns the clean path,
+// "" for the workspace root, or null when invalid.
+export function sanitizeRel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = value.replace(/^\//, "").trim();
+  if (!raw || raw === ".") return "";
+  if (raw.includes("\\")) return null;
+  const parts = raw.split("/").filter((p) => p !== "" && p !== ".");
+  if (parts.length === 0) return "";
+  if (parts.some((p) => p === "..")) return null;
+  return parts.join("/");
 }
 
 export async function githubTokenForUser(userId: string): Promise<string | null> {
@@ -77,7 +91,7 @@ export async function cloneRepo(
       .catch(() => undefined);
   }
 
-  // Fresh workspace, then clone. If workspace exists and is non-empty, skip.
+  // Fresh workspace, then clone.
   await cleanWorkspace();
   // First try unauthenticated clone (works for public repos, avoids leaking token or 401 for invalid token)
   let result = await tryClone(url, branch);
@@ -204,6 +218,31 @@ export async function checkSandboxAvailable(sandboxId: string): Promise<boolean>
   }
 }
 
+// Attach sandbox tools when the workspace sandbox is reachable, otherwise
+// return a note so the agent answers from general knowledge.
+export async function connectSandboxTools(
+  sandboxId: string,
+  workspacePath: string,
+): Promise<{ tools: ReturnType<typeof sandboxTools> | undefined; sandboxNote: string }> {
+  if (!sandboxId) {
+    return {
+      tools: undefined,
+      sandboxNote:
+        "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.",
+    };
+  }
+  try {
+    const sandbox = await Sandbox.connect(sandboxId);
+    return { tools: sandboxTools(sandbox, workspacePath || WORKSPACE_PATH), sandboxNote: "" };
+  } catch {
+    return {
+      tools: undefined,
+      sandboxNote:
+        "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.",
+    };
+  }
+}
+
 export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
   const cwd = workspacePath || WORKSPACE_PATH;
   return {
@@ -214,7 +253,8 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         path: z.string().default(".").describe("Relative path inside workspace"),
       }),
       execute: async ({ path }: { path: string }) => {
-        const rel = path.replace(/^\//, "").replace(/\.\./g, "");
+        const rel = sanitizeRel(path);
+        if (rel === null) return "Invalid path: must be workspace-relative, without '..'.";
         const entries = await sandbox.files.list(`${cwd}/${rel}`);
         return entries.map((e) => ({ name: e.name, type: e.type, path: e.path })).slice(0, 200);
       },
@@ -225,14 +265,16 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         path: z.string().describe("Relative file path, e.g. 'package.json'"),
       }),
       execute: async ({ path }: { path: string }) => {
-        const rel = path.replace(/^\//, "").replace(/\.\./g, "");
+        const rel = sanitizeRel(path);
+        if (rel === null || rel === "")
+          return "Invalid path: must be a workspace-relative file, without '..'.";
         const content = await sandbox.files.read(`${cwd}/${rel}`);
         return typeof content === "string" ? content.slice(0, 20000) : content;
       },
     }),
     run_command: tool({
       description:
-        "Run a shell command inside the workspace (read-only inspection, tests, builds). No sudo, 60s max.",
+        "Run a shell command inside the workspace to inspect, test, build, or edit. No sudo, 60s max.",
       inputSchema: z.object({
         command: z.string().describe("Shell command, e.g. 'ls -la && cat package.json'"),
       }),
@@ -249,7 +291,10 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         content: z.string().describe("Full new file content"),
       }),
       execute: async ({ path, content }: { path: string; content: string }) => {
-        const rel = path.replace(/^\//, "").replace(/\.\./g, "");
+        const rel = sanitizeRel(path);
+        if (rel === null || rel === "")
+          return "Invalid path: must be a workspace-relative file, without '..'.";
+        if (content.length > 200_000) return "Content too large: max 200,000 chars per write.";
         await sandbox.files.write(`${cwd}/${rel}`, content);
         return `Wrote ${rel} (${content.length} chars)`;
       },
@@ -378,6 +423,26 @@ export async function readWorkspaceDiff(
   const combined = patches.join("");
   if (combined.length <= MAX_DIFF_BYTES && !truncated) return { diff: combined, truncated: false };
   return { diff: truncateAtFileBoundary(combined), truncated: true };
+}
+
+// Best-effort diff snapshot so the Changes tab survives sandbox expiry, then
+// reset the session status so it is never left "running".
+export async function snapshotDiffAndIdle(sessionId: string): Promise<void> {
+  const session = await prisma.projectSession.findUnique({ where: { id: sessionId } });
+  if (session?.sandboxId) {
+    try {
+      const sandbox = await Sandbox.connect(session.sandboxId);
+      const { diff } = await readWorkspaceDiff(sandbox, session.workspacePath || WORKSPACE_PATH);
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: { lastDiff: diff, lastDiffAt: new Date(), status: "idle" },
+      });
+      return;
+    } catch {
+      // Unreachable sandbox: fall through and just reset the status.
+    }
+  }
+  await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
 }
 
 export const AGENT_STOP = stepCountIs(8);

@@ -2,7 +2,7 @@ import "dotenv/config";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
-import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, type ModelMessage } from "ai";
 import cors from "cors";
 import express from "express";
@@ -17,14 +17,17 @@ import {
   AGENT_STOP,
   WORKSPACE_PATH,
   checkSandboxAvailable,
+  connectSandboxTools,
   githubTokenForUser,
   isRepoUrl,
   provisionSandbox,
   readWorkspaceDiff,
   resolveChatModel,
-  sandboxTools,
+  runSandbox,
   sanitizeBranch,
+  sanitizeRel,
   shellQuote,
+  snapshotDiffAndIdle,
 } from "../sandbox.js";
 import { registerSystemRoutes } from "./system.js";
 
@@ -34,9 +37,7 @@ const port = Number(process.env.PORT || 3001);
 // Node's req.headers is a plain object (no .get()/.forEach()). Better Auth
 // expects a real Headers instance, so build one once and share it between the
 // REST helpers and the WebSocket upgrade handler.
-function authHeaders(req: {
-  headers: NodeJS.Dict<string | string | string[] | undefined>;
-}): Headers {
+function authHeaders(req: { headers: NodeJS.Dict<string | string[] | undefined> }): Headers {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers ?? {})) {
     if (value === undefined) continue;
@@ -71,7 +72,7 @@ async function killSandbox(sandboxId: string): Promise<void> {
 
 app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:3000", credentials: true }));
 app.all("/api/auth/*splat", toNodeHandler(auth));
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
 registerSystemRoutes(app);
 
@@ -237,6 +238,7 @@ app.get("/api/projects/:projectId/sessions", async (req, res) => {
   return res.json(
     await prisma.projectSession.findMany({
       where: { projectId: project.id },
+      omit: { toolLog: true, lastDiff: true },
       orderBy: { updatedAt: "desc" },
     }),
   );
@@ -253,37 +255,30 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
   if (!isRepoUrl(repo)) return res.json({ branches: [], defaultBranch: "" });
   try {
     const execFileAsync = promisify(execFile);
-    // Private repos need the owner's token for ls-remote; use authed URL only here.
-    let lsRepo = repo;
+    // Private repos need the owner's token for ls-remote. Pass it via an
+    // http.extraHeader flag (never embedded in the URL) and redact it from
+    // any error that gets logged, so it can't leak into server logs.
+    let extraHeader: string[] = [];
     try {
       const token = await githubTokenForUser(session.user.id);
       if (token && /^https:\/\/github\.com\//i.test(repo)) {
-        lsRepo = repo.replace(
-          /^https:\/\/github\.com\//i,
-          `https://oauth2:${token}@github.com/`,
-        );
+        extraHeader = ["-c", `http.extraHeader=Authorization: Bearer ${token}`];
       }
     } catch {
       // Fall back to unauthenticated ls-remote for public repos.
     }
+    const lsRemote = (args: string[], timeout: number) =>
+      execFileAsync("git", [...extraHeader, ...args, "--", repo], { timeout });
     // Try to get default branch via symref first (handles canary/develop etc)
     let defaultBranch = "";
     try {
-      const { stdout: symrefOut } = await execFileAsync(
-        "git",
-        ["ls-remote", "--symref", "--", lsRepo, "HEAD"],
-        {
-          timeout: 8000,
-        },
-      );
+      const { stdout: symrefOut } = await lsRemote(["ls-remote", "--symref", "HEAD"], 8000);
       const match = symrefOut.match(/ref:\s*refs\/heads\/([^\s]+)\s+HEAD/);
       if (match) defaultBranch = match[1].trim();
     } catch {
       // symref may fail for some hosts — fall back to guessing
     }
-    const { stdout } = await execFileAsync("git", ["ls-remote", "--heads", "--", lsRepo], {
-      timeout: 15000,
-    });
+    const { stdout } = await lsRemote(["ls-remote", "--heads"], 15000);
     const branches = stdout
       .split("\n")
       .map((line) => line.split("\t")[1]?.replace("refs/heads/", "").trim())
@@ -299,7 +294,10 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
     // Ensure defaultBranch is actually in the list; if we got it from symref but list is truncated, keep it
     return res.json({ branches, defaultBranch });
   } catch (error) {
-    console.error("List branches failed", error);
+    const safe = String(error instanceof Error ? error.message : error)
+      .replace(/Bearer [^\s]+/g, "Bearer [redacted]")
+      .slice(0, 300);
+    console.error("List branches failed", safe);
     return res.json({ branches: [], defaultBranch: "" });
   }
 });
@@ -359,7 +357,10 @@ app.get("/api/sessions/:id/messages", async (req, res) => {
 app.get("/api/sessions/:id", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
-  return found.owner ? res.json(found.owner) : res.status(404).json({ error: "Session not found" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  // toolLog/lastDiff can be ~100KB each and the UI never reads them here.
+  const { toolLog: _toolLog, lastDiff: _lastDiff, ...safe } = found.owner;
+  return res.json(safe);
 });
 
 app.get("/api/sessions/:id/status", async (req, res) => {
@@ -368,10 +369,7 @@ app.get("/api/sessions/:id/status", async (req, res) => {
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
   const sandboxAvailable = await checkSandboxAvailable(found.owner.sandboxId);
   return res.json({
-    sandboxStatus:
-      sandboxAvailable && found.owner.sandboxStatus === "ready"
-        ? "ready"
-        : found.owner.sandboxStatus,
+    sandboxStatus: found.owner.sandboxStatus,
     sandboxAvailable,
     sandboxId: found.owner.sandboxId,
     workspacePath: found.owner.workspacePath,
@@ -486,16 +484,45 @@ function toolCallMarker(name: string, input: unknown): string {
   return `\n\n<details data-tool="call"><summary>🛠 ${name}</summary>\n\ninput:\n\n\`\`\`json\n${truncateMarkerJson(input)}\n\`\`\`\n\n`;
 }
 
-function toolDoneMarker(
-  name: string,
-  partType: string,
-  output: unknown,
-  error: unknown,
-): string {
+function toolDoneMarker(name: string, partType: string, output: unknown, error: unknown): string {
   if (name === "ask_user") return `\n</div>\n\n`;
   if (partType === "tool-error")
     return `\nerror:\n\n\`\`\`\n${truncateMarkerText(error, 2000)}\n\`\`\`\n\n</details>\n\n`;
   return `\noutput:\n\n\`\`\`\n${truncateMarkerText(output, 4000)}\n\`\`\`\n\n</details>\n\n`;
+}
+
+// Drain one agent turn: stream text deltas as-is, surface tool activity as
+// collapsible markers, and always consume the whole stream so the turn
+// completes and the full assistant/tool transcript is available to persist.
+async function drainAgentStream(
+  result: {
+    fullStream: AsyncIterable<unknown>;
+    response: Promise<{ messages: unknown }>;
+    text: Promise<string>;
+  },
+  sink: (chunk: string) => void,
+): Promise<{ messages: ModelMessage[]; text: string }> {
+  for await (const part of result.fullStream) {
+    const p = part as {
+      type?: unknown;
+      text?: unknown;
+      toolName?: unknown;
+      input?: unknown;
+      output?: unknown;
+      error?: unknown;
+    };
+    if (p.type === "text-delta") {
+      sink(typeof p.text === "string" ? p.text : "");
+    } else if (p.type === "tool-call") {
+      sink(toolCallMarker(typeof p.toolName === "string" ? p.toolName : "tool", p.input));
+    } else if (p.type === "tool-result" || p.type === "tool-error") {
+      sink(
+        toolDoneMarker(typeof p.toolName === "string" ? p.toolName : "", p.type, p.output, p.error),
+      );
+    }
+  }
+  const [response, text] = await Promise.all([result.response, result.text]);
+  return { messages: (response.messages ?? []) as ModelMessage[], text };
 }
 
 function buildSystemPrompt(
@@ -516,30 +543,18 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   const owner = found.owner;
   const prompt = typeof req.body.message === "string" ? req.body.message.trim() : "";
   if (!prompt) return res.status(400).json({ error: "A message is required" });
-  const { modelId, usingOpenRouter } = resolveChatModel();
-  const aiApiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-  if (!aiApiKey) return res.status(503).json({ error: "OPENAI_API_KEY is not configured" });
+  const { modelId, apiKey } = resolveChatModel();
+  if (!apiKey) return res.status(503).json({ error: "OPENROUTER_API_KEY is not configured" });
 
   // Persist the user's message and mark the turn running before any network
   // work, so a hung sandbox connect can't swallow the prompt.
   await prisma.message.create({ data: { sessionId: owner.id, role: "user", content: prompt } });
   await prisma.projectSession.update({ where: { id: owner.id }, data: { status: "running" } });
 
-  // Attach sandbox tools when the workspace sandbox is reachable.
-  let tools: ReturnType<typeof sandboxTools> | undefined;
-  let sandboxNote = "";
-  try {
-    if (owner.sandboxId) {
-      const sandbox = await Sandbox.connect(owner.sandboxId);
-      tools = sandboxTools(sandbox, owner.workspacePath || WORKSPACE_PATH);
-    } else {
-      sandboxNote =
-        "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.";
-    }
-  } catch {
-    sandboxNote =
-      "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.";
-  }
+  const { tools, sandboxNote } = await connectSandboxTools(
+    owner.sandboxId,
+    owner.workspacePath || WORKSPACE_PATH,
+  );
 
   // Model history comes from toolLog (user/assistant/tool messages, including
   // prior tool calls so the agent keeps working state across turns). The
@@ -554,12 +569,7 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     if (!res.writableEnded) clientGone = true;
   });
   const result = streamText({
-    model: createOpenAI({
-      apiKey: aiApiKey,
-      baseURL:
-        process.env.OPENAI_BASE_URL ||
-        (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
-    })(modelId),
+    model: createOpenRouter({ apiKey })(modelId),
     system: buildSystemPrompt(
       owner.workspacePath || WORKSPACE_PATH,
       owner.project.repo,
@@ -576,10 +586,6 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   if (!tools) res.setHeader("x-sandbox-degraded", "1");
 
   try {
-    // Stream text deltas as-is; surface tool activity as collapsible markers
-    // with truncated input/output so the UI can render real tool parts.
-    // Always drain the SDK stream so the turn completes and
-    // result.response.messages contains the complete assistant/tool turn.
     // Accumulate the exact streamed markdown so the persisted Message keeps
     // tool cards after the UI refreshes from the DB.
     let streamed = "";
@@ -587,27 +593,8 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
       streamed += text;
       if (!clientGone) res.write(text);
     };
-    for await (const part of result.fullStream) {
-      if (part.type === "text-delta") {
-        write(part.text ?? "");
-      } else if (part.type === "tool-call") {
-        const call = part as { toolName?: unknown; input?: unknown };
-        const name = typeof call.toolName === "string" ? call.toolName : "tool";
-        write(toolCallMarker(name, call.input));
-      } else if (part.type === "tool-result" || part.type === "tool-error") {
-        const done = part as { toolName?: unknown; output?: unknown; error?: unknown };
-        const name = typeof done.toolName === "string" ? done.toolName : "";
-        write(toolDoneMarker(name, part.type, done.output, done.error));
-      }
-    }
-    const [completedMessages, completedText] = await Promise.all([result.response, result.text]);
-    return finishTurn(
-      res,
-      owner.id,
-      streamed.trim() ? streamed : completedText,
-      modelHistory,
-      completedMessages.messages as ModelMessage[],
-    );
+    const { messages, text } = await drainAgentStream(result, write);
+    return finishTurn(res, owner.id, streamed.trim() ? streamed : text, modelHistory, messages);
   } catch (error) {
     console.error("Chat stream failed", error);
     await prisma.projectSession.update({
@@ -617,7 +604,7 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     if (!res.headersSent) return res.status(500).json({ error: "Agent run failed" });
     const msg =
       error instanceof Error && (error as { statusCode?: number }).statusCode === 402
-        ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or set OPENAI_API_KEY."
+        ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or check OPENROUTER_API_KEY."
         : "Agent run failed — please retry.";
     try {
       if (!res.writableEnded)
@@ -659,23 +646,7 @@ async function finishTurn(
   } catch (error) {
     console.error("Could not persist agent tool history", error);
   }
-  // Best-effort diff snapshot so the Changes tab survives sandbox expiry.
-  const session = await prisma.projectSession.findUnique({ where: { id: sessionId } });
-  if (session?.sandboxId) {
-    try {
-      const sandbox = await Sandbox.connect(session.sandboxId);
-      const { diff } = await readWorkspaceDiff(sandbox, session.workspacePath || WORKSPACE_PATH);
-      await prisma.projectSession.update({
-        where: { id: sessionId },
-        data: { lastDiff: diff, lastDiffAt: new Date(), status: "idle" },
-      });
-      if (!res.writableEnded) res.end();
-      return;
-    } catch {
-      // Unreachable sandbox is handled by reconnect/kill; just reset status.
-    }
-  }
-  await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
+  await snapshotDiffAndIdle(sessionId);
   if (!res.writableEnded) res.end();
 }
 
@@ -691,37 +662,21 @@ async function runInitialTurn(sessionId: string): Promise<void> {
     });
     if (!session || session.sandboxStatus !== "ready") return;
     if (session.messages.some((m) => m.role === "assistant")) return;
-    const aiApiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-    if (!aiApiKey) {
+    const { modelId, apiKey } = resolveChatModel();
+    if (!apiKey) {
       await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
       return;
     }
     const modelHistory = await loadToolLog(sessionId);
     if (!modelHistory.some((m) => m.role === "user")) return;
 
-    let tools: ReturnType<typeof sandboxTools> | undefined;
-    let sandboxNote = "";
-    try {
-      if (session.sandboxId) {
-        const sandbox = await Sandbox.connect(session.sandboxId);
-        tools = sandboxTools(sandbox, session.workspacePath || WORKSPACE_PATH);
-      } else {
-        sandboxNote =
-          "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.";
-      }
-    } catch {
-      sandboxNote =
-        "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.";
-    }
-    const { modelId, usingOpenRouter } = resolveChatModel();
+    const { tools, sandboxNote } = await connectSandboxTools(
+      session.sandboxId,
+      session.workspacePath || WORKSPACE_PATH,
+    );
     await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "running" } });
     const result = streamText({
-      model: createOpenAI({
-        apiKey: aiApiKey,
-        baseURL:
-          process.env.OPENAI_BASE_URL ||
-          (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
-      })(modelId),
+      model: createOpenRouter({ apiKey })(modelId),
       system: buildSystemPrompt(
         session.workspacePath || WORKSPACE_PATH,
         session.project.repo,
@@ -733,54 +688,19 @@ async function runInitialTurn(sessionId: string): Promise<void> {
     });
     let streamed = "";
     try {
-      for await (const part of result.fullStream) {
-        if (part.type === "text-delta") streamed += part.text ?? "";
-        else if (part.type === "tool-call") {
-          const call = part as { toolName?: unknown; input?: unknown };
-          streamed += toolCallMarker(
-            typeof call.toolName === "string" ? call.toolName : "tool",
-            call.input,
-          );
-        } else if (part.type === "tool-result" || part.type === "tool-error") {
-          const done = part as { toolName?: unknown; output?: unknown; error?: unknown };
-          streamed += toolDoneMarker(
-            typeof done.toolName === "string" ? done.toolName : "",
-            part.type,
-            done.output,
-            done.error,
-          );
-        }
-      }
-      const [completedMessages, completedText] = await Promise.all([
-        result.response,
-        result.text,
-      ]);
-      const content = streamed.trim() ? streamed.slice(0, 100_000) : completedText.slice(0, 100_000);
+      const { messages, text } = await drainAgentStream(result, (chunk) => {
+        streamed += chunk;
+      });
+      const content = streamed.trim() ? streamed.slice(0, 100_000) : text.slice(0, 100_000);
       if (content.trim()) {
         await prisma.message
           .create({ data: { sessionId, role: "assistant", content } })
           .catch((e) => console.error("Could not persist initial reply", e));
       }
-      await saveToolLog(
-        sessionId,
-        trimToolLog([...modelHistory, ...((completedMessages.messages as ModelMessage[]) || [])]),
-      ).catch((e) => console.error("Could not persist initial tool history", e));
-      // Best-effort diff snapshot so the Changes tab has content immediately.
-      try {
-        if (session.sandboxId) {
-          const sandbox = await Sandbox.connect(session.sandboxId);
-          const { diff } = await readWorkspaceDiff(
-            sandbox,
-            session.workspacePath || WORKSPACE_PATH,
-          );
-          await prisma.projectSession.update({
-            where: { id: sessionId },
-            data: { lastDiff: diff, lastDiffAt: new Date(), status: "idle" },
-          });
-          return;
-        }
-      } catch {}
-      await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
+      await saveToolLog(sessionId, trimToolLog([...modelHistory, ...messages])).catch((e) =>
+        console.error("Could not persist initial tool history", e),
+      );
+      await snapshotDiffAndIdle(sessionId);
     } catch (error) {
       console.error("Initial agent turn failed", error);
       await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "failed" } });
@@ -797,6 +717,7 @@ app.get("/api/sessions", async (req, res) => {
   const sessions = await prisma.projectSession.findMany({
     where: { project: { userId: session.user.id } },
     include: { project: { select: { id: true, name: true } } },
+    omit: { toolLog: true, lastDiff: true },
     orderBy: { updatedAt: "desc" },
   });
   return res.json(sessions);
@@ -807,7 +728,7 @@ app.get("/api/sessions/:id/diff", async (req, res) => {
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
   const persisted = found.owner.lastDiff || "";
-  const persistedAt = (found.owner as { lastDiffAt?: Date | null }).lastDiffAt || null;
+  const persistedAt = found.owner.lastDiffAt || null;
   if (!found.owner.sandboxId) {
     if (persisted)
       return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
@@ -841,8 +762,8 @@ app.get("/api/sessions/:id/preview", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
-  const port = Number(req.query.port || 3000);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  const previewPort = Number(req.query.port || 3000);
+  if (!Number.isInteger(previewPort) || previewPort < 1 || previewPort > 65535) {
     return res.status(400).json({ error: "Preview unavailable: port must be 1-65535." });
   }
   const rawPath = typeof req.query.path === "string" && req.query.path ? req.query.path : "/";
@@ -856,22 +777,14 @@ app.get("/api/sessions/:id/preview", async (req, res) => {
   }
   try {
     const sandbox = await Sandbox.connect(found.owner.sandboxId);
-    const url = `https://${sandbox.getHost(port)}${path}`;
-    return res.json({ url, host: sandbox.getHost(port), port, path });
+    const url = `https://${sandbox.getHost(previewPort)}${path}`;
+    return res.json({ url, host: sandbox.getHost(previewPort), port: previewPort, path });
   } catch {
     return res.status(503).json({
       error: "Preview unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
     });
   }
 });
-
-function cleanWorkspaceRel(value: unknown): string | null {
-  if (typeof value !== "string") return "";
-  const rel = value.replace(/^\//, "").trim();
-  if (!rel) return "";
-  if (rel.includes("..") || rel.includes("\\") || rel.startsWith("-")) return null;
-  return rel;
-}
 
 const TREE_SKIP_DIRS: Record<string, true> = { ".git": true, node_modules: true };
 
@@ -892,9 +805,10 @@ app.get("/api/sessions/:id/files", async (req, res) => {
     const paths: string[] = [];
     const queue: string[] = [""];
     const LIMIT = 5000;
+    const DIR_LIMIT = 10_000;
     let truncated = false;
-    while (queue.length > 0) {
-      const dir = queue.shift() as string;
+    for (let head = 0; head < queue.length && head < DIR_LIMIT; head++) {
+      const dir = queue[head];
       let entries;
       try {
         entries = await sandbox.files.list(dir ? `${cwd}/${dir}` : cwd);
@@ -916,6 +830,7 @@ app.get("/api/sessions/:id/files", async (req, res) => {
       }
       if (truncated) break;
     }
+    if (queue.length > DIR_LIMIT) truncated = true;
     paths.sort();
     return res.json({ paths, truncated });
   } catch (error) {
@@ -929,8 +844,8 @@ app.get("/api/sessions/:id/file", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
-  const rel = cleanWorkspaceRel(req.query.path);
-  if (rel === null || !rel)
+  const rel = sanitizeRel(req.query.path);
+  if (!rel)
     return res
       .status(400)
       .json({ error: "File unavailable: path must be a workspace-relative file." });
@@ -987,7 +902,9 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
   try {
     const sandbox = await Sandbox.connect(owner.sandboxId);
     const cwd = owner.workspacePath || WORKSPACE_PATH;
-    const run = (command: string) => sandbox.commands.run(command, { cwd, timeoutMs: 120_000 });
+    // runSandbox unwraps non-zero exits into { exitCode, stdout, stderr }
+    // instead of throwing, so git failures stay publish errors (4xx), not 503s.
+    const run = (command: string) => runSandbox(sandbox, command, cwd, 120_000);
     await run(`git checkout -B ${shellQuote(branch)}`);
     const status = await run("git status --porcelain=v1 -uall");
     if (!status.stdout.trim()) {
@@ -1058,16 +975,10 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
 app.use(
   (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error("Unhandled route error", err);
-    const status =
-      err &&
-      typeof err === "object" &&
-      "status" in err &&
-      typeof (err as { status?: unknown }).status === "number"
-        ? (err as { status: number }).status
-        : err && typeof err === "object" && (err as { statusCode?: unknown }).statusCode === 413
-          ? 413
-          : 500;
-    const safeStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+    const fields = (err ?? {}) as { status?: unknown; statusCode?: unknown };
+    const code = fields.status ?? fields.statusCode;
+    const safeStatus =
+      typeof code === "number" && Number.isInteger(code) && code >= 400 && code <= 599 ? code : 500;
     if (!res.headersSent) {
       res.status(safeStatus).json({
         error: safeStatus === 413 ? "Request body too large." : "Internal server error.",
@@ -1096,7 +1007,7 @@ server.on("upgrade", (req, socket, head) => {
       socket.write(`HTTP/1.1 ${code}\r\nConnection: close\r\n\r\n`);
       socket.destroy();
     };
-    let owner;
+    let owner: { id: string; sandboxId: string; workspacePath: string } | null | undefined;
     try {
       const session = await auth.api.getSession({ headers: authHeaders(req) });
       if (!session) return fail("401 Unauthorized");
