@@ -1,5 +1,7 @@
 # OpenDevin
 
+<img width="1903" height="968" alt="image" src="https://github.com/user-attachments/assets/5a0af771-2d15-4078-bef0-76de799e3da7" />
+
 OpenDevin is a human-in-the-loop coding workspace. Sign in with GitHub, open a repository in an isolated E2B sandbox, chat with an AI coding agent, inspect the terminal and file changes, preview the running app, and publish GitHub changes as a branch and pull request.
 
 The project is intended for local development and experimentation. Agent actions are observable and reviewable; this is not an unattended production deployment system.
