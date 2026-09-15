@@ -1,4 +1,5 @@
-[ ] agent is not working
-[ ] improve chat ui ux lie shown all the parts text, tools, questionaire
-[ ] test: push to github form changes tab
-[ ] improve the quality of backend (code wise) and frontend (ux and parts load time wise)
+[x] test: push to github form changes tab
+[x] we are not cloning the repo, and checking out the selected branch in new session form
+[x] for diffs changes/terminal pnels use the repective working folder
+[x] the ai chat must must work, have ai the tools and must stream
+[x] use streamdown for markdown if you need to

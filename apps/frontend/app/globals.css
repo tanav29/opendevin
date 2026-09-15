@@ -2,7 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@wterm/dom/css";
+@import "streamdown/styles.css";
 @import "./typeset.css";
+
+@source "../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 

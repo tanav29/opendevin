@@ -221,18 +221,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
         }
       >
         <PageContainer size="wide" className="py-6">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <Link href="/" className="hover:text-foreground">
-              Dashboard
-            </Link>
-            <span>·</span>
-            {project.repo && (
-                <a href={project.repo} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
-                  <IconBrandGithub className="size-3" /> {repoName(project.repo)} ↗
-                </a>
-            )}
-          </div>
-
           <div className="mt-6">
             {/* New session */}
             <div className="lg:sticky lg:top-6 lg:self-start">

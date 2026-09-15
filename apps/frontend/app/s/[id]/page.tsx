@@ -356,7 +356,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             disabled={deleting}
           >
             <IconTrash />
-            <span className="hidden lg:inline">{deleting ? "…" : "Delete"}</span>
           </Button>
           <Button
             variant="secondary"
@@ -507,6 +506,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             sessionId={sessionId}
             sandboxId={status?.sandboxId || detail?.sandboxId || ""}
             sandboxReady={ready}
+            workspacePath={status?.workspacePath || detail?.workspacePath || ""}
             defaultTitle={detail?.title || ""}
             prefs={prefs}
             onPrefs={setPrefs}

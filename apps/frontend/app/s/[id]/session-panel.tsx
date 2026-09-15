@@ -88,6 +88,7 @@ export default function SessionPanel({
   sessionId,
   sandboxId,
   sandboxReady,
+  workspacePath,
   defaultTitle,
   prefs,
   onPrefs,
@@ -96,6 +97,7 @@ export default function SessionPanel({
   sessionId: string;
   sandboxId: string;
   sandboxReady: boolean;
+  workspacePath: string;
   defaultTitle: string;
   prefs: PanelPrefs;
   onPrefs: (next: PanelPrefs) => void;
@@ -159,6 +161,12 @@ export default function SessionPanel({
             ))}
           </div>
         </div>
+        <p
+          className="truncate border-b border-border px-3 py-1 font-mono text-[10px] text-muted-foreground"
+          title={workspacePath || "/home/user/workspace"}
+        >
+          {workspacePath || "/home/user/workspace"}
+        </p>
         <div className="min-h-0 flex-1">
           <div className={activeTab === "files" ? "h-full" : "hidden"}>
             <FilesTab

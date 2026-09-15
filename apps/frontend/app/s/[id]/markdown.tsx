@@ -1,93 +1,7 @@
 "use client";
 
-import { memo, useState } from "react";
-
-function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
-  // Minimal inline: `code`, **bold**, *italic*, [label](url)
-  const parts: React.ReactNode[] = [];
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
-    const tok = m[0];
-    if (tok.startsWith("`")) {
-      parts.push(
-        <code
-          key={`${keyPrefix}-${k++}`}
-          className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]"
-        >
-          {tok.slice(1, -1)}
-        </code>,
-      );
-    } else if (tok.startsWith("**")) {
-      parts.push(<strong key={`${keyPrefix}-${k++}`}>{tok.slice(2, -2)}</strong>);
-    } else if (tok.startsWith("*")) {
-      parts.push(<em key={`${keyPrefix}-${k++}`}>{tok.slice(1, -1)}</em>);
-    } else {
-      const lm = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      if (lm) {
-        const href = lm[2].trim();
-        const safe =
-          /^(https?:|mailto:|\/|#)/i.test(href) &&
-          !/^\s*javascript:/i.test(href) &&
-          !/^\s*data:/i.test(href);
-        if (safe) {
-          parts.push(
-            <a
-              key={`${keyPrefix}-${k++}`}
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline"
-            >
-              {lm[1]}
-            </a>,
-          );
-        } else {
-          parts.push(`${lm[1]} (${href})`);
-        }
-      } else {
-        parts.push(tok);
-      }
-    }
-    last = m.index + tok.length;
-  }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
-}
-
-function CodeBlock({ lang, code, id }: { lang: string; code: string; id: string }) {
-  const [copied, setCopied] = useState(false);
-  function copy() {
-    void navigator.clipboard
-      ?.writeText(code)
-      ?.then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      })
-      ?.catch(() => undefined);
-  }
-  return (
-    <pre
-      key={id}
-      className="group/code overflow-x-auto rounded-md bg-[#0a0a0b] p-3 text-[12px] leading-5 text-zinc-200"
-    >
-      <div className="mb-1 flex items-center justify-between font-mono text-[10px] uppercase text-zinc-500">
-        <span>{lang || "code"}</span>
-        <button
-          type="button"
-          onClick={copy}
-          className="rounded px-1.5 py-0.5 normal-case opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-white/10 hover:text-zinc-200"
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <code className="font-mono whitespace-pre">{code}</code>
-    </pre>
-  );
-}
+import { memo } from "react";
+import { Streamdown } from "streamdown";
 
 function ToolCallCard({
   name,
@@ -209,89 +123,27 @@ function parseQuestion(line: string): { question: string; options: string[] } | 
   return null;
 }
 
-function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: string) => void }) {
-  const blocks: React.ReactNode[] = [];
+type Block =
+  | { kind: "md"; text: string }
+  | { kind: "tool"; name: string; input: string; output: string; error: string; running: boolean }
+  | { kind: "question"; question: string; options: string[] }
+  | { kind: "error"; name: string; body: string };
+
+function splitBlocks(content: string): Block[] {
+  const blocks: Block[] = [];
   const lines = content.split("\n");
   let i = 0;
-  let k = 0;
-  let inFence = false;
-  let fenceLang = "";
-  let fenceBuf: string[] = [];
-
-  const flushFence = () => {
-    const code = fenceBuf.join("\n");
-    blocks.push(<CodeBlock key={`b-${k++}`} id={`b-${k}`} lang={fenceLang} code={code} />);
-    fenceBuf = [];
-  };
-
-  let listBuf: string[] = [];
-  const flushList = () => {
-    if (!listBuf.length) return;
-    blocks.push(
-      <ul key={`b-${k++}`} className="list-disc space-y-0.5 pl-5">
-        {listBuf.map((item, j) => (
-          <li key={j}>{renderInline(item, `li-${k}-${j}`)}</li>
-        ))}
-      </ul>,
-    );
-    listBuf = [];
-  };
-
-  let tableBuf: string[] = [];
-  const flushTable = () => {
-    if (!tableBuf.length) return;
-    const rows = tableBuf.map((r) =>
-      r
-        .trim()
-        .replace(/^\||\|$/g, "")
-        .split("|")
-        .map((c) => c.trim()),
-    );
-    const body = rows.filter((_, idx) => !(idx === 1 && rows[1]?.every((c) => /^:?-+:?$/.test(c))));
-    blocks.push(
-      <div key={`b-${k++}`} className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
-          <tbody>
-            {body.map((cells, r) => (
-              <tr key={r}>
-                {cells.map((cell, c) => (
-                  <td key={c} className="border border-border px-2 py-1 align-top">
-                    {renderInline(cell, `t-${k}-${r}-${c}`)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>,
-    );
-    tableBuf = [];
+  let mdBuf: string[] = [];
+  const flushMd = () => {
+    const text = mdBuf.join("\n").trim();
+    mdBuf = [];
+    if (text) blocks.push({ kind: "md", text });
   };
 
   while (i < lines.length) {
     const line = lines[i];
-    if (line.trimStart().startsWith("```")) {
-      if (!inFence) {
-        flushList();
-        flushTable();
-        inFence = true;
-        fenceLang = line.trim().slice(3).trim();
-      } else {
-        inFence = false;
-        flushFence();
-      }
-      i += 1;
-      continue;
-    }
-    if (inFence) {
-      fenceBuf.push(line);
-      i += 1;
-      continue;
-    }
-    // Error part streamed after headers are sent.
     if (line.includes('<details data-tool="error">')) {
-      flushList();
-      flushTable();
+      flushMd();
       const name = line.replace(/.*<summary>(.*)<\/summary>.*/, "$1") || "⚠️ Agent run failed";
       const inner: string[] = [];
       i += 1;
@@ -299,26 +151,12 @@ function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: st
         inner.push(lines[i]);
         i += 1;
       }
-      i += 1; // skip </details>
-      blocks.push(
-        <div
-          key={`b-${k++}`}
-          className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[13px]"
-        >
-          <p className="font-medium text-destructive">{name}</p>
-          {inner.join("\n").trim() && (
-            <p className="mt-1 whitespace-pre-wrap text-destructive/90">
-              {inner.join("\n").trim()}
-            </p>
-          )}
-        </div>,
-      );
+      i += 1;
+      blocks.push({ kind: "error", name, body: inner.join("\n").trim() });
       continue;
     }
-    // Tool-activity markers streamed by the backend.
     if (line.includes('<details data-tool="call">')) {
-      flushList();
-      flushTable();
+      flushMd();
       const name = line.replace(/.*<summary>(.*)<\/summary>.*/, "$1") || "🛠 tool";
       const inner: string[] = [];
       i += 1;
@@ -333,105 +171,90 @@ function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: st
         i += 1;
       }
       const joined = inner.join("\n");
-      blocks.push(
-        <ToolCallCard
-          key={`b-${k++}`}
-          id={`b-${k}`}
-          name={name}
-          input={extractFenced(joined, "input")}
-          output={extractFenced(joined, "output")}
-          error={extractFenced(joined, "error")}
-          running={!closed}
-        />,
-      );
+      blocks.push({
+        kind: "tool",
+        name,
+        input: extractFenced(joined, "input"),
+        output: extractFenced(joined, "output"),
+        error: extractFenced(joined, "error"),
+        running: !closed,
+      });
       continue;
     }
     if (line.trim() === "</details>") {
       i += 1;
       continue;
     }
-    // Questionnaire part emitted by the ask_user tool.
     if (line.includes("<div data-question=")) {
-      flushList();
-      flushTable();
+      flushMd();
       const parsed = parseQuestion(line);
       i += 1;
       while (i < lines.length && lines[i].trim() !== "</div>") i += 1;
-      i += 1; // skip </div>
-      if (parsed) {
-        blocks.push(
-          <QuestionCard
-            key={`b-${k++}`}
-            id={`b-${k}`}
-            question={parsed.question}
-            options={parsed.options}
-            onAnswer={onAnswer}
-          />,
-        );
-      }
+      i += 1;
+      if (parsed) blocks.push({ kind: "question", ...parsed });
       continue;
     }
     if (line.trim() === "</div>") {
       i += 1;
       continue;
     }
-    if (/^\s*\|.*\|\s*$/.test(line)) {
-      flushList();
-      tableBuf.push(line);
-      i += 1;
-      continue;
-    }
-    flushTable();
-    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
-      listBuf.push(line.replace(/^\s*([-*]|\d+\.)\s+/, ""));
-      i += 1;
-      continue;
-    }
-    flushList();
-    if (!line.trim()) {
-      i += 1;
-      continue;
-    }
-    if (line.startsWith("### ")) {
-      blocks.push(
-        <h4 key={`b-${k++}`} className="text-sm font-semibold">
-          {renderInline(line.slice(4), `h-${k}`)}
-        </h4>,
-      );
-    } else if (line.startsWith("## ")) {
-      blocks.push(
-        <h3 key={`b-${k++}`} className="text-[15px] font-semibold">
-          {renderInline(line.slice(3), `h-${k}`)}
-        </h3>,
-      );
-    } else if (line.startsWith("# ")) {
-      blocks.push(
-        <h2 key={`b-${k++}`} className="text-base font-semibold">
-          {renderInline(line.slice(2), `h-${k}`)}
-        </h2>,
-      );
-    } else if (line.startsWith("> ")) {
-      blocks.push(
-        <blockquote
-          key={`b-${k++}`}
-          className="border-l-2 border-border pl-3 text-muted-foreground"
-        >
-          {renderInline(line.slice(2), `q-${k}`)}
-        </blockquote>,
-      );
-    } else {
-      blocks.push(
-        <p key={`b-${k++}`} className="whitespace-pre-wrap">
-          {renderInline(line, `p-${k}`)}
-        </p>,
-      );
-    }
+    mdBuf.push(line);
     i += 1;
   }
-  flushList();
-  flushTable();
-  if (inFence) flushFence();
-  return <div className="space-y-2">{blocks}</div>;
+  flushMd();
+  return blocks;
+}
+
+function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: string) => void }) {
+  const blocks = splitBlocks(content);
+  return (
+    <div className="space-y-2">
+      {blocks.map((b, k) => {
+        if (b.kind === "md") {
+          return (
+            <Streamdown key={`b-${k}`} className="text-[13.5px] leading-7">
+              {b.text}
+            </Streamdown>
+          );
+        }
+        if (b.kind === "tool") {
+          return (
+            <ToolCallCard
+              key={`b-${k}`}
+              id={`b-${k}`}
+              name={b.name}
+              input={b.input}
+              output={b.output}
+              error={b.error}
+              running={b.running}
+            />
+          );
+        }
+        if (b.kind === "question") {
+          return (
+            <QuestionCard
+              key={`b-${k}`}
+              id={`b-${k}`}
+              question={b.question}
+              options={b.options}
+              onAnswer={onAnswer}
+            />
+          );
+        }
+        return (
+          <div
+            key={`b-${k}`}
+            className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[13px]"
+          >
+            <p className="font-medium text-destructive">{b.name}</p>
+            {b.body && (
+              <p className="mt-1 whitespace-pre-wrap text-destructive/90">{b.body}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default memo(Markdown);

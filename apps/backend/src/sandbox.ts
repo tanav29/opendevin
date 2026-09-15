@@ -49,36 +49,74 @@ export async function cloneRepo(
   token: string | null = null,
 ): Promise<void> {
   const url = repo.trim();
-  // Fresh workspace, then clone. If workspace exists and is non-empty, skip.
-  await sandbox.commands.run(
-    `rm -rf ${shellQuote(workspacePath)} && mkdir -p ${shellQuote(workspacePath)}`,
-  );
   const isGitHub = /^https:\/\/github\.com\//i.test(url);
-  const branchArg = branch ? ` --branch ${shellQuote(branch)}` : "";
-  // First try unauthenticated clone (works for public repos, avoids leaking token or 401 for invalid token)
-  let result = await sandbox.commands.run(
-    `git clone --depth 1${branchArg} ${shellQuote(url)} ${shellQuote(workspacePath)}`,
-    { timeoutMs: 120_000 },
-  );
-  if (result.exitCode !== 0 && token && isGitHub) {
-    // Retry with token embedded via oauth2 URL (works for private repos, token is valid via API)
-    const authedUrl = url.replace(
-      /^https:\/\/github\.com\//i,
-      `https://oauth2:${token}@github.com/`,
-    );
-    // Clean workspace before retry
-    await sandbox.commands.run(
+  const cleanWorkspace = () =>
+    sandbox.commands.run(
       `rm -rf ${shellQuote(workspacePath)} && mkdir -p ${shellQuote(workspacePath)}`,
     );
-    result = await sandbox.commands.run(
-      `git clone --depth 1${branchArg} ${shellQuote(authedUrl)} ${shellQuote(workspacePath)}`,
-      { timeoutMs: 120_000 },
+  const authedUrl =
+    token && isGitHub
+      ? url.replace(/^https:\/\/github\.com\//i, `https://oauth2:${token}@github.com/`)
+      : null;
+
+  async function tryClone(targetUrl: string, targetBranch: string) {
+    const branchArg = targetBranch ? ` --branch ${shellQuote(targetBranch)}` : "";
+    // Use runSandbox (unwraps CommandExitError) — E2B throws on non-zero exit,
+    // and git signals clone failure that way. 120s for large repos.
+    return runSandbox(
+      sandbox,
+      `git clone --depth 1${branchArg} ${shellQuote(targetUrl)} ${shellQuote(workspacePath)}`,
+      "/tmp",
+      120_000,
     );
-    // Remove token from remote URL immediately so it doesn't persist in .git/config
+  }
+
+  async function scrubOrigin() {
+    await sandbox.commands
+      .run(`git -C ${shellQuote(workspacePath)} remote set-url origin ${shellQuote(url)}`)
+      .catch(() => undefined);
+  }
+
+  // Fresh workspace, then clone. If workspace exists and is non-empty, skip.
+  await cleanWorkspace();
+  // First try unauthenticated clone (works for public repos, avoids leaking token or 401 for invalid token)
+  let result = await tryClone(url, branch);
+  if (result.exitCode !== 0 && authedUrl) {
+    // Retry with token embedded via oauth2 URL (works for private repos, token is valid via API)
+    await cleanWorkspace();
+    result = await tryClone(authedUrl, branch);
+    if (result.exitCode === 0) await scrubOrigin();
+  }
+  if (result.exitCode === 0) return;
+
+  // Branch may be new (not on remote): clone default then checkout -B.
+  // Also covers transient --branch failures for existing branches.
+  if (branch) {
+    await cleanWorkspace();
+    result = await tryClone(url, "");
+    if (result.exitCode !== 0 && authedUrl) {
+      await cleanWorkspace();
+      result = await tryClone(authedUrl, "");
+    }
     if (result.exitCode === 0) {
-      await sandbox.commands
-        .run(`git -C ${shellQuote(workspacePath)} remote set-url origin ${shellQuote(url)}`)
-        .catch(() => undefined);
+      await scrubOrigin();
+      const cwd = workspacePath;
+      // If the branch exists on remote, track it; otherwise create it.
+      const fetchOut = await runSandbox(
+        sandbox,
+        `git fetch origin ${shellQuote(branch)} --depth 1`,
+        cwd,
+      ).catch(() => ({ exitCode: 128, stdout: "", stderr: "" }));
+      if (fetchOut.exitCode === 0) {
+        const co = await runSandbox(sandbox, `git checkout ${shellQuote(branch)}`, cwd).catch(
+          () => ({ exitCode: 128, stdout: "", stderr: "" }),
+        );
+        if (co.exitCode === 0) return;
+      }
+      const create = await runSandbox(sandbox, `git checkout -B ${shellQuote(branch)}`, cwd).catch(
+        () => ({ exitCode: 128, stdout: "", stderr: "" }),
+      );
+      if (create.exitCode === 0) return;
     }
   }
   if (result.exitCode !== 0) {
@@ -240,9 +278,10 @@ export async function runSandbox(
   sandbox: Sandbox,
   command: string,
   cwd: string,
+  timeoutMs = 30_000,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   try {
-    const result = await sandbox.commands.run(command, { cwd, timeoutMs: 30_000 });
+    const result = await sandbox.commands.run(command, { cwd, timeoutMs });
     return {
       exitCode: result.exitCode,
       stdout: result.stdout ?? "",
@@ -275,6 +314,14 @@ export async function readWorkspaceDiff(
   cwd: string,
 ): Promise<{ diff: string; truncated: boolean }> {
   const run = (command: string) => runSandbox(sandbox, command, cwd);
+
+  // Non-git workspaces (e.g. empty project with no repo) have no diff, not an error.
+  try {
+    const rev = await run("git rev-parse --git-dir");
+    if (rev.exitCode !== 0) return { diff: "", truncated: false };
+  } catch {
+    return { diff: "", truncated: false };
+  }
 
   let tracked = "";
   const head = await run("git diff HEAD --no-color");

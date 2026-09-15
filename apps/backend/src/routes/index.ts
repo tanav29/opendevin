@@ -253,12 +253,25 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
   if (!isRepoUrl(repo)) return res.json({ branches: [], defaultBranch: "" });
   try {
     const execFileAsync = promisify(execFile);
+    // Private repos need the owner's token for ls-remote; use authed URL only here.
+    let lsRepo = repo;
+    try {
+      const token = await githubTokenForUser(session.user.id);
+      if (token && /^https:\/\/github\.com\//i.test(repo)) {
+        lsRepo = repo.replace(
+          /^https:\/\/github\.com\//i,
+          `https://oauth2:${token}@github.com/`,
+        );
+      }
+    } catch {
+      // Fall back to unauthenticated ls-remote for public repos.
+    }
     // Try to get default branch via symref first (handles canary/develop etc)
     let defaultBranch = "";
     try {
       const { stdout: symrefOut } = await execFileAsync(
         "git",
-        ["ls-remote", "--symref", "--", repo, "HEAD"],
+        ["ls-remote", "--symref", "--", lsRepo, "HEAD"],
         {
           timeout: 8000,
         },
@@ -268,7 +281,7 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
     } catch {
       // symref may fail for some hosts — fall back to guessing
     }
-    const { stdout } = await execFileAsync("git", ["ls-remote", "--heads", "--", repo], {
+    const { stdout } = await execFileAsync("git", ["ls-remote", "--heads", "--", lsRepo], {
       timeout: 15000,
     });
     const branches = stdout
@@ -293,7 +306,8 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
 
 // Cursor-like: creating a session immediately returns a record, then a cloud
 // sandbox spins up in the background and clones the project's repo on the
-// requested branch (empty = repo default branch).
+// requested branch (empty = repo default branch). Once ready, the opening
+// prompt runs automatically so the agent answers without a second message.
 app.post("/api/projects/:projectId/sessions", async (req, res) => {
   const session = await currentUser(req);
   if (!session) return res.status(401).json({ error: "Sign in required" });
@@ -322,10 +336,11 @@ app.post("/api/projects/:projectId/sessions", async (req, res) => {
     include: { messages: true },
   });
 
-  // Background provisioning: sandbox spin-up + repo clone. Never block the response.
-  void provisionSandbox(created.id).catch((error) =>
-    console.error("Sandbox provisioning failed", error),
-  );
+  // Background provisioning: sandbox spin-up + repo clone, then the opening
+  // prompt runs automatically. Never block the response.
+  void provisionSandbox(created.id)
+    .then(() => runInitialTurn(created.id))
+    .catch((error) => console.error("Sandbox provisioning failed", error));
   return res.status(201).json(created);
 });
 
@@ -466,12 +481,41 @@ function questionPayload(input: unknown): string {
   return JSON.stringify({ question, options }).replace(/'/g, "&#39;");
 }
 
+function toolCallMarker(name: string, input: unknown): string {
+  if (name === "ask_user") return `\n\n<div data-question='${questionPayload(input)}'>\n\n`;
+  return `\n\n<details data-tool="call"><summary>🛠 ${name}</summary>\n\ninput:\n\n\`\`\`json\n${truncateMarkerJson(input)}\n\`\`\`\n\n`;
+}
+
+function toolDoneMarker(
+  name: string,
+  partType: string,
+  output: unknown,
+  error: unknown,
+): string {
+  if (name === "ask_user") return `\n</div>\n\n`;
+  if (partType === "tool-error")
+    return `\nerror:\n\n\`\`\`\n${truncateMarkerText(error, 2000)}\n\`\`\`\n\n</details>\n\n`;
+  return `\noutput:\n\n\`\`\`\n${truncateMarkerText(output, 4000)}\n\`\`\`\n\n</details>\n\n`;
+}
+
+function buildSystemPrompt(
+  workspacePath: string,
+  repo: string | null,
+  branch: string,
+  sandboxNote: string,
+): string {
+  const repoLine = repo ? `Project repo: ${repo}. ` : "";
+  const branchLine = branch ? `Active git branch: ${branch}. ` : "";
+  return `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${workspacePath}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.`;
+}
+
 app.post("/api/sessions/:id/chat", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
   const owner = found.owner;
   const prompt = typeof req.body.message === "string" ? req.body.message.trim() : "";
+  if (!prompt) return res.status(400).json({ error: "A message is required" });
   const { modelId, usingOpenRouter } = resolveChatModel();
   const aiApiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
   if (!aiApiKey) return res.status(503).json({ error: "OPENAI_API_KEY is not configured" });
@@ -503,8 +547,6 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   const modelHistory = await loadToolLog(owner.id);
   modelHistory.push({ role: "user", content: prompt });
 
-  const repoLine = owner.project.repo ? `Project repo: ${owner.project.repo}. ` : "";
-  const branchLine = owner.branch ? `Active git branch: ${owner.branch}. ` : "";
   let clientGone = false;
   // A disconnected client must not abort the model turn: the completed SDK
   // response is the source of truth that gets persisted below.
@@ -518,7 +560,12 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
         process.env.OPENAI_BASE_URL ||
         (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
     })(modelId),
-    system: `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${owner.workspacePath || WORKSPACE_PATH}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.`,
+    system: buildSystemPrompt(
+      owner.workspacePath || WORKSPACE_PATH,
+      owner.project.repo,
+      owner.branch,
+      sandboxNote,
+    ),
     messages: modelHistory,
     ...(tools ? { tools, stopWhen: AGENT_STOP } : {}),
   });
@@ -533,41 +580,31 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     // with truncated input/output so the UI can render real tool parts.
     // Always drain the SDK stream so the turn completes and
     // result.response.messages contains the complete assistant/tool turn.
+    // Accumulate the exact streamed markdown so the persisted Message keeps
+    // tool cards after the UI refreshes from the DB.
+    let streamed = "";
+    const write = (text: string) => {
+      streamed += text;
+      if (!clientGone) res.write(text);
+    };
     for await (const part of result.fullStream) {
-      if (clientGone) continue;
       if (part.type === "text-delta") {
-        res.write(part.text ?? "");
+        write(part.text ?? "");
       } else if (part.type === "tool-call") {
         const call = part as { toolName?: unknown; input?: unknown };
         const name = typeof call.toolName === "string" ? call.toolName : "tool";
-        if (name === "ask_user") {
-          res.write(`\n\n<div data-question='${questionPayload(call.input)}'>\n\n`);
-        } else {
-          res.write(
-            `\n\n<details data-tool="call"><summary>🛠 ${name}</summary>\n\ninput:\n\n\`\`\`json\n${truncateMarkerJson(call.input)}\n\`\`\`\n\n`,
-          );
-        }
+        write(toolCallMarker(name, call.input));
       } else if (part.type === "tool-result" || part.type === "tool-error") {
         const done = part as { toolName?: unknown; output?: unknown; error?: unknown };
         const name = typeof done.toolName === "string" ? done.toolName : "";
-        if (name === "ask_user") {
-          res.write(`\n</div>\n\n`);
-        } else if (part.type === "tool-error") {
-          res.write(
-            `\nerror:\n\n\`\`\`\n${truncateMarkerText(done.error, 2000)}\n\`\`\`\n\n</details>\n\n`,
-          );
-        } else {
-          res.write(
-            `\noutput:\n\n\`\`\`\n${truncateMarkerText(done.output, 4000)}\n\`\`\`\n\n</details>\n\n`,
-          );
-        }
+        write(toolDoneMarker(name, part.type, done.output, done.error));
       }
     }
     const [completedMessages, completedText] = await Promise.all([result.response, result.text]);
     return finishTurn(
       res,
       owner.id,
-      completedText,
+      streamed.trim() ? streamed : completedText,
       modelHistory,
       completedMessages.messages as ModelMessage[],
     );
@@ -605,10 +642,11 @@ async function finishTurn(
   modelHistory: ModelMessage[],
   toolMessages: ModelMessage[],
 ) {
-  if (replyText.trim()) {
+  const content = replyText.trim() ? replyText.slice(0, 100_000) : "";
+  if (content) {
     try {
       await prisma.message.create({
-        data: { sessionId, role: "assistant", content: replyText },
+        data: { sessionId, role: "assistant", content },
       });
     } catch (error) {
       console.error("Could not persist assistant reply", error);
@@ -639,6 +677,117 @@ async function finishTurn(
   }
   await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
   if (!res.writableEnded) res.end();
+}
+
+// Background run for the opening prompt: session creation seeds the user
+// message + toolLog but has no HTTP stream to write to, so run the same agent
+// turn headless. Skips when the sandbox failed to provision or an assistant
+// reply already exists (e.g. user sent a second message first).
+async function runInitialTurn(sessionId: string): Promise<void> {
+  try {
+    const session = await prisma.projectSession.findUnique({
+      where: { id: sessionId },
+      include: { project: true, messages: { orderBy: { createdAt: "asc" } } },
+    });
+    if (!session || session.sandboxStatus !== "ready") return;
+    if (session.messages.some((m) => m.role === "assistant")) return;
+    const aiApiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
+    if (!aiApiKey) {
+      await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
+      return;
+    }
+    const modelHistory = await loadToolLog(sessionId);
+    if (!modelHistory.some((m) => m.role === "user")) return;
+
+    let tools: ReturnType<typeof sandboxTools> | undefined;
+    let sandboxNote = "";
+    try {
+      if (session.sandboxId) {
+        const sandbox = await Sandbox.connect(session.sandboxId);
+        tools = sandboxTools(sandbox, session.workspacePath || WORKSPACE_PATH);
+      } else {
+        sandboxNote =
+          "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.";
+      }
+    } catch {
+      sandboxNote =
+        "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.";
+    }
+    const { modelId, usingOpenRouter } = resolveChatModel();
+    await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "running" } });
+    const result = streamText({
+      model: createOpenAI({
+        apiKey: aiApiKey,
+        baseURL:
+          process.env.OPENAI_BASE_URL ||
+          (usingOpenRouter ? "https://openrouter.ai/api/v1" : undefined),
+      })(modelId),
+      system: buildSystemPrompt(
+        session.workspacePath || WORKSPACE_PATH,
+        session.project.repo,
+        session.branch,
+        sandboxNote,
+      ),
+      messages: modelHistory,
+      ...(tools ? { tools, stopWhen: AGENT_STOP } : {}),
+    });
+    let streamed = "";
+    try {
+      for await (const part of result.fullStream) {
+        if (part.type === "text-delta") streamed += part.text ?? "";
+        else if (part.type === "tool-call") {
+          const call = part as { toolName?: unknown; input?: unknown };
+          streamed += toolCallMarker(
+            typeof call.toolName === "string" ? call.toolName : "tool",
+            call.input,
+          );
+        } else if (part.type === "tool-result" || part.type === "tool-error") {
+          const done = part as { toolName?: unknown; output?: unknown; error?: unknown };
+          streamed += toolDoneMarker(
+            typeof done.toolName === "string" ? done.toolName : "",
+            part.type,
+            done.output,
+            done.error,
+          );
+        }
+      }
+      const [completedMessages, completedText] = await Promise.all([
+        result.response,
+        result.text,
+      ]);
+      const content = streamed.trim() ? streamed.slice(0, 100_000) : completedText.slice(0, 100_000);
+      if (content.trim()) {
+        await prisma.message
+          .create({ data: { sessionId, role: "assistant", content } })
+          .catch((e) => console.error("Could not persist initial reply", e));
+      }
+      await saveToolLog(
+        sessionId,
+        trimToolLog([...modelHistory, ...((completedMessages.messages as ModelMessage[]) || [])]),
+      ).catch((e) => console.error("Could not persist initial tool history", e));
+      // Best-effort diff snapshot so the Changes tab has content immediately.
+      try {
+        if (session.sandboxId) {
+          const sandbox = await Sandbox.connect(session.sandboxId);
+          const { diff } = await readWorkspaceDiff(
+            sandbox,
+            session.workspacePath || WORKSPACE_PATH,
+          );
+          await prisma.projectSession.update({
+            where: { id: sessionId },
+            data: { lastDiff: diff, lastDiffAt: new Date(), status: "idle" },
+          });
+          return;
+        }
+      } catch {}
+      await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
+    } catch (error) {
+      console.error("Initial agent turn failed", error);
+      await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "failed" } });
+    }
+  } catch (error) {
+    console.error("runInitialTurn failed", error);
+  }
 }
 
 // Every session the user owns, newest first — powers the /s sidebar.
