@@ -29,10 +29,16 @@ import { timeAgo, repoName } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
-
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-type Project = { id: string; name: string; repo: string | null };
+type Project = {
+  id: string;
+  name: string;
+  repo: string | null;
+  setupScript?: string;
+  devCommand?: string;
+  devPort?: number;
+};
 type ProjectSession = {
   id: string;
   title: string;
@@ -71,6 +77,11 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [setupScript, setSetupScript] = useState("");
+  const [devCommand, setDevCommand] = useState("");
+  const [devPort, setDevPort] = useState("3000");
+  const [savingEnv, setSavingEnv] = useState(false);
+  const [envSaved, setEnvSaved] = useState("");
 
   const loadSessions = useCallback(async (id: string) => {
     const response = await fetch(`${API}/api/projects/${id}/sessions`, { credentials: "include" });
@@ -99,6 +110,9 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
         if (!nextProject) setNotFound(true);
         setProject(nextProject);
         setSessions(nextSessions);
+        if (nextProject?.setupScript) setSetupScript(nextProject.setupScript);
+        if (nextProject?.devCommand) setDevCommand(nextProject.devCommand);
+        if (typeof nextProject?.devPort === "number") setDevPort(String(nextProject.devPort));
         const list = Array.isArray(nextBranches.branches) ? nextBranches.branches : [];
         setBranches(list);
         setBranch(nextBranches.defaultBranch || "");
@@ -142,7 +156,8 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     if (!projectId || deleting) return;
     const ok = await confirm({
       title: "Delete project?",
-      description: "This removes the project, all sessions, and their sandboxes. This cannot be undone.",
+      description:
+        "This removes the project, all sessions, and their sandboxes. This cannot be undone.",
       confirmLabel: "Delete",
       destructive: true,
     });
@@ -158,6 +173,35 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       return;
     }
     window.location.href = "/";
+  }
+
+  async function saveEnv() {
+    if (!projectId || savingEnv) return;
+    setSavingEnv(true);
+    setEnvSaved("");
+    try {
+      const response = await fetch(`${API}/api/projects/${projectId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          setupScript,
+          devCommand,
+          devPort: Number(devPort) || 3000,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setEnvSaved(data.error || "Could not save.");
+      } else {
+        setProject(data);
+        setEnvSaved("Saved. New sessions run the setup script.");
+      }
+    } catch {
+      setEnvSaved("Could not reach server.");
+    } finally {
+      setSavingEnv(false);
+    }
   }
 
   if (loading) {
@@ -212,8 +256,15 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             icon={<IconFolder className="size-4" />}
             actions={
               <div className="flex items-center gap-1.5">
-                <Button variant="ghost" size="sm" onClick={() => void deleteProject()} disabled={deleting} className="text-muted-foreground hover:text-destructive">
-                  <IconTrash className="size-4" /> <span className="hidden sm:inline">{deleting ? "Deleting…" : "Delete"}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void deleteProject()}
+                  disabled={deleting}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <IconTrash className="size-4" />{" "}
+                  <span className="hidden sm:inline">{deleting ? "Deleting…" : "Delete"}</span>
                 </Button>
               </div>
             }
@@ -224,50 +275,116 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
           <div className="mt-6">
             {/* New session */}
             <div className="lg:sticky lg:top-6 lg:self-start">
+              <form onSubmit={createSession} className="space-y-3">
+                <div>
+                  <Textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="Inspect the repo and propose a plan…"
+                    rows={5}
+                    className="mt-2 min-h-[110px] resize-none"
+                  />
+                </div>
 
-                  <form onSubmit={createSession} className="space-y-3">
-                    <div>
-                      <Textarea
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="Inspect the repo and propose a plan…"
-                        rows={5}
-                        className="mt-2 min-h-[110px] resize-none"
+                <div>
+                  <Label className="mb-2 mt-4">Branch</Label>
+                  {showBranchPicker && (
+                    <div className="space-x-2 flex">
+                      {branches.length > 0 ? (
+                        <NativeSelect value={branch} onChange={(e) => setBranch(e.target.value)}>
+                          <NativeSelectOption value="">Select a branch</NativeSelectOption>
+                          {branches.map((b) => (
+                            <NativeSelectOption key={b} value={b}>
+                              {b}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                      ) : (
+                        <Input
+                          value={branch}
+                          onChange={(e) => setBranch(e.target.value)}
+                          placeholder="Default branch (e.g. main)"
+                        />
+                      )}
+                      <Input
+                        value={customBranch}
+                        onChange={(e) => setCustomBranch(e.target.value)}
+                        placeholder="Or type a new branch name"
                       />
                     </div>
+                  )}
+                </div>
 
-                    <div>
-                    <Label className="mb-2 mt-4">Branch</Label>
-                    {showBranchPicker && (
-                      <div className="space-x-2 flex">
-                          {branches.length > 0 ? (
-                          <NativeSelect value={branch} onChange={(e) => setBranch(e.target.value)}>
-                            <NativeSelectOption value="">Select a branch</NativeSelectOption>
-                            {branches.map((b) => (
-                              <NativeSelectOption key={b} value={b}>{b}</NativeSelectOption>
-                            ))}
-                          </NativeSelect>
-                        ) : (
-                          <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Default branch (e.g. main)" />
-                        )}
-                        <Input value={customBranch} onChange={(e) => setCustomBranch(e.target.value)} placeholder="Or type a new branch name" />
-                      </div>
-                      )}
-                      </div>
+                {error && (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
 
-                    {error && <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-
-                    <Button type="submit" disabled={creating || !prompt.trim()} className="w-full">
-                      {creating ? "Opening sandbox…" : "New session"}
-                    </Button>
-                  </form>
+                <Button type="submit" disabled={creating || !prompt.trim()} className="w-full">
+                  {creating ? "Opening sandbox…" : "New session"}
+                </Button>
+              </form>
             </div>
+
+            {/* Environment */}
+            <Card className="mt-4">
+              <CardHeader>
+                <CardTitle className="text-sm">Environment setup</CardTitle>
+                <CardDescription>Runs once after clone for new sessions.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label>Setup script</Label>
+                  <Textarea
+                    value={setupScript}
+                    onChange={(e) => setSetupScript(e.target.value)}
+                    placeholder="pnpm install"
+                    rows={2}
+                    className="mt-2 font-mono text-[12px]"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Label>Dev command</Label>
+                    <Input
+                      value={devCommand}
+                      onChange={(e) => setDevCommand(e.target.value)}
+                      placeholder="npm run dev -- --port 3000 --hostname 0.0.0.0"
+                      className="mt-2 font-mono text-[12px]"
+                    />
+                  </div>
+                  <div className="w-24 shrink-0">
+                    <Label>Port</Label>
+                    <Input
+                      value={devPort}
+                      onChange={(e) => setDevPort(e.target.value)}
+                      inputMode="numeric"
+                      className="mt-2 font-mono text-[12px]"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void saveEnv()}
+                    disabled={savingEnv}
+                  >
+                    {savingEnv ? "Saving…" : "Save environment"}
+                  </Button>
+                  {envSaved && <span className="text-xs text-muted-foreground">{envSaved}</span>}
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Sessions */}
             <div className="mt-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-medium text-muted-foreground">Sessions</h2>
-                <span className="font-mono text-[11px] text-muted-foreground">{sessions.length} total</span>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {sessions.length} total
+                </span>
               </div>
 
               <div className="rounded-xl border overflow-hidden my-3">
@@ -282,13 +399,20 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                     {sessions.map((session) => {
                       const provisioning = isProvisioning(session);
                       return (
-                        <Link key={session.id} href={`/s/${session.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
+                        <Link
+                          key={session.id}
+                          href={`/s/${session.id}`}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50"
+                        >
                           <StatusDot status={session.status} />
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-[13px] font-medium">{session.title}</p>
                             <div className="mt-1 flex flex-wrap items-center gap-1.5">
                               {session.branch && (
-                                <Badge variant="outline" className="h-5 px-1.5 font-mono text-[11px]">
+                                <Badge
+                                  variant="outline"
+                                  className="h-5 px-1.5 font-mono text-[11px]"
+                                >
                                   <IconGitBranch className="size-3" /> {session.branch}
                                 </Badge>
                               )}
@@ -298,14 +422,22 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                                   Provisioning
                                 </Badge>
                               ) : (
-                                <Badge variant="outline" className="font-mono text-[11px] capitalize">
+                                <Badge
+                                  variant="outline"
+                                  className="font-mono text-[11px] capitalize"
+                                >
                                   {session.status}
                                 </Badge>
                               )}
-                              <span className="font-mono text-[11px] text-muted-foreground">· {timeAgo(session.updatedAt)}</span>
+                              <span className="font-mono text-[11px] text-muted-foreground">
+                                · {timeAgo(session.updatedAt)}
+                              </span>
                             </div>
                           </div>
-                          <Badge variant="outline" className="hidden shrink-0 font-mono text-[11px] sm:inline-flex">
+                          <Badge
+                            variant="outline"
+                            className="hidden shrink-0 font-mono text-[11px] sm:inline-flex"
+                          >
                             {session.sandboxStatus}
                           </Badge>
                         </Link>

@@ -29,6 +29,7 @@ export default function ChangesTab({
   const [publishTitle, setPublishTitle] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState("");
+  const [reverting, setReverting] = useState("");
 
   type DiffPayload = { diff?: string; truncated?: boolean; persisted?: boolean; error?: string };
 
@@ -121,6 +122,28 @@ export default function ChangesTab({
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function revertFile(path: string) {
+    setReverting(path);
+    try {
+      const response = await fetch(`${API}/api/sessions/${sessionId}/revert`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || `Could not revert ${path}`);
+      } else {
+        refresh();
+      }
+    } catch {
+      setError("Could not revert: server unreachable.");
+    } finally {
+      setReverting("");
+    }
   }
 
   async function publish() {
@@ -232,6 +255,19 @@ export default function ChangesTab({
         )}
         {parsedFiles.map((fileDiff, index) => (
           <div key={`${fileDiff.name}-${index}`} className="mb-3 min-w-0 overflow-x-auto px-3">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {fileDiff.name}
+              </p>
+              <button
+                onClick={() => void revertFile(fileDiff.name)}
+                disabled={reverting === fileDiff.name}
+                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                title={`Revert ${fileDiff.name}`}
+              >
+                {reverting === fileDiff.name ? "…" : "Revert"}
+              </button>
+            </div>
             <FileDiff fileDiff={fileDiff} options={diffOptions} className="w-full" />
           </div>
         ))}

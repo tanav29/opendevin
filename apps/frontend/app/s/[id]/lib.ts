@@ -9,6 +9,9 @@ export type SessionDetail = {
   sandboxStatus: string;
   workspacePath: string;
   branch: string;
+  model: string;
+  plan: string;
+  usage: string;
   lastError: string | null;
   projectId: string;
   createdAt: string;
@@ -25,7 +28,12 @@ export type SessionStatus = {
   repo: string | null;
   branch: string;
   createdAt: string;
+  model: string;
+  plan: { title: string; status: string }[];
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 };
+
+export type ModelOption = { id: string; label: string };
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
 

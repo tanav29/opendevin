@@ -15,11 +15,13 @@ import { attachPty, detachPty, dropPty, replayPty, resizePty, writePty } from ".
 import { loadToolLog, saveToolLog, trimToolLog } from "../agent.js";
 import {
   AGENT_STOP,
+  AVAILABLE_MODELS,
   WORKSPACE_PATH,
   checkSandboxAvailable,
   connectSandboxTools,
   githubTokenForUser,
   isRepoUrl,
+  normalizeModelId,
   provisionSandbox,
   readWorkspaceDiff,
   resolveChatModel,
@@ -30,6 +32,10 @@ import {
   snapshotDiffAndIdle,
 } from "../sandbox.js";
 import { registerSystemRoutes } from "./system.js";
+
+// In-flight agent turns by session. Lets POST /stop abort the model stream
+// server-side instead of only dropping the client's fetch.
+const activeTurns = new Map<string, AbortController>();
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -75,6 +81,11 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json({ limit: "1mb" }));
 
 registerSystemRoutes(app);
+
+app.get("/api/models", async (_req, res) => {
+  const { modelId } = resolveChatModel();
+  return res.json({ models: AVAILABLE_MODELS, defaultModel: modelId });
+});
 
 app.get("/api/github/repos", async (req, res) => {
   const session = await currentUser(req);
@@ -207,6 +218,29 @@ app.post("/api/projects", async (req, res) => {
     data: { name: name.trim(), repo, userId: session.user.id },
   });
   return res.status(201).json(project);
+});
+
+app.put("/api/projects/:id", async (req, res) => {
+  const session = await currentUser(req);
+  if (!session) return res.status(401).json({ error: "Sign in required" });
+  const project = await prisma.project.findFirst({
+    where: { id: req.params.id, userId: session.user.id },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const { name, setupScript, devCommand, devPort } = req.body as {
+    name?: string;
+    setupScript?: string;
+    devCommand?: string;
+    devPort?: number;
+  };
+  const data: Record<string, unknown> = {};
+  if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 200);
+  if (typeof setupScript === "string") data.setupScript = setupScript.slice(0, 2000);
+  if (typeof devCommand === "string") data.devCommand = devCommand.slice(0, 500);
+  if (typeof devPort === "number" && Number.isInteger(devPort) && devPort >= 1 && devPort <= 65535)
+    data.devPort = devPort;
+  if (Object.keys(data).length === 0) return res.status(400).json({ error: "Nothing to update" });
+  return res.json(await prisma.project.update({ where: { id: project.id }, data }));
 });
 
 app.delete("/api/projects/:id", async (req, res) => {
@@ -368,6 +402,15 @@ app.get("/api/sessions/:id/status", async (req, res) => {
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
   const sandboxAvailable = await checkSandboxAvailable(found.owner.sandboxId);
+  let plan: { title: string; status: string }[] = [];
+  try {
+    const parsed = JSON.parse(found.owner.plan || "[]") as unknown;
+    if (Array.isArray(parsed)) plan = parsed as typeof plan;
+  } catch {}
+  let usage: Record<string, unknown> = {};
+  try {
+    usage = (JSON.parse(found.owner.usage || "{}") as Record<string, unknown>) || {};
+  } catch {}
   return res.json({
     sandboxStatus: found.owner.sandboxStatus,
     sandboxAvailable,
@@ -378,6 +421,9 @@ app.get("/api/sessions/:id/status", async (req, res) => {
     repo: found.owner.project.repo,
     branch: found.owner.branch,
     createdAt: found.owner.createdAt,
+    model: found.owner.model || "",
+    plan,
+    usage,
   });
 });
 
@@ -479,15 +525,38 @@ function questionPayload(input: unknown): string {
   return JSON.stringify({ question, options }).replace(/'/g, "&#39;");
 }
 
+function planPayload(input: unknown): string {
+  let tasks: { title: string; status: string }[] = [];
+  if (input && typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    if (Array.isArray(rec.tasks)) {
+      tasks = rec.tasks
+        .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+        .map((t) => ({
+          title: typeof t.title === "string" ? t.title.slice(0, 200) : "",
+          status: t.status === "done" || t.status === "in_progress" ? String(t.status) : "pending",
+        }))
+        .filter((t) => t.title)
+        .slice(0, 12);
+    }
+  }
+  return JSON.stringify(tasks).replace(/'/g, "&#39;");
+}
+
 function toolCallMarker(name: string, input: unknown): string {
   if (name === "ask_user") return `\n\n<div data-question='${questionPayload(input)}'>\n\n`;
+  if (name === "update_plan") return `\n\n<div data-plan='${planPayload(input)}'>\n\n`;
   return `\n\n<details data-tool="call"><summary>🛠 ${name}</summary>\n\ninput:\n\n\`\`\`json\n${truncateMarkerJson(input)}\n\`\`\`\n\n`;
 }
 
 function toolDoneMarker(name: string, partType: string, output: unknown, error: unknown): string {
-  if (name === "ask_user") return `\n</div>\n\n`;
+  if (name === "ask_user" || name === "update_plan") return `\n</div>\n\n`;
   if (partType === "tool-error")
     return `\nerror:\n\n\`\`\`\n${truncateMarkerText(error, 2000)}\n\`\`\`\n\n</details>\n\n`;
+  if (typeof output === "string" && output.startsWith("__PLAN__")) {
+    const raw = output.slice("__PLAN__".length).replace(/'/g, "&#39;");
+    return `\n<div data-plan='${raw}'>\n\n</div>\n\n`;
+  }
   return `\noutput:\n\n\`\`\`\n${truncateMarkerText(output, 4000)}\n\`\`\`\n\n</details>\n\n`;
 }
 
@@ -499,9 +568,17 @@ async function drainAgentStream(
     fullStream: AsyncIterable<unknown>;
     response: Promise<{ messages: unknown }>;
     text: Promise<string>;
+    usage?: Promise<
+      { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined
+    >;
   },
   sink: (chunk: string) => void,
-): Promise<{ messages: ModelMessage[]; text: string }> {
+  onPlan?: (tasksJson: string) => void,
+): Promise<{
+  messages: ModelMessage[];
+  text: string;
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+}> {
   for await (const part of result.fullStream) {
     const p = part as {
       type?: unknown;
@@ -516,13 +593,25 @@ async function drainAgentStream(
     } else if (p.type === "tool-call") {
       sink(toolCallMarker(typeof p.toolName === "string" ? p.toolName : "tool", p.input));
     } else if (p.type === "tool-result" || p.type === "tool-error") {
-      sink(
-        toolDoneMarker(typeof p.toolName === "string" ? p.toolName : "", p.type, p.output, p.error),
-      );
+      const name = typeof p.toolName === "string" ? p.toolName : "";
+      sink(toolDoneMarker(name, p.type, p.output, p.error));
+      if (
+        name === "update_plan" &&
+        typeof p.output === "string" &&
+        p.output.startsWith("__PLAN__")
+      ) {
+        try {
+          onPlan?.(p.output.slice("__PLAN__".length));
+        } catch {}
+      }
     }
   }
-  const [response, text] = await Promise.all([result.response, result.text]);
-  return { messages: (response.messages ?? []) as ModelMessage[], text };
+  const [response, text, usage] = await Promise.all([
+    result.response,
+    result.text,
+    result.usage?.catch(() => undefined),
+  ]);
+  return { messages: (response.messages ?? []) as ModelMessage[], text, usage };
 }
 
 function buildSystemPrompt(
@@ -533,7 +622,7 @@ function buildSystemPrompt(
 ): string {
   const repoLine = repo ? `Project repo: ${repo}. ` : "";
   const branchLine = branch ? `Active git branch: ${branch}. ` : "";
-  return `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${workspacePath}. ${repoLine}${branchLine}${sandboxNote} Prefer inspecting real files with list_files/read_file before answering, and use run_command for verification. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.`;
+  return `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${workspacePath}. ${repoLine}${branchLine}${sandboxNote} Workflow: for non-trivial tasks first call update_plan with 2-8 steps, then work the plan (search/read before edit, edit_file for patches, run_command to verify tests/build). Prefer inspecting real files with list_files/read_file/search before answering. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.`;
 }
 
 app.post("/api/sessions/:id/chat", async (req, res) => {
@@ -543,13 +632,22 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   const owner = found.owner;
   const prompt = typeof req.body.message === "string" ? req.body.message.trim() : "";
   if (!prompt) return res.status(400).json({ error: "A message is required" });
-  const { modelId, apiKey } = resolveChatModel();
+  const content = prompt.slice(0, 20_000);
+  const requestedModel = normalizeModelId(req.body.model);
+  if (req.body.model && !requestedModel) return res.status(400).json({ error: "Invalid model id" });
+  const effectiveModel = requestedModel || owner.model || undefined;
+  const { modelId, apiKey } = resolveChatModel(effectiveModel);
   if (!apiKey) return res.status(503).json({ error: "OPENROUTER_API_KEY is not configured" });
+  if (activeTurns.has(owner.id))
+    return res.status(409).json({ error: "Agent is already running. Stop it first." });
 
   // Persist the user's message and mark the turn running before any network
   // work, so a hung sandbox connect can't swallow the prompt.
-  await prisma.message.create({ data: { sessionId: owner.id, role: "user", content: prompt } });
-  await prisma.projectSession.update({ where: { id: owner.id }, data: { status: "running" } });
+  await prisma.message.create({ data: { sessionId: owner.id, role: "user", content } });
+  await prisma.projectSession.update({
+    where: { id: owner.id },
+    data: { status: "running", ...(requestedModel ? { model: modelId } : {}) },
+  });
 
   const { tools, sandboxNote } = await connectSandboxTools(
     owner.sandboxId,
@@ -560,14 +658,17 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   // prior tool calls so the agent keeps working state across turns). The
   // Message table is only the plain-text timeline for the UI.
   const modelHistory = await loadToolLog(owner.id);
-  modelHistory.push({ role: "user", content: prompt });
+  modelHistory.push({ role: "user", content });
 
   let clientGone = false;
   // A disconnected client must not abort the model turn: the completed SDK
-  // response is the source of truth that gets persisted below.
+  // response is the source of truth that gets persisted below. Only an
+  // explicit POST /stop aborts via activeTurns.
   req.on("close", () => {
     if (!res.writableEnded) clientGone = true;
   });
+  const controller = new AbortController();
+  activeTurns.set(owner.id, controller);
   const result = streamText({
     model: createOpenRouter({ apiKey })(modelId),
     system: buildSystemPrompt(
@@ -578,9 +679,11 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     ),
     messages: modelHistory,
     ...(tools ? { tools, stopWhen: AGENT_STOP } : {}),
+    abortSignal: controller.signal,
   });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.setHeader("Transfer-Encoding", "chunked");
+  res.setHeader("x-model", modelId);
   // Lets the UI banner degraded answers (sandbox provisioning/expired) while
   // still streaming general-knowledge text.
   if (!tools) res.setHeader("x-sandbox-degraded", "1");
@@ -589,21 +692,37 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     // Accumulate the exact streamed markdown so the persisted Message keeps
     // tool cards after the UI refreshes from the DB.
     let streamed = "";
+    let latestPlan: string | null = null;
     const write = (text: string) => {
       streamed += text;
       if (!clientGone) res.write(text);
     };
-    const { messages, text } = await drainAgentStream(result, write);
-    return finishTurn(res, owner.id, streamed.trim() ? streamed : text, modelHistory, messages);
+    const { messages, text, usage } = await drainAgentStream(result, write, (planJson) => {
+      latestPlan = planJson;
+    });
+    return finishTurn(
+      res,
+      owner.id,
+      streamed.trim() ? streamed : text,
+      modelHistory,
+      messages,
+      latestPlan,
+      usage,
+    );
   } catch (error) {
+    const aborted =
+      (error as { name?: string })?.name === "AbortError" ||
+      !activeTurns.has(owner.id) ||
+      controller.signal.aborted;
     console.error("Chat stream failed", error);
     await prisma.projectSession.update({
       where: { id: owner.id },
-      data: { status: "failed" },
+      data: { status: aborted ? "idle" : "failed" },
     });
     if (!res.headersSent) return res.status(500).json({ error: "Agent run failed" });
-    const msg =
-      error instanceof Error && (error as { statusCode?: number }).statusCode === 402
+    const msg = aborted
+      ? "Agent stopped."
+      : error instanceof Error && (error as { statusCode?: number }).statusCode === 402
         ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or check OPENROUTER_API_KEY."
         : "Agent run failed — please retry.";
     try {
@@ -616,7 +735,25 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
     // pollute the timeline and the next turn's context. The failed status
     // drives the UI's "Retry last message" path instead.
     return res.end();
+  } finally {
+    if (activeTurns.get(owner.id) === controller) activeTurns.delete(owner.id);
   }
+});
+
+app.post("/api/sessions/:id/stop", async (req, res) => {
+  const found = await ownedSession(req, req.params.id);
+  if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  const controller = activeTurns.get(found.owner.id);
+  if (controller) {
+    controller.abort();
+    activeTurns.delete(found.owner.id);
+  }
+  await prisma.projectSession.update({
+    where: { id: found.owner.id },
+    data: { status: "idle" },
+  });
+  return res.json({ ok: true, stopped: Boolean(controller) });
 });
 
 // Persist a finished agent turn: the assistant text to the timeline, the full
@@ -628,6 +765,10 @@ async function finishTurn(
   replyText: string,
   modelHistory: ModelMessage[],
   toolMessages: ModelMessage[],
+  planJson: string | null = null,
+  usage:
+    | { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+    | undefined = undefined,
 ) {
   const content = replyText.trim() ? replyText.slice(0, 100_000) : "";
   if (content) {
@@ -646,6 +787,28 @@ async function finishTurn(
   } catch (error) {
     console.error("Could not persist agent tool history", error);
   }
+  try {
+    const data: Record<string, unknown> = {};
+    if (planJson) {
+      try {
+        const parsed = JSON.parse(planJson) as unknown;
+        if (Array.isArray(parsed)) data.plan = JSON.stringify(parsed).slice(0, 5000);
+      } catch {}
+    }
+    if (usage && (usage.inputTokens || usage.outputTokens || usage.totalTokens)) {
+      data.usage = JSON.stringify({
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        totalTokens: usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+        at: new Date().toISOString(),
+      }).slice(0, 500);
+    }
+    if (Object.keys(data).length > 0) {
+      await prisma.projectSession.update({ where: { id: sessionId }, data });
+    }
+  } catch (error) {
+    console.error("Could not persist plan/usage", error);
+  }
   await snapshotDiffAndIdle(sessionId);
   if (!res.writableEnded) res.end();
 }
@@ -662,7 +825,7 @@ async function runInitialTurn(sessionId: string): Promise<void> {
     });
     if (!session || session.sandboxStatus !== "ready") return;
     if (session.messages.some((m) => m.role === "assistant")) return;
-    const { modelId, apiKey } = resolveChatModel();
+    const { modelId, apiKey } = resolveChatModel(session.model || undefined);
     if (!apiKey) {
       await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
       return;
@@ -675,6 +838,8 @@ async function runInitialTurn(sessionId: string): Promise<void> {
       session.workspacePath || WORKSPACE_PATH,
     );
     await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "running" } });
+    const controller = new AbortController();
+    activeTurns.set(sessionId, controller);
     const result = streamText({
       model: createOpenRouter({ apiKey })(modelId),
       system: buildSystemPrompt(
@@ -685,12 +850,20 @@ async function runInitialTurn(sessionId: string): Promise<void> {
       ),
       messages: modelHistory,
       ...(tools ? { tools, stopWhen: AGENT_STOP } : {}),
+      abortSignal: controller.signal,
     });
     let streamed = "";
     try {
-      const { messages, text } = await drainAgentStream(result, (chunk) => {
-        streamed += chunk;
-      });
+      let latestPlan: string | null = null;
+      const { messages, text, usage } = await drainAgentStream(
+        result,
+        (chunk) => {
+          streamed += chunk;
+        },
+        (planJson) => {
+          latestPlan = planJson;
+        },
+      );
       const content = streamed.trim() ? streamed.slice(0, 100_000) : text.slice(0, 100_000);
       if (content.trim()) {
         await prisma.message
@@ -700,10 +873,34 @@ async function runInitialTurn(sessionId: string): Promise<void> {
       await saveToolLog(sessionId, trimToolLog([...modelHistory, ...messages])).catch((e) =>
         console.error("Could not persist initial tool history", e),
       );
+      try {
+        const data: Record<string, unknown> = {};
+        if (latestPlan) {
+          try {
+            const parsed = JSON.parse(latestPlan) as unknown;
+            if (Array.isArray(parsed)) data.plan = JSON.stringify(parsed).slice(0, 5000);
+          } catch {}
+        }
+        if (usage && (usage.inputTokens || usage.outputTokens || usage.totalTokens)) {
+          data.usage = JSON.stringify({
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            totalTokens: usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+            at: new Date().toISOString(),
+          }).slice(0, 500);
+        }
+        if (Object.keys(data).length > 0) {
+          await prisma.projectSession.update({ where: { id: sessionId }, data });
+        }
+      } catch (e) {
+        console.error("Could not persist initial plan/usage", e);
+      }
       await snapshotDiffAndIdle(sessionId);
     } catch (error) {
       console.error("Initial agent turn failed", error);
       await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "failed" } });
+    } finally {
+      if (activeTurns.get(sessionId) === controller) activeTurns.delete(sessionId);
     }
   } catch (error) {
     console.error("runInitialTurn failed", error);
@@ -865,6 +1062,109 @@ app.get("/api/sessions/:id/file", async (req, res) => {
     console.error("Could not read workspace file", error);
     const message = error instanceof Error ? error.message : "unknown error";
     return res.status(404).json({ error: `File unavailable: ${message.slice(0, 200)}` });
+  }
+});
+
+app.put("/api/sessions/:id/file", async (req, res) => {
+  const found = await ownedSession(req, req.params.id);
+  if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  const rel = sanitizeRel(req.body.path ?? req.query.path);
+  const content = typeof req.body.content === "string" ? req.body.content : null;
+  if (!rel) return res.status(400).json({ error: "path must be workspace-relative." });
+  if (content === null) return res.status(400).json({ error: "content is required." });
+  if (content.length > 200_000)
+    return res.status(413).json({ error: "Content too large: max 200,000 chars." });
+  if (!found.owner.sandboxId) return res.status(409).json({ error: "Sandbox not ready." });
+  try {
+    const sandbox = await Sandbox.connect(found.owner.sandboxId);
+    const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+    await sandbox.files.write(`${cwd}/${rel}`, content);
+    return res.json({ ok: true, path: rel, chars: content.length });
+  } catch (error) {
+    console.error("Could not write workspace file", error);
+    return res.status(503).json({ error: "Write failed: sandbox unreachable." });
+  }
+});
+
+app.post("/api/sessions/:id/revert", async (req, res) => {
+  const found = await ownedSession(req, req.params.id);
+  if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  const rel = sanitizeRel(req.body.path);
+  if (rel === null || rel === "")
+    return res.status(400).json({ error: "path must be a workspace-relative file." });
+  if (!found.owner.sandboxId) return res.status(409).json({ error: "Sandbox not ready." });
+  try {
+    const sandbox = await Sandbox.connect(found.owner.sandboxId);
+    const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+    const run = (command: string) => runSandbox(sandbox, command, cwd, 30_000);
+    // Tracked: restore from HEAD. Untracked: delete.
+    const checkout = await run(`git checkout -- ${shellQuote(rel)}`);
+    const clean = await run(`git clean -f -- ${shellQuote(rel)}`);
+    if (checkout.exitCode === 0 || clean.exitCode === 0) {
+      void prisma.projectSession
+        .update({ where: { id: found.owner.id }, data: { lastDiff: "", lastDiffAt: null } })
+        .catch(() => undefined);
+      return res.json({ ok: true, path: rel });
+    }
+    return res.status(409).json({
+      error: `Revert failed: ${(checkout.stderr || clean.stderr || "git error").slice(0, 300)}`,
+    });
+  } catch (error) {
+    console.error("Revert failed", error);
+    return res.status(503).json({ error: "Revert failed: sandbox unreachable." });
+  }
+});
+
+app.post("/api/sessions/:id/devserver", async (req, res) => {
+  const found = await ownedSession(req, req.params.id);
+  if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+  if (!found.owner) return res.status(404).json({ error: "Session not found" });
+  if (!found.owner.sandboxId) return res.status(409).json({ error: "Sandbox not ready." });
+  try {
+    const sandbox = await Sandbox.connect(found.owner.sandboxId);
+    const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+    const project = found.owner.project as unknown as {
+      devCommand?: string;
+      devPort?: number;
+    };
+    let command = typeof req.body.command === "string" ? req.body.command.trim().slice(0, 500) : "";
+    let port =
+      typeof req.body.port === "number" && Number.isInteger(req.body.port)
+        ? req.body.port
+        : (project.devPort ?? 3000);
+    if (!command) command = (project.devCommand || "").trim();
+    if (!command) {
+      // Auto-detect from package.json scripts.
+      try {
+        const raw = await sandbox.files.read(`${cwd}/package.json`);
+        const pkg = JSON.parse(typeof raw === "string" ? raw : "{}") as {
+          scripts?: Record<string, string>;
+        };
+        const scripts = pkg.scripts || {};
+        if (scripts.dev) command = "npm run dev -- --port 3000 --hostname 0.0.0.0";
+        else if (scripts.start) command = "npm run start -- --port 3000 --hostname 0.0.0.0";
+        else command = "python3 -m http.server 3000";
+      } catch {
+        command = "python3 -m http.server 3000";
+      }
+    }
+    if (command.includes("3000") && port !== 3000 && !String(req.body.port)) {
+      // Keep default port substitution simple: caller overrides explicitly.
+    }
+    const log = "/tmp/opendevin-dev.log";
+    const start = await runSandbox(
+      sandbox,
+      `nohup sh -c ${shellQuote(`${command} > ${log} 2>&1`)} > /dev/null 2>&1 & echo $!; sleep 2; cat ${log} | tail -n 20`,
+      cwd,
+      30_000,
+    );
+    const url = `https://${sandbox.getHost(port)}/`;
+    return res.json({ ok: true, command, port, url, log: start.stdout.slice(0, 2000) });
+  } catch (error) {
+    console.error("Dev server start failed", error);
+    return res.status(503).json({ error: "Could not start dev server: sandbox unreachable." });
   }
 });
 

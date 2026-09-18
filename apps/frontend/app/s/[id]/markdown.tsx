@@ -98,6 +98,36 @@ function QuestionCard({
   );
 }
 
+function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; id: string }) {
+  return (
+    <div key={id} className="rounded-md border border-border bg-card p-3">
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+        Plan · {tasks.filter((t) => t.status === "done").length}/{tasks.length}
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {tasks.map((t, i) => (
+          <li key={`${i}-${t.title}`} className="flex items-start gap-2 text-[13px]">
+            <span
+              className={
+                t.status === "done"
+                  ? "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-success text-[10px] text-white"
+                  : t.status === "in_progress"
+                    ? "mt-0.5 size-4 shrink-0 animate-pulse rounded-full border-2 border-warning border-t-transparent"
+                    : "mt-0.5 size-4 shrink-0 rounded-full border border-border"
+              }
+            >
+              {t.status === "done" ? "✓" : ""}
+            </span>
+            <span className={t.status === "done" ? "text-muted-foreground line-through" : ""}>
+              {t.title}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function extractFenced(inner: string, label: string): string {
   // Matches "label:\n\n```[lang]\n…\n```" as emitted by the chat endpoint.
   const re = new RegExp(`${label}:\\s*\\\`\\\`\\\`(?:json|\\w*)?\\n([\\s\\S]*?)\\n\\\`\\\`\\\``);
@@ -123,10 +153,29 @@ function parseQuestion(line: string): { question: string; options: string[] } | 
   return null;
 }
 
+function parsePlan(line: string): { title: string; status: string }[] | null {
+  const m = line.match(/<div data-plan='(.*)'>/);
+  if (!m) return null;
+  try {
+    const parsed = JSON.parse(m[1].replace(/&#39;/g, "'")) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+        .map((t) => ({
+          title: typeof t.title === "string" ? t.title : "",
+          status: typeof t.status === "string" ? t.status : "pending",
+        }))
+        .filter((t) => t.title);
+    }
+  } catch {}
+  return null;
+}
+
 type Block =
   | { kind: "md"; text: string }
   | { kind: "tool"; name: string; input: string; output: string; error: string; running: boolean }
   | { kind: "question"; question: string; options: string[] }
+  | { kind: "plan"; tasks: { title: string; status: string }[] }
   | { kind: "error"; name: string; body: string };
 
 function splitBlocks(content: string): Block[] {
@@ -194,6 +243,15 @@ function splitBlocks(content: string): Block[] {
       if (parsed) blocks.push({ kind: "question", ...parsed });
       continue;
     }
+    if (line.includes("<div data-plan=")) {
+      flushMd();
+      const tasks = parsePlan(line);
+      i += 1;
+      while (i < lines.length && lines[i].trim() !== "</div>") i += 1;
+      i += 1;
+      if (tasks && tasks.length > 0) blocks.push({ kind: "plan", tasks });
+      continue;
+    }
     if (line.trim() === "</div>") {
       i += 1;
       continue;
@@ -241,15 +299,16 @@ function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: st
             />
           );
         }
+        if (b.kind === "plan") {
+          return <PlanCard key={`b-${k}`} id={`b-${k}`} tasks={b.tasks} />;
+        }
         return (
           <div
             key={`b-${k}`}
             className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[13px]"
           >
             <p className="font-medium text-destructive">{b.name}</p>
-            {b.body && (
-              <p className="mt-1 whitespace-pre-wrap text-destructive/90">{b.body}</p>
-            )}
+            {b.body && <p className="mt-1 whitespace-pre-wrap text-destructive/90">{b.body}</p>}
           </div>
         );
       })}

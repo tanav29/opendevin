@@ -10,8 +10,27 @@ export const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 // OpenRouter. OPENROUTER_API_KEY is the key, MODEL is the model id.
 // OpenRouter requires a `provider/model` id, so bare ids like `gpt-4o-mini`
 // are prefixed with `openai/`.
-export function resolveChatModel(): { modelId: string; apiKey: string | undefined } {
-  const raw = process.env.MODEL?.trim() || "openai/gpt-4o-mini";
+export const AVAILABLE_MODELS = [
+  { id: "openai/gpt-4o-mini", label: "gpt-4o-mini (fast)" },
+  { id: "openai/gpt-4o", label: "gpt-4o (capable)" },
+  { id: "anthropic/claude-sonnet-4", label: "claude-sonnet-4" },
+  { id: "google/gemini-2.5-flash", label: "gemini-2.5-flash" },
+  { id: "openai/gpt-5-mini", label: "gpt-5-mini" },
+];
+
+export function normalizeModelId(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const id = raw.trim().slice(0, 200);
+  if (!/^[\w.\-/:]+$/.test(id)) return null;
+  return id.includes("/") ? id : `openai/${id}`;
+}
+
+export function resolveChatModel(override?: unknown): {
+  modelId: string;
+  apiKey: string | undefined;
+} {
+  const fromOverride = normalizeModelId(override);
+  const raw = fromOverride || process.env.MODEL?.trim() || "openai/gpt-4o-mini";
   const modelId = raw.includes("/") ? raw : `openai/${raw}`;
   return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }
@@ -191,6 +210,44 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
       }
     }
 
+    // Project setup script (env install, e.g. `pnpm install`). Runs once after
+    // clone so preview/dev and agent tools work without manual terminal steps.
+    const setup = (existing.project as { setupScript?: string }).setupScript?.trim();
+    if (setup) {
+      try {
+        const out = await runSandbox(
+          sandbox,
+          setup.slice(0, 2000),
+          existing.workspacePath || WORKSPACE_PATH,
+          300_000,
+        );
+        if (out.exitCode !== 0) {
+          await prisma.projectSession.update({
+            where: { id: sessionId },
+            data: {
+              sandboxStatus: "ready",
+              status: "idle",
+              lastError: `Setup script exited ${out.exitCode}: ${(out.stderr || out.stdout).slice(0, 500)}`,
+            },
+          });
+          return;
+        }
+      } catch (error) {
+        await prisma.projectSession.update({
+          where: { id: sessionId },
+          data: {
+            sandboxStatus: "ready",
+            status: "idle",
+            lastError:
+              error instanceof Error
+                ? `Setup failed: ${error.message}`.slice(0, 500)
+                : "Setup failed",
+          },
+        });
+        return;
+      }
+    }
+
     await prisma.projectSession.update({
       where: { id: sessionId },
       data: { sandboxStatus: "ready", status: "idle", lastError: null },
@@ -274,12 +331,17 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
     }),
     run_command: tool({
       description:
-        "Run a shell command inside the workspace to inspect, test, build, or edit. No sudo, 60s max.",
+        "Run a shell command inside the workspace to inspect, test, build, or edit. No sudo. Use timeoutMs for long builds (max 300s). Prefix long servers with nohup ... & to background them.",
       inputSchema: z.object({
         command: z.string().describe("Shell command, e.g. 'ls -la && cat package.json'"),
+        timeoutMs: z.number().default(60_000).describe("Timeout 1000-300000ms"),
       }),
-      execute: async ({ command }: { command: string }) => {
-        const result = await sandbox.commands.run(command, { cwd, timeoutMs: 60_000 });
+      execute: async ({ command, timeoutMs }: { command: string; timeoutMs?: number }) => {
+        const timeout = Math.max(
+          1000,
+          Math.min(300_000, Math.floor(timeoutMs ?? 60_000) || 60_000),
+        );
+        const result = await sandbox.commands.run(command, { cwd, timeoutMs: timeout });
         return `exit=${result.exitCode}\nstdout:\n${result.stdout.slice(0, 12000)}\nstderr:\n${result.stderr.slice(0, 4000)}`;
       },
     }),
@@ -308,6 +370,100 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
       }),
       execute: async ({ question, options }: { question: string; options: string[] }) => {
         return `Question asked: ${question} Options: ${options.join(" | ")}. Wait for the user's answer in their next message before proceeding.`;
+      },
+    }),
+    edit_file: tool({
+      description:
+        "Patch a text file with an exact string replacement. Prefer over write_file for small changes. old_string must appear exactly once.",
+      inputSchema: z.object({
+        path: z.string().describe("Relative file path"),
+        old_string: z.string().describe("Exact text to replace"),
+        new_string: z.string().describe("Replacement text"),
+      }),
+      execute: async ({
+        path,
+        old_string,
+        new_string,
+      }: {
+        path: string;
+        old_string: string;
+        new_string: string;
+      }) => {
+        const rel = sanitizeRel(path);
+        if (rel === null || rel === "")
+          return "Invalid path: must be a workspace-relative file, without '..'.";
+        if (!old_string) return "old_string is required.";
+        if (old_string.length > 50_000 || new_string.length > 200_000)
+          return "Replacement too large.";
+        const current = await sandbox.files.read(`${cwd}/${rel}`);
+        const text = typeof current === "string" ? current : "";
+        const first = text.indexOf(old_string);
+        if (first === -1) return "old_string not found in file.";
+        if (text.indexOf(old_string, first + 1) !== -1)
+          return "old_string matches multiple locations: include more context to make it unique.";
+        const next = text.slice(0, first) + new_string + text.slice(first + old_string.length);
+        await sandbox.files.write(`${cwd}/${rel}`, next);
+        return `Patched ${rel} (${old_string.length} -> ${new_string.length} chars)`;
+      },
+    }),
+    delete_file: tool({
+      description: "Delete a file or empty directory in the workspace.",
+      inputSchema: z.object({
+        path: z.string().describe("Relative file path"),
+      }),
+      execute: async ({ path }: { path: string }) => {
+        const rel = sanitizeRel(path);
+        if (rel === null || rel === "")
+          return "Invalid path: must be a workspace-relative file, without '..'.";
+        const out = await runSandbox(sandbox, `rm -rf ${shellQuote(rel)}`, cwd);
+        return out.exitCode === 0
+          ? `Deleted ${rel}`
+          : `Delete failed: ${(out.stderr || out.stdout).slice(0, 500)}`;
+      },
+    }),
+    search: tool({
+      description:
+        "Grep for text in the workspace (excludes .git/node_modules). Use to find symbols, imports, TODOs before reading files.",
+      inputSchema: z.object({
+        pattern: z.string().describe("Fixed string or regex, e.g. 'useState'"),
+        dir: z.string().default(".").describe("Relative dir to search"),
+      }),
+      execute: async ({ pattern, dir }: { pattern: string; dir?: string }) => {
+        const rel = sanitizeRel(dir ?? ".");
+        if (rel === null) return "Invalid dir.";
+        if (!pattern || pattern.length > 300) return "Invalid pattern.";
+        const out = await runSandbox(
+          sandbox,
+          `grep -rn -I --exclude-dir=.git --exclude-dir=node_modules -- ${shellQuote(pattern)} ${shellQuote(rel === "" ? "." : rel)} | head -n 100`,
+          cwd,
+        );
+        const text = (out.stdout || "").slice(0, 12000);
+        return text ? `matches:\n${text}` : "No matches.";
+      },
+    }),
+    update_plan: tool({
+      description:
+        "Publish the current task plan (2-8 steps) so the user sees progress. Call at start and after each step completes. Statuses: pending|in_progress|done.",
+      inputSchema: z.object({
+        tasks: z
+          .array(
+            z.object({
+              title: z.string().describe("Short step title"),
+              status: z.enum(["pending", "in_progress", "done"]).describe("Step status"),
+            }),
+          )
+          .min(1)
+          .max(12),
+      }),
+      execute: async ({ tasks }: { tasks: { title: string; status: string }[] }) => {
+        const clean = tasks
+          .slice(0, 12)
+          .map((t) => ({
+            title: String(t.title || "").slice(0, 200),
+            status: t.status === "done" || t.status === "in_progress" ? t.status : "pending",
+          }))
+          .filter((t) => t.title);
+        return `__PLAN__${JSON.stringify(clean)}`;
       },
     }),
   };
@@ -445,4 +601,4 @@ export async function snapshotDiffAndIdle(sessionId: string): Promise<void> {
   await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
 }
 
-export const AGENT_STOP = stepCountIs(8);
+export const AGENT_STOP = stepCountIs(25);

@@ -27,6 +27,7 @@ import {
   formatDate,
   isWorking,
   type ChatMessage,
+  type ModelOption,
   type SessionDetail,
   type SessionStatus,
   type SidebarSession,
@@ -84,10 +85,59 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [deleting, setDeleting] = useState(false);
   const [copiedId, setCopiedId] = useState("");
   const [degraded, setDegraded] = useState(false);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [model, setModel] = useState("");
+  const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("opendevin:model");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setModel(saved);
+    } catch {}
+    void fetch(`${API}/api/models`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && Array.isArray(d.models)) {
+          setModels(d.models as ModelOption[]);
+          if (!window.localStorage.getItem("opendevin:model") && d.defaultModel)
+            setModel(d.defaultModel as string);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  function pickModel(next: string) {
+    setModel(next);
+    try {
+      window.localStorage.setItem("opendevin:model", next);
+    } catch {}
+  }
+
+  async function addFiles(files: FileList | File[]) {
+    const list = Array.from(files).slice(0, 3);
+    for (const f of list) {
+      if (f.size > 200_000) {
+        setError(`Attachment ${f.name} too large (max 200KB).`);
+        continue;
+      }
+      try {
+        const text = await f.text();
+        setAttachments((cur) =>
+          cur.length >= 3
+            ? cur
+            : [...cur, { name: f.name.slice(0, 100), content: text.slice(0, 50_000) }],
+        );
+      } catch {
+        setError(`Could not read ${f.name}.`);
+      }
+    }
+  }
 
   function copyMessage(id: string, content: string) {
     void navigator.clipboard
@@ -177,15 +227,24 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || !sessionId || sending) return;
+    if ((!trimmed && attachments.length === 0) || !sessionId || sending) return;
+    let full = trimmed;
+    if (attachments.length > 0) {
+      const blocks = attachments
+        .map((a) => `<attachment name="${a.name}">\n${a.content}\n</attachment>`)
+        .join("\n\n");
+      full = trimmed ? `${trimmed}\n\n${blocks}` : blocks;
+      full = full.slice(0, 60_000);
+    }
     setInput("");
+    setAttachments([]);
     setError("");
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
     setMessages((current) => [
       ...current,
-      { id: `local-${Date.now()}`, role: "user", content: trimmed },
+      { id: `local-${Date.now()}`, role: "user", content: full },
       { id: "streaming", role: "assistant", content: "" },
     ]);
     try {
@@ -193,7 +252,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
+        body: JSON.stringify({ message: full, ...(model ? { model } : {}) }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -240,6 +299,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   function stop() {
     abortRef.current?.abort();
+    // Server-side abort: actually stops the model turn, not just the stream.
+    if (sessionId) {
+      void fetch(`${API}/api/sessions/${sessionId}/stop`, {
+        method: "POST",
+        credentials: "include",
+      })
+        .then(() => refresh(sessionId, true))
+        .catch(() => undefined);
+    }
   }
 
   function retry() {
@@ -458,11 +526,43 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
             <div ref={bottomRef} />
 
-            <form onSubmit={(e) => void send(e)} className="sticky bottom-0 bg-card rounded-xl">
+            <form
+              onSubmit={(e) => void send(e)}
+              className="sticky bottom-0 bg-card rounded-xl"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
+              }}
+            >
               <div className="">
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+                    {attachments.map((a) => (
+                      <span
+                        key={a.name}
+                        className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+                      >
+                        {a.name} · {(a.content.length / 1024).toFixed(1)}KB
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAttachments((cur) => cur.filter((x) => x.name !== a.name))
+                          }
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onPaste={(e) => {
+                    if (e.clipboardData.files.length > 0) void addFiles(e.clipboardData.files);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
@@ -476,9 +576,51 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   className="min-h-16 rounded-xl bg-transparent resize-none border-0 px-3 py-2 text-sm focus-visible:ring-0"
                 />
                 <div className="flex items-center justify-between gap-2 px-2 p-2">
-                  <p className="px-2 text-[11px] text-muted-foreground">
-                    {sending && "Agent is working… esc to stop"}
-                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files) void addFiles(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={sending}
+                      className="px-2 text-[12px]"
+                    >
+                      Attach
+                    </Button>
+                    {models.length > 0 && (
+                      <select
+                        value={model}
+                        onChange={(e) => pickModel(e.target.value)}
+                        disabled={sending}
+                        className="h-7 max-w-44 rounded-md border border-border bg-background px-1.5 font-mono text-[11px] outline-none"
+                        title="Model"
+                      >
+                        {models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
+                      {status?.plan && status.plan.length > 0
+                        ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
+                        : ""}
+                      {status?.usage?.totalTokens
+                        ? ` · ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
+                        : ""}
+                    </p>
+                  </div>
                   {sending ? (
                     <Button
                       type="button"
@@ -490,7 +632,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       <IconPlayerStop className="size-4" /> Stop
                     </Button>
                   ) : (
-                    <Button type="submit" size="sm" disabled={!input.trim()} className="gap-1.5">
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={!input.trim() && attachments.length === 0}
+                      className="gap-1.5"
+                    >
                       <IconSend2 className="size-4" /> Send
                     </Button>
                   )}

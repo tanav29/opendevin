@@ -18,8 +18,42 @@ export default function PreviewTab({
   const [path, setPath] = useState("/");
   const [url, setUrl] = useState("");
   const [resolving, setResolving] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  const [devInfo, setDevInfo] = useState("");
   // Request-scoped state (url/error) resets via the parent's key on session/sandbox change.
+
+  async function startDev() {
+    setStarting(true);
+    setError("");
+    setDevInfo("");
+    try {
+      const response = await fetch(`${API}/api/sessions/${sessionId}/devserver`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ port: Number(port) || 3000 }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        url?: string;
+        command?: string;
+        port?: number;
+        log?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.url) {
+        setError(data.error || "Could not start dev server.");
+        return;
+      }
+      setPort(String(data.port ?? port));
+      setDevInfo(`Started: ${data.command}`);
+      setUrl(data.url);
+    } catch {
+      setError("Could not start dev server: server unreachable.");
+    } finally {
+      setStarting(false);
+    }
+  }
 
   async function resolve() {
     setResolving(true);
@@ -76,13 +110,18 @@ export default function PreviewTab({
           placeholder="/"
           className="min-w-0 flex-1"
         />
-        <Button
-          onClick={() => void resolve()}
-          disabled={resolving}
-        >
+        <Button onClick={() => void resolve()} disabled={resolving}>
           {url ? "Reload" : resolving ? "…" : "Open"}
         </Button>
+        <Button variant="outline" onClick={() => void startDev()} disabled={starting}>
+          {starting ? "…" : "Auto-start"}
+        </Button>
       </div>
+      {devInfo && (
+        <p className="truncate border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+          {devInfo}
+        </p>
+      )}
       {error && (
         <p className="border-b border-border bg-danger-muted px-3 py-2 text-xs text-danger">
           {error}{" "}
@@ -92,12 +131,12 @@ export default function PreviewTab({
         </p>
       )}
       {url ? (
-          <iframe
-            title="Sandbox preview"
-            src={url}
-            className="min-h-0 flex-1"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          />
+        <iframe
+          title="Sandbox preview"
+          src={url}
+          className="min-h-0 flex-1"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <p className="text-sm font-medium">No preview loaded</p>

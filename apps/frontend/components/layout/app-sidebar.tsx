@@ -36,7 +36,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { StatusDot } from "@/components/ui/status-dot";
 import { timeAgo } from "@/lib/format";
 import NewProjectForm from "@/components/new-project-dialog";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useSession } from "@/hooks/use-session";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -97,13 +104,17 @@ export function AppSidebar() {
   const filteredProjects = useMemo(() => {
     if (!query.trim()) return projects.slice(0, 6);
     const q = query.toLowerCase();
-    return projects.filter((p) => p.name.toLowerCase().includes(q) || (p.repo || "").toLowerCase().includes(q)).slice(0, 6);
+    return projects
+      .filter((p) => p.name.toLowerCase().includes(q) || (p.repo || "").toLowerCase().includes(q))
+      .slice(0, 6);
   }, [projects, query]);
 
   const filteredSessions = useMemo(() => {
     if (!query.trim()) return sessions.slice(0, 8);
     const q = query.toLowerCase();
-    return sessions.filter((s) => s.title.toLowerCase().includes(q) || s.project.name.toLowerCase().includes(q)).slice(0, 8);
+    return sessions
+      .filter((s) => s.title.toLowerCase().includes(q) || s.project.name.toLowerCase().includes(q))
+      .slice(0, 8);
   }, [sessions, query]);
 
   const isDashboard = pathname === "/";
@@ -114,7 +125,9 @@ export function AppSidebar() {
       <SidebarHeader className="gap-0">
         <div className="flex items-center gap-2 px-1 h-8">
           <Link href="/" className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-md font-semibold tracking-[-0.02em] group-data-[collapsible=icon]:hidden">OpenDevin</span>
+            <span className="truncate text-md font-semibold tracking-[-0.02em] group-data-[collapsible=icon]:hidden">
+              OpenDevin
+            </span>
           </Link>
         </div>
 
@@ -138,7 +151,11 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={isDashboard} tooltip="Dashboard" render={<Link href="/" prefetch />}>
+                <SidebarMenuButton
+                  isActive={isDashboard}
+                  tooltip="Dashboard"
+                  render={<Link href="/" prefetch />}
+                >
                   <IconLayoutDashboard className="size-4" />
                   <span>Dashboard</span>
                 </SidebarMenuButton>
@@ -148,7 +165,11 @@ export function AppSidebar() {
               </SidebarMenuItem>
               {signedIn === false && (
                 <SidebarMenuItem>
-                  <SidebarMenuButton isActive={pathname === "/login"} tooltip="Sign in" render={<Link href="/login" prefetch />}>
+                  <SidebarMenuButton
+                    isActive={pathname === "/login"}
+                    tooltip="Sign in"
+                    render={<Link href="/login" prefetch />}
+                  >
                     <IconSparkles className="size-4" />
                     <span>Sign in</span>
                   </SidebarMenuButton>
@@ -161,8 +182,13 @@ export function AppSidebar() {
         {signedIn === false ? (
           <SidebarGroup>
             <div className="rounded-md border border-dashed border-border bg-card p-3 group-data-[collapsible=icon]:hidden">
-              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Sign in</p>
-              <Link href="/login" className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background">
+              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                Sign in
+              </p>
+              <Link
+                href="/login"
+                className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background"
+              >
                 Continue with GitHub
               </Link>
             </div>
@@ -173,7 +199,9 @@ export function AppSidebar() {
               <SidebarGroupLabel className="flex items-center gap-1.5">
                 {/*<IconFolder className="size-3.5" />*/}
                 Projects
-                <span className="ml-auto font-mono text-[11px] text-muted-foreground">{projects.length}</span>
+                <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+                  {projects.length}
+                </span>
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
@@ -186,7 +214,11 @@ export function AppSidebar() {
                       const active = pathname === `/p/${p.id}` || pathname === `/projects/${p.id}`;
                       return (
                         <SidebarMenuItem key={p.id}>
-                          <SidebarMenuButton isActive={active} tooltip={p.name} render={<Link href={`/p/${p.id}`} />}>
+                          <SidebarMenuButton
+                            isActive={active}
+                            tooltip={p.name}
+                            render={<Link href={`/p/${p.id}`} />}
+                          >
                             <IconFolder className="size-4 shrink-0 text-muted-foreground" />
                             <span className="truncate">{p.name}</span>
                           </SidebarMenuButton>
@@ -196,7 +228,10 @@ export function AppSidebar() {
                   )}
                 </SidebarMenu>
                 {projects.length > 6 && !query && (
-                  <Link href="/" className="mt-1 block px-2 text-[11px] text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden">
+                  <Link
+                    href="/"
+                    className="mt-1 block px-2 text-[11px] text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
+                  >
                     View all →
                   </Link>
                 )}
@@ -219,13 +254,19 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {filteredSessions.length === 0 ? (
-                    <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">No sessions.</p>
+                    <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                      No sessions.
+                    </p>
                   ) : (
                     filteredSessions.map((s) => {
                       const active = pathname === `/s/${s.id}` || pathname === `/sessions/${s.id}`;
                       return (
                         <SidebarMenuItem key={s.id}>
-                          <SidebarMenuButton isActive={active} tooltip={s.title} render={<Link href={`/s/${s.id}`} />}>
+                          <SidebarMenuButton
+                            isActive={active}
+                            tooltip={s.title}
+                            render={<Link href={`/s/${s.id}`} />}
+                          >
                             <span className="truncate">{s.title}</span>
                             {/*{s.branch && (
                               <Badge variant="outline" className="ml-auto hidden h-4 px-1 font-mono text-[10px] group-data-[collapsible=icon]:hidden xl:inline-flex">
@@ -262,11 +303,17 @@ export function AppSidebar() {
             </div>
           )}
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-[13px] font-medium leading-none">{me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…")}</p>
+            <p className="truncate text-[13px] font-medium leading-none">
+              {me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…")}
+            </p>
           </div>
           <Link href="/settings">
-            <Button variant="ghost" size="icon-sm" className="size-7 shrink-0 group-data-[collapsible=icon]:hidden">
-            <IconSettings className="size-4" />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 shrink-0 group-data-[collapsible=icon]:hidden"
+            >
+              <IconSettings className="size-4" />
             </Button>
           </Link>
         </div>

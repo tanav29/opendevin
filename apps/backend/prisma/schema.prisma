@@ -69,6 +69,9 @@ model Project {
   id        String    @id @default(cuid())
   name      String
   repo      String?
+  setupScript String @default("")
+  devCommand String @default("")
+  devPort   Int     @default(3000)
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now())
@@ -84,6 +87,9 @@ model ProjectSession {
   sandboxStatus String   @default("pending")
   workspacePath String   @default("/home/user/workspace")
   branch        String   @default("")
+  model         String   @default("")
+  plan          String   @default("[]")
+  usage         String   @default("{}")
   lastError     String?
   lastDiff      String?  @default("")
   lastDiffAt    DateTime?

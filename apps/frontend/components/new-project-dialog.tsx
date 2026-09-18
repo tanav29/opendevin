@@ -188,9 +188,7 @@ export default function NewProjectForm() {
       <DialogContent className="w-108">
         <DialogHeader>
           <DialogTitle>Create a workspace</DialogTitle>
-          <DialogDescription>
-            Pick a repo or start blank.
-          </DialogDescription>
+          <DialogDescription>Pick a repo or start blank.</DialogDescription>
         </DialogHeader>
         <form onSubmit={createProject} className="space-y-5 min-h-0">
           <label className="block">
@@ -405,7 +403,6 @@ export default function NewProjectForm() {
                 </a>
               )}
             </div>
-
           </div>
 
           {repo.trim() && !/^https?:\/\//.test(repo.trim()) && (
