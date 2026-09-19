@@ -466,6 +466,8 @@ app.get("/api/sessions/:id/status", async (req, res) => {
     model: resolveChatModel().modelId,
     plan,
     usage,
+    devCommand: found.owner.project.devCommand ?? "",
+    devPort: found.owner.project.devPort ?? 3000,
   });
 });
 
@@ -1020,7 +1022,11 @@ app.get("/api/sessions/:id/preview", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
-  const previewPort = Number(req.query.port || 3000);
+  const rawPort = req.query.port;
+  const previewPort =
+    rawPort === undefined || rawPort === ""
+      ? (found.owner.project.devPort ?? 3000)
+      : Number(rawPort);
   if (!Number.isInteger(previewPort) || previewPort < 1 || previewPort > 65535) {
     return res.status(400).json({ error: "Preview unavailable: port must be 1-65535." });
   }
@@ -1192,9 +1198,16 @@ app.post("/api/sessions/:id/devserver", async (req, res) => {
       envVars?: string;
     };
     let command = typeof req.body.command === "string" ? req.body.command.trim().slice(0, 500) : "";
-    let port =
-      typeof req.body.port === "number" && Number.isInteger(req.body.port)
-        ? req.body.port
+    const rawPort = req.body.port;
+    const parsedPort =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? Number(rawPort)
+          : NaN;
+    const port =
+      Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
+        ? parsedPort
         : (project.devPort ?? 3000);
     if (!command) command = (project.devCommand || "").trim();
     if (!command) {
@@ -1205,15 +1218,12 @@ app.post("/api/sessions/:id/devserver", async (req, res) => {
           scripts?: Record<string, string>;
         };
         const scripts = pkg.scripts || {};
-        if (scripts.dev) command = "npm run dev -- --port 3000 --hostname 0.0.0.0";
-        else if (scripts.start) command = "npm run start -- --port 3000 --hostname 0.0.0.0";
-        else command = "python3 -m http.server 3000";
+        if (scripts.dev) command = `npm run dev -- --port ${port} --hostname 0.0.0.0`;
+        else if (scripts.start) command = `npm run start -- --port ${port} --hostname 0.0.0.0`;
+        else command = `python3 -m http.server ${port}`;
       } catch {
-        command = "python3 -m http.server 3000";
+        command = `python3 -m http.server ${port}`;
       }
-    }
-    if (command.includes("3000") && port !== 3000 && !String(req.body.port)) {
-      // Keep default port substitution simple: caller overrides explicitly.
     }
     const log = "/tmp/opendevin-dev.log";
     const start = await runSandbox(
