@@ -18,15 +18,21 @@ export default function PreviewTab({
   defaultPort?: number;
 }) {
   const [port, setPort] = useState("3000");
+  const [portEdited, setPortEdited] = useState(false);
   const [path, setPath] = useState("/");
   const [url, setUrl] = useState("");
   const [resolving, setResolving] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [devInfo, setDevInfo] = useState("");
-  // Request-scoped state (url/error) resets via the parent's key on session/sandbox change.
+  const [copied, setCopied] = useState(false);
+  // Request-scoped state resets via the parent's key on session/sandbox change.
   const appliedSignal = useRef(0);
 
+  // Adopt the project's saved dev port until the user edits the field.
+  if (!portEdited && !url && defaultPort && port !== String(defaultPort)) {
+    setPort(String(defaultPort));
+  }
   // The session header's Run-dev button starts the saved dev command and hands
   // the resolved URL over via emitPreview — pick it up here.
   const signal = usePreviewSignal();
@@ -38,11 +44,6 @@ export default function PreviewTab({
       setError("");
     }
   }, [signal]);
-
-  // Default to the project's saved dev port until the user edits the field.
-  useEffect(() => {
-    if (!url && defaultPort) setPort(String(defaultPort));
-  }, [defaultPort, url]);
 
   async function startDev() {
     setStarting(true);
@@ -65,8 +66,8 @@ export default function PreviewTab({
       setPort(String(data.port ?? port));
       setDevInfo(`Started: ${data.command}`);
       setUrl(data.url);
-    } catch {
-      setError("Could not start dev server: server unreachable.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start dev server.");
     } finally {
       setStarting(false);
     }
@@ -85,11 +86,22 @@ export default function PreviewTab({
         return;
       }
       setUrl(data.url);
-    } catch {
-      setError("Preview unavailable: could not reach the server.");
+    } catch (e) {
+      // The backend only resolves URLs that actually serve, so a failure here
+      // means nothing listens on this port — drop the stale iframe, if any.
+      setUrl("");
+      setError(e instanceof Error ? e.message : "Preview unavailable.");
     } finally {
       setResolving(false);
     }
+  }
+
+  function copyUrl() {
+    if (!url) return;
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
   }
 
   if (!available) {
@@ -114,7 +126,10 @@ export default function PreviewTab({
       <div className="flex items-center gap-1.5 border-b border-border p-2">
         <Input
           value={port}
-          onChange={(e) => setPort(e.target.value)}
+          onChange={(e) => {
+            setPortEdited(true);
+            setPort(e.target.value);
+          }}
           placeholder="3000"
           inputMode="numeric"
           className="w-16"
@@ -132,6 +147,24 @@ export default function PreviewTab({
           {starting ? "…" : "Auto-start"}
         </Button>
       </div>
+      {url && (
+        <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+            {url}
+          </span>
+          <Button variant="ghost" size="xs" onClick={copyUrl}>
+            {copied ? "Copied" : "Copy"}
+          </Button>
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-primary hover:underline"
+          >
+            Open ↗
+          </a>
+        </div>
+      )}
       {devInfo && (
         <p className="truncate border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
           {devInfo}
@@ -146,18 +179,25 @@ export default function PreviewTab({
         </p>
       )}
       {url ? (
-        <iframe
-          title="Sandbox preview"
-          src={url}
-          className="min-h-0 flex-1"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
+        <>
+          <iframe
+            key={url}
+            title="Sandbox preview"
+            src={url}
+            className="min-h-0 flex-1"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+          <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+            Blank here but the site works via Open ↗? The app blocks iframe embedding — use the
+            external link.
+          </p>
+        </>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <p className="text-sm font-medium">No preview loaded</p>
           <p className="max-w-64 text-[13px] text-muted-foreground">
-            Start a dev server in the terminal or via the agent, then open the port above. The URL
-            appears only after it resolves.
+            Start a dev server in the terminal, via the agent, or with Auto-start, then open the
+            port above. The preview appears only once something actually serves that port.
           </p>
         </div>
       )}

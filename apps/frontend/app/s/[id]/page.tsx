@@ -724,6 +724,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             prefs={prefs}
             onPrefs={setPrefs}
             onReconnect={() => void reconnect()}
+            defaultPort={status?.devPort}
           />
         )}
       </div>
