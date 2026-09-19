@@ -19,6 +19,7 @@ export default function SessionPanel({
   prefs,
   onPrefs,
   onReconnect,
+  defaultPort,
 }: {
   sessionId: string;
   sandboxId: string;
@@ -28,6 +29,7 @@ export default function SessionPanel({
   prefs: PanelPrefs;
   onPrefs: (next: PanelPrefs) => void;
   onReconnect: () => void;
+  defaultPort?: number;
 }) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const prefsRef = useRef(prefs);
@@ -126,6 +128,7 @@ export default function SessionPanel({
               sessionId={sessionId}
               available={sandboxReady}
               onReconnect={onReconnect}
+              defaultPort={defaultPort}
             />
           )}
         </div>
