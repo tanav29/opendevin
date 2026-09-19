@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { usePreviewSignal } from "./preview-signal";
 
 export default function PreviewTab({
   sessionId,
   available,
   onReconnect,
+  defaultPort,
 }: {
   sessionId: string;
   available: boolean;
   onReconnect: () => void;
+  defaultPort?: number;
 }) {
   const [port, setPort] = useState("3000");
   const [path, setPath] = useState("/");
@@ -22,6 +25,24 @@ export default function PreviewTab({
   const [error, setError] = useState("");
   const [devInfo, setDevInfo] = useState("");
   // Request-scoped state (url/error) resets via the parent's key on session/sandbox change.
+  const appliedSignal = useRef(0);
+
+  // The session header's Run-dev button starts the saved dev command and hands
+  // the resolved URL over via emitPreview — pick it up here.
+  const signal = usePreviewSignal();
+  useEffect(() => {
+    if (signal && signal.at !== appliedSignal.current) {
+      appliedSignal.current = signal.at;
+      setPort(String(signal.port));
+      setUrl(signal.url);
+      setError("");
+    }
+  }, [signal]);
+
+  // Default to the project's saved dev port until the user edits the field.
+  useEffect(() => {
+    if (!url && defaultPort) setPort(String(defaultPort));
+  }, [defaultPort, url]);
 
   async function startDev() {
     setStarting(true);

@@ -31,6 +31,8 @@ export type SessionStatus = {
   model: string;
   plan: { title: string; status: string }[];
   usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+  devCommand?: string;
+  devPort?: number;
 };
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
