@@ -66,7 +66,9 @@ export default function FilesTab({
   }, [sessionId]);
 
   useEffect(() => {
-    if (active && available) void readPaths();
+    if (!active || !available) return;
+    const timer = window.setTimeout(() => void readPaths(), 0);
+    return () => window.clearTimeout(timer);
   }, [active, available, sandboxId, readPaths]);
 
   const openFile = useCallback(

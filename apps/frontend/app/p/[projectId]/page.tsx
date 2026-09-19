@@ -460,6 +460,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                         <Link
                           key={session.id}
                           href={`/s/${session.id}`}
+                          prefetch
                           className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50"
                         >
                           <StatusDot status={session.status} />

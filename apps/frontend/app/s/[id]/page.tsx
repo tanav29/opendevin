@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   IconArrowLeft,
   IconPlayerStop,
@@ -15,8 +16,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import Message from "./message";
-import SessionPanel, { usePanelPrefs } from "./session-panel";
+import { usePanelPrefs } from "./panel-prefs";
+const Message = dynamic(() => import("./message"), {
+  ssr: false,
+  loading: () => <span className="text-muted-foreground">Loading response…</span>,
+});
+const SessionPanel = dynamic(() => import("./session-panel"), {
+  ssr: false,
+  loading: () => <aside className="hidden w-[min(30vw,480px)] shrink-0 md:block" />,
+});
 import {
   API,
   PROVISIONING_SANDBOX,

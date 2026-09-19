@@ -89,8 +89,10 @@ export default function Home() {
   useEffect(() => {
     const cancelled = false;
     async function load() {
+      const projectsRequest = fetch(`${API}/api/projects`, { credentials: "include" });
+      const sessionsRequest = fetch(`${API}/api/sessions`, { credentials: "include" });
       try {
-        const pr = await fetch(`${API}/api/projects`, { credentials: "include" });
+        const pr = await projectsRequest;
         if (pr.status === 401) {
           if (!cancelled) {
             setSignedIn(false);
@@ -112,7 +114,7 @@ export default function Home() {
       }
 
       try {
-        const sr = await fetch(`${API}/api/sessions`, { credentials: "include" });
+        const sr = await sessionsRequest;
         if (sr.ok && !cancelled) setSessions((await sr.json()) as Session[]);
       } catch {}
     }

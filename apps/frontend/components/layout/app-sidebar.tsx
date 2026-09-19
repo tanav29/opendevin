@@ -217,7 +217,7 @@ export function AppSidebar() {
                           <SidebarMenuButton
                             isActive={active}
                             tooltip={p.name}
-                            render={<Link href={`/p/${p.id}`} />}
+                            render={<Link href={`/p/${p.id}`} prefetch />}
                           >
                             <IconFolder className="size-4 shrink-0 text-muted-foreground" />
                             <span className="truncate">{p.name}</span>
@@ -265,7 +265,7 @@ export function AppSidebar() {
                           <SidebarMenuButton
                             isActive={active}
                             tooltip={s.title}
-                            render={<Link href={`/s/${s.id}`} />}
+                            render={<Link href={`/s/${s.id}`} prefetch />}
                           >
                             <span className="truncate">{s.title}</span>
                             {/*{s.branch && (

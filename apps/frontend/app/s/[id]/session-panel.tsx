@@ -1,88 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
-import ChangesTab from "./changes-tab";
-import FilesTab from "./files-tab";
-import PreviewTab from "./preview-tab";
-import TerminalTab from "./terminal-tab";
+import dynamic from "next/dynamic";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { PanelPrefs, Tab } from "./panel-prefs";
 
-type Tab = "files" | "terminal" | "changes" | "preview";
-
-const PANEL_KEY = "opendevin:panel";
-
-export type PanelPrefs = { open: boolean; tab: Tab; width: number };
-
-const DEFAULT_PREFS: PanelPrefs = { open: true, tab: "terminal", width: 480 };
-
-function parsePrefs(raw: string | null): PanelPrefs {
-  if (!raw) return DEFAULT_PREFS;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PanelPrefs>;
-    const tab: Tab =
-      parsed.tab === "files" || parsed.tab === "changes" || parsed.tab === "preview"
-        ? parsed.tab
-        : "terminal";
-    const width =
-      typeof parsed.width === "number"
-        ? Math.max(320, Math.min(800, parsed.width))
-        : DEFAULT_PREFS.width;
-    return { open: parsed.open !== false, tab, width };
-  } catch {
-    return DEFAULT_PREFS;
-  }
-}
-
-const prefListeners = new Set<() => void>();
-let cachedRaw: string | null | undefined;
-let cachedPrefs: PanelPrefs = DEFAULT_PREFS;
-
-function notifyPrefs() {
-  for (const listener of prefListeners) listener();
-}
-
-export function getPanelPrefsSnapshot(): PanelPrefs {
-  if (typeof window === "undefined") return DEFAULT_PREFS;
-  // Cache by raw string so the snapshot is referentially stable between writes.
-  const raw = window.localStorage.getItem(PANEL_KEY);
-  if (raw !== cachedRaw) {
-    cachedRaw = raw;
-    cachedPrefs = parsePrefs(raw);
-  }
-  return cachedPrefs;
-}
-
-export function getPanelPrefsServerSnapshot(): PanelPrefs {
-  return DEFAULT_PREFS;
-}
-
-export function subscribePanelPrefs(listener: () => void) {
-  prefListeners.add(listener);
-  const onStorage = () => listener();
-  window.addEventListener("storage", onStorage);
-  return () => {
-    prefListeners.delete(listener);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-export function savePanelPrefs(next: PanelPrefs) {
-  try {
-    window.localStorage.setItem(PANEL_KEY, JSON.stringify(next));
-  } catch {
-    // Private mode — panel prefs simply don't persist.
-  }
-  notifyPrefs();
-}
-
-export function usePanelPrefs(): [PanelPrefs, (next: PanelPrefs) => void] {
-  const prefs = useSyncExternalStore(
-    subscribePanelPrefs,
-    getPanelPrefsSnapshot,
-    getPanelPrefsServerSnapshot,
-  );
-  return [prefs, savePanelPrefs];
-}
+const ChangesTab = dynamic(() => import("./changes-tab"), { ssr: false });
+const FilesTab = dynamic(() => import("./files-tab"), { ssr: false });
+const PreviewTab = dynamic(() => import("./preview-tab"), { ssr: false });
+const TerminalTab = dynamic(() => import("./terminal-tab"), { ssr: false });
 
 export default function SessionPanel({
   sessionId,
@@ -168,7 +94,7 @@ export default function SessionPanel({
           {workspacePath || "/home/user/workspace"}
         </p>
         <div className="min-h-0 flex-1">
-          <div className={activeTab === "files" ? "h-full" : "hidden"}>
+          {activeTab === "files" && (
             <FilesTab
               key={`files-${sessionId}-${sandboxId}`}
               sessionId={sessionId}
@@ -177,8 +103,8 @@ export default function SessionPanel({
               active={activeTab === "files"}
               onReconnect={onReconnect}
             />
-          </div>
-          <div className={activeTab === "terminal" ? "h-full" : "hidden"}>
+          )}
+          {activeTab === "terminal" && (
             <TerminalTab
               key={`term-${sessionId}-${sandboxId}`}
               sessionId={sessionId}
@@ -187,8 +113,8 @@ export default function SessionPanel({
               active={activeTab === "terminal"}
               onReconnect={onReconnect}
             />
-          </div>
-          <div className={activeTab === "changes" ? "h-full" : "hidden"}>
+          )}
+          {activeTab === "changes" && (
             <ChangesTab
               key={`diff-${sessionId}-${sandboxId}`}
               sessionId={sessionId}
@@ -198,15 +124,15 @@ export default function SessionPanel({
               defaultTitle={defaultTitle}
               onReconnect={onReconnect}
             />
-          </div>
-          <div className={activeTab === "preview" ? "h-full" : "hidden"}>
+          )}
+          {activeTab === "preview" && (
             <PreviewTab
               key={`preview-${sessionId}-${sandboxId}`}
               sessionId={sessionId}
               available={sandboxReady}
               onReconnect={onReconnect}
             />
-          </div>
+          )}
         </div>
       </div>
     </div>
