@@ -1,11 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   IconArrowLeft,
-  IconCopy,
-  IconCheck,
   IconPlayerStop,
   IconSend2,
   IconRefresh,
@@ -16,23 +13,19 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/ui/empty-state";
-import Markdown from "./markdown";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import Message from "./message";
 import SessionPanel, { usePanelPrefs } from "./session-panel";
-import SessionSidebar from "./session-sidebar";
 import {
   API,
   PROVISIONING_SANDBOX,
-  formatDate,
   isWorking,
   type ChatMessage,
-  type ModelOption,
   type SessionDetail,
   type SessionStatus,
-  type SidebarSession,
 } from "./lib";
-import { Bot, Box } from "lucide-react";
+import { Bot, Box, PaperclipIcon } from "lucide-react";
 
 function AgentBadge({
   working,
@@ -45,10 +38,21 @@ function AgentBadge({
 }) {
   const label = streaming || working ? "Working" : failed ? "Failed" : "Idle";
   return (
-    <Badge variant={"ghost"}>
-      <Bot className="w-3" />
-      {label}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex cursor-help" />}>
+        <Badge variant={failed ? "destructive" : "ghost"}>
+          <Bot className="w-3" />
+          {label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>
+        {failed
+          ? "The last agent run failed. Retry from the conversation."
+          : working || streaming
+            ? "The agent is currently processing this session."
+            : "The agent is ready for your next message."}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -63,11 +67,21 @@ function SandboxBadge({ status }: { status: SessionStatus | null }) {
         ? "Failed"
         : "Provisioning"
     : "…";
+  const description = status
+    ? `${status.workspacePath || "/home/user/workspace"} · ${
+        sandboxStatus === "ready" && status.sandboxAvailable ? "Connected" : label
+      }`
+    : "Loading sandbox status…";
   return (
-    <Badge variant={"ghost"}>
-      <Box className="w-3" />
-      {label}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex cursor-help" />}>
+        <Badge variant={sandboxStatus === "error" ? "destructive" : "ghost"}>
+          <Box className="w-3" />
+          {label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{description}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -76,48 +90,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [allSessions, setAllSessions] = useState<SidebarSession[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [copiedId, setCopiedId] = useState("");
   const [degraded, setDegraded] = useState(false);
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [model, setModel] = useState("");
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
-
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("opendevin:model");
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved) setModel(saved);
-    } catch {}
-    void fetch(`${API}/api/models`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d && Array.isArray(d.models)) {
-          setModels(d.models as ModelOption[]);
-          if (!window.localStorage.getItem("opendevin:model") && d.defaultModel)
-            setModel(d.defaultModel as string);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-
-  function pickModel(next: string) {
-    setModel(next);
-    try {
-      window.localStorage.setItem("opendevin:model", next);
-    } catch {}
-  }
 
   async function addFiles(files: FileList | File[]) {
     const list = Array.from(files).slice(0, 3);
@@ -138,26 +123,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       }
     }
   }
-
-  function copyMessage(id: string, content: string) {
-    void navigator.clipboard
-      ?.writeText(content)
-      ?.then(() => {
-        setCopiedId(id);
-        setTimeout(() => setCopiedId((c) => (c === id ? "" : c)), 1500);
-      })
-      ?.catch(() => undefined);
-  }
-
   const refresh = useCallback(async (id: string, includeMessages: boolean) => {
-    const [nextDetail, nextStatus, nextSessions, history] = await Promise.all([
+    const [nextDetail, nextStatus, history] = await Promise.all([
       fetch(`${API}/api/sessions/${id}`, { credentials: "include" }).then((r) =>
         r.ok ? r.json() : null,
       ),
       fetch(`${API}/api/sessions/${id}/status`, { credentials: "include" }).then((r) =>
         r.ok ? r.json() : null,
       ),
-      fetch(`${API}/api/sessions`, { credentials: "include" }).then((r) => (r.ok ? r.json() : [])),
       includeMessages
         ? fetch(`${API}/api/sessions/${id}/messages`, { credentials: "include" }).then((r) =>
             r.ok ? r.json() : null,
@@ -166,7 +139,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     ]);
     if (nextDetail) setDetail(nextDetail);
     if (nextStatus) setStatus(nextStatus);
-    setAllSessions(nextSessions);
     if (history) setMessages(history);
     return nextDetail as SessionDetail | null;
   }, []);
@@ -252,7 +224,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: full, ...(model ? { model } : {}) }),
+        body: JSON.stringify({ message: full }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -379,23 +351,37 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   return (
     <main className="flex h-screen flex-col bg-background">
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-3 py-2.5 sm:px-4">
+      <header className="z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-card/90 px-3 py-2.5 backdrop-blur sm:px-5">
         <div className="flex min-w-0 items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
-          >
-            <IconArrowLeft />
-          </Button>
-          <div className="min-w-0 flex gap-2 items-center">
-            <h1 className="truncate text-sm font-medium leading-none">
-              {detail?.title || "Loading session…"}{" "}
-            </h1>
-            {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
-          </div>
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Back to project"
+                onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
+              >
+                <IconArrowLeft />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Back to project</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<div className="min-w-0 cursor-default" />}>
+              <div className="flex min-w-0 items-center gap-2">
+                  <h1 className="max-w-[min(42vw,24rem)] truncate text-sm">
+                    {detail?.title || "Loading session…"}
+                  </h1>
+                {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              {detail?.workspacePath || "Session workspace"}
+              {detail?.branch ? ` · branch ${detail.branch}` : ""}
+            </TooltipContent>
+          </Tooltip>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
           <AgentBadge
             working={agentStatus === "running"}
             failed={agentStatus === "failed"}
@@ -403,43 +389,71 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           />
           <SandboxBadge status={status} />
           {(failed || (sandboxStatus === "ready" && !status?.sandboxAvailable)) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void reconnect()}
-              disabled={reconnecting}
-            >
-              {reconnecting ? "…" : "Reconnect"}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" />}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void reconnect()}
+                  disabled={reconnecting}
+                >
+                  {reconnecting ? "…" : "Reconnect"}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Reconnect the workspace sandbox</TooltipContent>
+            </Tooltip>
           )}
-          {/*{(status?.sandboxId || detail?.sandboxId) && !failed && (
-            <Button variant="secondary" size="sm" onClick={() => void kill()} disabled={killing} className="hidden sm:inline-flex">
-              {killing ? "…" : "Kill"}
-            </Button>
-          )}*/}
-          <Button
-            variant="secondary"
-            size="icon-sm"
-            onClick={() => void removeSession()}
-            disabled={deleting}
-          >
-            <IconTrash />
-          </Button>
-          <Button
-            variant="secondary"
-            size="icon-sm"
-            onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
-          >
-            <IconLayoutSidebarRight />
-          </Button>
+          {(status?.sandboxId || detail?.sandboxId) && !failed && (
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" />}>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  aria-label="Stop sandbox"
+                  onClick={() => void kill()}
+                  disabled={killing}
+                  className="gap-1.5"
+                >
+                  <IconPlayerStop className="size-3.5" />
+                  <span className="hidden sm:inline">{killing ? "Stopping…" : "Stop sandbox"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Stop the sandbox, terminal, and preview</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                aria-label="Delete session"
+                onClick={() => void removeSession()}
+                disabled={deleting}
+              >
+                <IconTrash />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete this session and its history</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant={prefs.open ? "outline" : "secondary"}
+                size="icon-sm"
+                aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+                onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
+              >
+                <IconLayoutSidebarRight />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{prefs.open ? "Hide workspace panel" : "Show workspace panel"}</TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/*<SessionSidebar sessions={allSessions} activeId={sessionId} projectId={detail?.projectId || ""} />*/}
-
         <section className="flex min-w-0 flex-1 flex-col bg-background">
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
+          <div className="chat-scroll mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-4 py-7 sm:px-8">
             {provisioning && (
               <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-[13px] text-muted-foreground">
                 <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
@@ -478,7 +492,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </div>
             )}
 
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 space-y-6">
               {messages.length === 0 && (
                 <EmptyState
                   icon={<IconTerminal className="size-4" />}
@@ -487,29 +501,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 />
               )}
               {messages.map((message) => (
-                <article key={message.id} className="group">
-                  {message.role === "assistant" && message.content && (
-                    <div className="mb-0.5 flex items-center justify-end">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => copyMessage(message.id, message.content)}
-                        className="h-6 gap-1 px-1.5 text-[11px] opacity-0 group-hover:opacity-100"
-                      >
-                        {copiedId === message.id ? (
-                          <IconCheck className="size-3" />
-                        ) : (
-                          <IconCopy className="size-3" />
-                        )}
-                        {copiedId === message.id ? "Copied" : "Copy"}
-                      </Button>
-                    </div>
-                  )}
+                <article
+                  key={message.id}
+                  className={message.role === "user" ? "group flex justify-end" : "group"}
+                >
                   {message.role === "user" ? (
-                    <p className="whitespace-pre-wrap text-[13.5px] leading-6">{message.content}</p>
+                    <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-[13.5px] leading-6 text-primary-foreground shadow-sm sm:max-w-[75%]">
+                      {message.content}
+                    </p>
                   ) : message.content ? (
-                    <div className="rounded-none border-0 bg-transparent p-0 text-[13.5px] leading-7">
-                      <Markdown
+                    <div className="max-w-[94%] rounded-2xl rounded-tl-md border border-border/70 bg-card px-4 py-3 text-[13.5px] leading-7 shadow-sm sm:max-w-[88%]">
+                      <Message
                         content={message.content}
                         onAnswer={(text) => void sendMessage(text)}
                       />
@@ -528,7 +530,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
             <form
               onSubmit={(e) => void send(e)}
-              className="sticky bottom-0 bg-card rounded-xl"
+              className="sticky bottom-0 mt-6 rounded-2xl border border-border bg-card shadow-lg shadow-black/[0.06] transition-shadow focus-within:border-ring focus-within:shadow-xl"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -557,7 +559,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     ))}
                   </div>
                 )}
-                <Textarea
+                <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onPaste={(e) => {
@@ -572,10 +574,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   }}
                   rows={1}
                   ref={textareaRef}
-                  placeholder="Tell the agent what to do… (Enter to send, Shift+Enter for a new line)"
-                  className="min-h-16 rounded-xl bg-transparent resize-none border-0 px-3 py-2 text-sm focus-visible:ring-0"
+                  placeholder="Tell the agent what to do…"
+                  className="min-h-14 w-full resize-none rounded-2xl border-0 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
                 />
-                <div className="flex items-center justify-between gap-2 px-2 p-2">
+                <div className="flex items-center justify-between gap-2 px-2 pb-2">
                   <div className="flex items-center gap-1.5">
                     <input
                       ref={fileRef}
@@ -590,28 +592,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
+                      size="icon-sm"
                       onClick={() => fileRef.current?.click()}
                       disabled={sending}
                       className="px-2 text-[12px]"
                     >
-                      Attach
+                      <PaperclipIcon />
                     </Button>
-                    {models.length > 0 && (
-                      <select
-                        value={model}
-                        onChange={(e) => pickModel(e.target.value)}
-                        disabled={sending}
-                        className="h-7 max-w-44 rounded-md border border-border bg-background px-1.5 font-mono text-[11px] outline-none"
-                        title="Model"
-                      >
-                        {models.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                    )}
                     <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
                       {status?.plan && status.plan.length > 0
                         ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
@@ -635,10 +622,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     <Button
                       type="submit"
                       size="sm"
+                      variant="default"
                       disabled={!input.trim() && attachments.length === 0}
-                      className="gap-1.5"
+                      className="gap-1.5 rounded-xl px-3"
                     >
-                      <IconSend2 className="size-4" /> Send
+                      <span className="hidden sm:inline">Send</span>
                     </Button>
                   )}
                 </div>

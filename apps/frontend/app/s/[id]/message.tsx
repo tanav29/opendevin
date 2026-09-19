@@ -1,64 +1,40 @@
 "use client";
 
 import { memo } from "react";
-import { Streamdown } from "streamdown";
+import Markdown from 'react-markdown';
 
 function ToolCallCard({
   name,
-  input,
-  output,
-  error,
-  running,
+  argument,
+  status,
   id,
 }: {
   name: string;
-  input: string;
-  output: string;
-  error: string;
-  running: boolean;
+  argument: string;
+  status: "working" | "done" | "failed";
   id: string;
 }) {
+  const statusStyles = {
+    working: "text-warning",
+    done: "text-success",
+    failed: "text-destructive",
+  } as const;
+  const statusIcon = status === "working" ? "◌" : status === "done" ? "✓" : "×";
   return (
-    <details
+    <div
       key={id}
-      open={running || Boolean(error)}
-      className="rounded-md border border-border bg-card px-2 py-1.5 text-[12px]"
+      className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 bg-muted/35 px-2.5 py-1.5 font-mono text-[11px]"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${running ? "animate-pulse bg-warning" : error ? "bg-destructive" : "bg-success"}`}
-        />
-        <span className="truncate">
-          {name}
-          {running ? " — running…" : error ? " — failed" : ""}
-        </span>
-      </summary>
-      {input && (
-        <div className="mt-1.5">
-          <p className="mb-0.5 font-mono text-[10px] uppercase text-muted-foreground">Input</p>
-          <pre className="max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">
-            {input}
-          </pre>
-        </div>
-      )}
-      {error ? (
-        <div className="mt-1.5">
-          <p className="mb-0.5 font-mono text-[10px] uppercase text-destructive">Error</p>
-          <pre className="max-h-40 overflow-auto rounded bg-destructive/10 p-2 font-mono text-[11px] whitespace-pre-wrap text-destructive">
-            {error}
-          </pre>
-        </div>
-      ) : (
-        output && (
-          <div className="mt-1.5">
-            <p className="mb-0.5 font-mono text-[10px] uppercase text-muted-foreground">Output</p>
-            <pre className="max-h-60 overflow-auto rounded bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">
-              {output}
-            </pre>
-          </div>
-        )
-      )}
-    </details>
+      <span
+        className={`flex size-4 shrink-0 items-center justify-center rounded-full bg-background font-sans text-[10px] ${statusStyles[status]}`}
+        aria-label={status}
+      >
+        {statusIcon}
+      </span>
+      <span className="shrink-0 capitalize text-muted-foreground">{status}</span>
+      <span className="shrink-0 font-medium text-foreground">{name}</span>
+      {argument && <span className="truncate text-muted-foreground">{argument}</span>}
+    </div>
   );
 }
 
@@ -74,8 +50,8 @@ function QuestionCard({
   id: string;
 }) {
   return (
-    <div key={id} className="rounded-md border border-warning/40 bg-warning-muted/40 p-3">
-      <p className="text-[13px] font-medium">{question}</p>
+    <div key={id} className="rounded-xl border border-warning/40 bg-warning-muted/40 p-3.5">
+      <p className="text-[13px] font-medium leading-5">{question}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {options.map((opt) => (
           <button
@@ -100,8 +76,8 @@ function QuestionCard({
 
 function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; id: string }) {
   return (
-    <div key={id} className="rounded-md border border-border bg-card p-3">
-      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+    <div key={id} className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         Plan · {tasks.filter((t) => t.status === "done").length}/{tasks.length}
       </p>
       <ul className="mt-2 space-y-1.5">
@@ -126,13 +102,6 @@ function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; i
       </ul>
     </div>
   );
-}
-
-function extractFenced(inner: string, label: string): string {
-  // Matches "label:\n\n```[lang]\n…\n```" as emitted by the chat endpoint.
-  const re = new RegExp(`${label}:\\s*\\\`\\\`\\\`(?:json|\\w*)?\\n([\\s\\S]*?)\\n\\\`\\\`\\\``);
-  const m = inner.match(re);
-  return m ? m[1].trim() : "";
 }
 
 function parseQuestion(line: string): { question: string; options: string[] } | null {
@@ -173,7 +142,7 @@ function parsePlan(line: string): { title: string; status: string }[] | null {
 
 type Block =
   | { kind: "md"; text: string }
-  | { kind: "tool"; name: string; input: string; output: string; error: string; running: boolean }
+  | { kind: "tool"; name: string; argument: string; failed: boolean; running: boolean }
   | { kind: "question"; question: string; options: string[] }
   | { kind: "plan"; tasks: { title: string; status: string }[] }
   | { kind: "error"; name: string; body: string };
@@ -204,9 +173,15 @@ function splitBlocks(content: string): Block[] {
       blocks.push({ kind: "error", name, body: inner.join("\n").trim() });
       continue;
     }
-    if (line.includes('<details data-tool="call">')) {
+    if (line.includes('<details data-tool="call"')) {
       flushMd();
       const name = line.replace(/.*<summary>(.*)<\/summary>.*/, "$1") || "🛠 tool";
+      const argMatch = line.match(/data-arg="([^"]*)"/);
+      const argument = (argMatch?.[1] || "")
+        .replace(/&quot;/g, '"')
+        .replace(/&gt;/g, ">")
+        .replace(/&lt;/g, "<")
+        .replace(/&amp;/g, "&");
       const inner: string[] = [];
       i += 1;
       let closed = false;
@@ -223,9 +198,8 @@ function splitBlocks(content: string): Block[] {
       blocks.push({
         kind: "tool",
         name,
-        input: extractFenced(joined, "input"),
-        output: extractFenced(joined, "output"),
-        error: extractFenced(joined, "error"),
+        argument,
+        failed: joined.includes('data-tool-status="failed"'),
         running: !closed,
       });
       continue;
@@ -263,16 +237,16 @@ function splitBlocks(content: string): Block[] {
   return blocks;
 }
 
-function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: string) => void }) {
+function Message({ content, onAnswer }: { content: string; onAnswer?: (text: string) => void }) {
   const blocks = splitBlocks(content);
   return (
     <div className="space-y-2">
       {blocks.map((b, k) => {
         if (b.kind === "md") {
           return (
-            <Streamdown key={`b-${k}`} className="text-[13.5px] leading-7">
-              {b.text}
-            </Streamdown>
+            <div key={`b-${k}`} className="typeset typeset-docs text-sm">
+              <Markdown>{b.text}</Markdown>
+            </div>
           );
         }
         if (b.kind === "tool") {
@@ -281,10 +255,8 @@ function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: st
               key={`b-${k}`}
               id={`b-${k}`}
               name={b.name}
-              input={b.input}
-              output={b.output}
-              error={b.error}
-              running={b.running}
+              argument={b.argument}
+              status={b.running ? "working" : b.failed ? "failed" : "done"}
             />
           );
         }
@@ -305,7 +277,7 @@ function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: st
         return (
           <div
             key={`b-${k}`}
-            className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[13px]"
+            className="rounded-xl border border-destructive/30 bg-destructive/10 p-3.5 text-[13px]"
           >
             <p className="font-medium text-destructive">{b.name}</p>
             {b.body && <p className="mt-1 whitespace-pre-wrap text-destructive/90">{b.body}</p>}
@@ -316,4 +288,4 @@ function Markdown({ content, onAnswer }: { content: string; onAnswer?: (text: st
   );
 }
 
-export default memo(Markdown);
+export default memo(Message);

@@ -10,27 +10,11 @@ export const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 // OpenRouter. OPENROUTER_API_KEY is the key, MODEL is the model id.
 // OpenRouter requires a `provider/model` id, so bare ids like `gpt-4o-mini`
 // are prefixed with `openai/`.
-export const AVAILABLE_MODELS = [
-  { id: "openai/gpt-4o-mini", label: "gpt-4o-mini (fast)" },
-  { id: "openai/gpt-4o", label: "gpt-4o (capable)" },
-  { id: "anthropic/claude-sonnet-4", label: "claude-sonnet-4" },
-  { id: "google/gemini-2.5-flash", label: "gemini-2.5-flash" },
-  { id: "openai/gpt-5-mini", label: "gpt-5-mini" },
-];
-
-export function normalizeModelId(raw: unknown): string | null {
-  if (typeof raw !== "string" || !raw.trim()) return null;
-  const id = raw.trim().slice(0, 200);
-  if (!/^[\w.\-/:]+$/.test(id)) return null;
-  return id.includes("/") ? id : `openai/${id}`;
-}
-
-export function resolveChatModel(override?: unknown): {
+export function resolveChatModel(): {
   modelId: string;
   apiKey: string | undefined;
 } {
-  const fromOverride = normalizeModelId(override);
-  const raw = fromOverride || process.env.MODEL?.trim() || "openai/gpt-4o-mini";
+  const raw = process.env.MODEL?.trim() || "openai/gpt-4o-mini";
   const modelId = raw.includes("/") ? raw : `openai/${raw}`;
   return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }
@@ -53,6 +37,21 @@ export function sanitizeBranch(branch: unknown): string {
   if (!/^[\w.\-\/]+$/.test(name)) return "";
   if (name.includes("..") || name.startsWith("/") || name.startsWith("-")) return "";
   return name;
+}
+
+export function projectEnvVars(value: unknown): Record<string, string> {
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter(([key, entry]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof entry === "string")
+        .slice(0, 50),
+    ) as Record<string, string>;
+  } catch {
+    return {};
+  }
 }
 
 // Workspace-relative path guard for tools and file routes. Rejects absolute
@@ -213,6 +212,7 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
     // Project setup script (env install, e.g. `pnpm install`). Runs once after
     // clone so preview/dev and agent tools work without manual terminal steps.
     const setup = (existing.project as { setupScript?: string }).setupScript?.trim();
+    const envs = projectEnvVars((existing.project as { envVars?: string }).envVars);
     if (setup) {
       try {
         const out = await runSandbox(
@@ -220,6 +220,7 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
           setup.slice(0, 2000),
           existing.workspacePath || WORKSPACE_PATH,
           300_000,
+          envs,
         );
         if (out.exitCode !== 0) {
           await prisma.projectSession.update({
@@ -480,9 +481,10 @@ export async function runSandbox(
   command: string,
   cwd: string,
   timeoutMs = 30_000,
+  envs?: Record<string, string>,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   try {
-    const result = await sandbox.commands.run(command, { cwd, timeoutMs });
+    const result = await sandbox.commands.run(command, { cwd, timeoutMs, envs });
     return {
       exitCode: result.exitCode,
       stdout: result.stdout ?? "",

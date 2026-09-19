@@ -2,10 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@wterm/dom/css";
-@import "streamdown/styles.css";
 @import "./typeset.css";
-
-@source "../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -209,5 +206,33 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+.typeset-docs {
+  --typeset-font-body: var(--font-geist);
+  --typeset-font-heading: var(--font-geist);
+  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-size: 15px;
+  --typeset-leading: 1.75;
+  --typeset-flow: 1.25em;
+}
+
+@layer components {
+  .chat-scroll {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 28%, transparent) transparent;
+  }
+
+  .chat-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .chat-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 28%, transparent);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
   }
 }

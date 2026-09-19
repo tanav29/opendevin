@@ -72,6 +72,7 @@ model Project {
   setupScript String @default("")
   devCommand String @default("")
   devPort   Int     @default(3000)
+  envVars    String  @default("{}")
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now())

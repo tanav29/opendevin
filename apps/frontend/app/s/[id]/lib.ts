@@ -33,8 +33,6 @@ export type SessionStatus = {
   usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 };
 
-export type ModelOption = { id: string; label: string };
-
 export type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
 
 export type SidebarSession = {

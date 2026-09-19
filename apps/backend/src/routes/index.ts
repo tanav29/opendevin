@@ -15,14 +15,13 @@ import { attachPty, detachPty, dropPty, replayPty, resizePty, writePty } from ".
 import { loadToolLog, saveToolLog, trimToolLog } from "../agent.js";
 import {
   AGENT_STOP,
-  AVAILABLE_MODELS,
   WORKSPACE_PATH,
   checkSandboxAvailable,
   connectSandboxTools,
   githubTokenForUser,
   isRepoUrl,
-  normalizeModelId,
   provisionSandbox,
+  projectEnvVars,
   readWorkspaceDiff,
   resolveChatModel,
   runSandbox,
@@ -81,11 +80,6 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json({ limit: "1mb" }));
 
 registerSystemRoutes(app);
-
-app.get("/api/models", async (_req, res) => {
-  const { modelId } = resolveChatModel();
-  return res.json({ models: AVAILABLE_MODELS, defaultModel: modelId });
-});
 
 app.get("/api/github/repos", async (req, res) => {
   const session = await currentUser(req);
@@ -227,11 +221,12 @@ app.put("/api/projects/:id", async (req, res) => {
     where: { id: req.params.id, userId: session.user.id },
   });
   if (!project) return res.status(404).json({ error: "Project not found" });
-  const { name, setupScript, devCommand, devPort } = req.body as {
+  const { name, setupScript, devCommand, devPort, envVars } = req.body as {
     name?: string;
     setupScript?: string;
     devCommand?: string;
     devPort?: number;
+    envVars?: Record<string, string>;
   };
   const data: Record<string, unknown> = {};
   if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 200);
@@ -239,6 +234,15 @@ app.put("/api/projects/:id", async (req, res) => {
   if (typeof devCommand === "string") data.devCommand = devCommand.slice(0, 500);
   if (typeof devPort === "number" && Number.isInteger(devPort) && devPort >= 1 && devPort <= 65535)
     data.devPort = devPort;
+  if (envVars && typeof envVars === "object" && !Array.isArray(envVars)) {
+    const cleanEnvVars = Object.fromEntries(
+      Object.entries(envVars)
+        .map(([key, value]) => [key.trim().slice(0, 100), String(value).slice(0, 2000)] as const)
+        .filter(([key]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+        .slice(0, 50),
+    );
+    data.envVars = JSON.stringify(cleanEnvVars);
+  }
   if (Object.keys(data).length === 0) return res.status(400).json({ error: "Nothing to update" });
   return res.json(await prisma.project.update({ where: { id: project.id }, data }));
 });
@@ -421,7 +425,7 @@ app.get("/api/sessions/:id/status", async (req, res) => {
     repo: found.owner.project.repo,
     branch: found.owner.branch,
     createdAt: found.owner.createdAt,
-    model: found.owner.model || "",
+    model: resolveChatModel().modelId,
     plan,
     usage,
   });
@@ -478,36 +482,8 @@ app.post("/api/sessions/:id/kill", async (req, res) => {
   return res.json({ ok: true });
 });
 
-// Stream-marker helpers: the chat endpoint streams plain-text markdown with
-// embedded HTML markers for tool/question/error parts. Payloads are truncated
-// so one huge file read can't blow up the live stream or the Message row.
-function truncateMarkerText(value: unknown, max: number): string {
-  let text: string;
-  if (typeof value === "string") {
-    text = value;
-  } else if (value === undefined || value === null) {
-    text = "";
-  } else {
-    try {
-      text = JSON.stringify(value, null, 2) ?? "";
-    } catch {
-      text = String(value);
-    }
-  }
-  if (text.length > max) text = `${text.slice(0, max)}\n…[truncated]`;
-  return text.replace(/<\/details>/g, "<\\/details>");
-}
-
-function truncateMarkerJson(value: unknown, max = 2000): string {
-  let text: string;
-  try {
-    text = JSON.stringify(value ?? {}, null, 2) ?? "{}";
-  } catch {
-    text = "{}";
-  }
-  if (text.length > max) text = `${text.slice(0, max)}\n…[truncated]`;
-  return text.replace(/<\/details>/g, "<\\/details>");
-}
+// Stream-marker helpers: the chat endpoint streams compact HTML markers for
+// tool/question/error parts. Tool payloads and results stay server-side.
 
 function questionPayload(input: unknown): string {
   let question = "Question";
@@ -543,21 +519,49 @@ function planPayload(input: unknown): string {
   return JSON.stringify(tasks).replace(/'/g, "&#39;");
 }
 
+function escapeMarkerAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function toolArgument(name: string, input: unknown): string {
+  const record = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const preferredKey: Record<string, string> = {
+    list_files: "path",
+    read_file: "path",
+    run_command: "command",
+    write_file: "path",
+    edit_file: "path",
+    delete_file: "path",
+    search: "pattern",
+    ask_user: "question",
+  };
+  const preferred = record[preferredKey[name]];
+  const fallback = Object.values(record).find((value) => typeof value === "string");
+  const value = typeof preferred === "string" ? preferred : typeof fallback === "string" ? fallback : "";
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
+}
+
 function toolCallMarker(name: string, input: unknown): string {
   if (name === "ask_user") return `\n\n<div data-question='${questionPayload(input)}'>\n\n`;
   if (name === "update_plan") return `\n\n<div data-plan='${planPayload(input)}'>\n\n`;
-  return `\n\n<details data-tool="call"><summary>🛠 ${name}</summary>\n\ninput:\n\n\`\`\`json\n${truncateMarkerJson(input)}\n\`\`\`\n\n`;
+  const argument = escapeMarkerAttribute(toolArgument(name, input));
+  return `\n\n<details data-tool="call" data-arg="${argument}"><summary>${name}</summary>\n\n`;
 }
 
 function toolDoneMarker(name: string, partType: string, output: unknown, error: unknown): string {
   if (name === "ask_user" || name === "update_plan") return `\n</div>\n\n`;
   if (partType === "tool-error")
-    return `\nerror:\n\n\`\`\`\n${truncateMarkerText(error, 2000)}\n\`\`\`\n\n</details>\n\n`;
+    return `\n<div data-tool-status="failed"></div>\n\n</details>\n\n`;
   if (typeof output === "string" && output.startsWith("__PLAN__")) {
     const raw = output.slice("__PLAN__".length).replace(/'/g, "&#39;");
     return `\n<div data-plan='${raw}'>\n\n</div>\n\n`;
   }
-  return `\noutput:\n\n\`\`\`\n${truncateMarkerText(output, 4000)}\n\`\`\`\n\n</details>\n\n`;
+  return `\n</details>\n\n`;
 }
 
 // Drain one agent turn: stream text deltas as-is, surface tool activity as
@@ -633,10 +637,7 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   const prompt = typeof req.body.message === "string" ? req.body.message.trim() : "";
   if (!prompt) return res.status(400).json({ error: "A message is required" });
   const content = prompt.slice(0, 20_000);
-  const requestedModel = normalizeModelId(req.body.model);
-  if (req.body.model && !requestedModel) return res.status(400).json({ error: "Invalid model id" });
-  const effectiveModel = requestedModel || owner.model || undefined;
-  const { modelId, apiKey } = resolveChatModel(effectiveModel);
+  const { modelId, apiKey } = resolveChatModel();
   if (!apiKey) return res.status(503).json({ error: "OPENROUTER_API_KEY is not configured" });
   if (activeTurns.has(owner.id))
     return res.status(409).json({ error: "Agent is already running. Stop it first." });
@@ -646,13 +647,24 @@ app.post("/api/sessions/:id/chat", async (req, res) => {
   await prisma.message.create({ data: { sessionId: owner.id, role: "user", content } });
   await prisma.projectSession.update({
     where: { id: owner.id },
-    data: { status: "running", ...(requestedModel ? { model: modelId } : {}) },
+    data: { status: "running", model: modelId },
   });
 
   const { tools, sandboxNote } = await connectSandboxTools(
     owner.sandboxId,
     owner.workspacePath || WORKSPACE_PATH,
   );
+  // A session with a sandbox id must never silently fall back to a text-only
+  // model response: that makes tool calls look like ordinary assistant text.
+  // Ask the user to reconnect so a fresh sandbox can be provisioned instead.
+  if (!tools && owner.sandboxId) {
+    const error = "Workspace sandbox is unavailable. Reconnect the sandbox, then retry.";
+    await prisma.projectSession.update({
+      where: { id: owner.id },
+      data: { status: "failed", sandboxStatus: "error", lastError: error },
+    });
+    return res.status(503).json({ error });
+  }
 
   // Model history comes from toolLog (user/assistant/tool messages, including
   // prior tool calls so the agent keeps working state across turns). The
@@ -825,7 +837,7 @@ async function runInitialTurn(sessionId: string): Promise<void> {
     });
     if (!session || session.sandboxStatus !== "ready") return;
     if (session.messages.some((m) => m.role === "assistant")) return;
-    const { modelId, apiKey } = resolveChatModel(session.model || undefined);
+    const { modelId, apiKey } = resolveChatModel();
     if (!apiKey) {
       await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
       return;
@@ -837,6 +849,17 @@ async function runInitialTurn(sessionId: string): Promise<void> {
       session.sandboxId,
       session.workspacePath || WORKSPACE_PATH,
     );
+    if (!tools && session.sandboxId) {
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: {
+          status: "failed",
+          sandboxStatus: "error",
+          lastError: "Workspace sandbox is unavailable. Reconnect the sandbox, then retry.",
+        },
+      });
+      return;
+    }
     await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "running" } });
     const controller = new AbortController();
     activeTurns.set(sessionId, controller);
@@ -1128,6 +1151,7 @@ app.post("/api/sessions/:id/devserver", async (req, res) => {
     const project = found.owner.project as unknown as {
       devCommand?: string;
       devPort?: number;
+      envVars?: string;
     };
     let command = typeof req.body.command === "string" ? req.body.command.trim().slice(0, 500) : "";
     let port =
@@ -1159,6 +1183,7 @@ app.post("/api/sessions/:id/devserver", async (req, res) => {
       `nohup sh -c ${shellQuote(`${command} > ${log} 2>&1`)} > /dev/null 2>&1 & echo $!; sleep 2; cat ${log} | tail -n 20`,
       cwd,
       30_000,
+      projectEnvVars(project.envVars),
     );
     const url = `https://${sandbox.getHost(port)}/`;
     return res.json({ ok: true, command, port, url, log: start.stdout.slice(0, 2000) });
