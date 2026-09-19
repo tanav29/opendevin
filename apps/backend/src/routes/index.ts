@@ -20,6 +20,7 @@ import {
   connectSandboxTools,
   githubTokenForUser,
   isRepoUrl,
+  probePort,
   provisionSandbox,
   projectEnvVars,
   readWorkspaceDiff,
@@ -29,6 +30,7 @@ import {
   sanitizeRel,
   shellQuote,
   snapshotDiffAndIdle,
+  waitForPort,
 } from "../sandbox.js";
 import { registerSystemRoutes } from "./system.js";
 
@@ -581,7 +583,8 @@ function toolArgument(name: string, input: unknown): string {
   };
   const preferred = record[preferredKey[name]];
   const fallback = Object.values(record).find((value) => typeof value === "string");
-  const value = typeof preferred === "string" ? preferred : typeof fallback === "string" ? fallback : "";
+  const value =
+    typeof preferred === "string" ? preferred : typeof fallback === "string" ? fallback : "";
   const compact = value.replace(/\s+/g, " ").trim();
   return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
 }
@@ -595,8 +598,7 @@ function toolCallMarker(name: string, input: unknown): string {
 
 function toolDoneMarker(name: string, partType: string, output: unknown, error: unknown): string {
   if (name === "ask_user" || name === "update_plan") return `\n</div>\n\n`;
-  if (partType === "tool-error")
-    return `\n<div data-tool-status="failed"></div>\n\n</details>\n\n`;
+  if (partType === "tool-error") return `\n<div data-tool-status="failed"></div>\n\n</details>\n\n`;
   if (typeof output === "string" && output.startsWith("__PLAN__")) {
     const raw = output.slice("__PLAN__".length).replace(/'/g, "&#39;");
     return `\n<div data-plan='${raw}'>\n\n</div>\n\n`;
@@ -1041,8 +1043,22 @@ app.get("/api/sessions/:id/preview", async (req, res) => {
   }
   try {
     const sandbox = await Sandbox.connect(found.owner.sandboxId);
-    const url = `https://${sandbox.getHost(previewPort)}${path}`;
-    return res.json({ url, host: sandbox.getHost(previewPort), port: previewPort, path });
+    const host = sandbox.getHost(previewPort);
+    const url = `https://${host}${path}`;
+    // Never hand out a dead URL: the e2b.app host exists for every port, but
+    // the site only loads when a server inside the sandbox serves this one.
+    const { listening } = await probePort(sandbox, previewPort);
+    if (!listening) {
+      return res.status(409).json({
+        error: `Preview unavailable: nothing is listening on port ${previewPort} in the sandbox. Start the dev server (Auto-start), then retry.`,
+        url,
+        host,
+        port: previewPort,
+        path,
+        listening: false,
+      });
+    }
+    return res.json({ url, host, port: previewPort, path, listening: true });
   } catch {
     return res.status(503).json({
       error: "Preview unavailable: sandbox is unreachable. Reconnect the sandbox and retry.",
@@ -1220,21 +1236,54 @@ app.post("/api/sessions/:id/devserver", async (req, res) => {
         const scripts = pkg.scripts || {};
         if (scripts.dev) command = `npm run dev -- --port ${port} --hostname 0.0.0.0`;
         else if (scripts.start) command = `npm run start -- --port ${port} --hostname 0.0.0.0`;
-        else command = `python3 -m http.server ${port}`;
+        else command = `python3 -m http.server ${port} --bind 0.0.0.0`;
       } catch {
-        command = `python3 -m http.server ${port}`;
+        command = `python3 -m http.server ${port} --bind 0.0.0.0`;
       }
+    } else if (/^python3 -m http\.server\b/.test(command) && !command.includes("--bind")) {
+      command = command.replace(
+        /^python3 -m http\.server\b/,
+        "python3 -m http.server --bind 0.0.0.0",
+      );
     }
     const log = "/tmp/opendevin-dev.log";
+    const envs = {
+      PORT: String(port),
+      HOST: "0.0.0.0",
+      HOSTNAME: "0.0.0.0",
+      ...projectEnvVars(project.envVars),
+    };
+    // Best-effort: free the port so a stale server doesn't shadow the new one.
+    await runSandbox(sandbox, `fuser -k ${port}/tcp 2>/dev/null || true`, cwd, 10_000).catch(
+      () => undefined,
+    );
     const start = await runSandbox(
       sandbox,
-      `nohup sh -c ${shellQuote(`${command} > ${log} 2>&1`)} > /dev/null 2>&1 & echo $!; sleep 2; cat ${log} | tail -n 20`,
+      `nohup sh -c ${shellQuote(`${command} > ${log} 2>&1`)} > /dev/null 2>&1 & echo $!`,
       cwd,
       30_000,
-      projectEnvVars(project.envVars),
+      envs,
     );
+    // Don't return a URL that doesn't serve yet: wait until the port answers.
+    const ready = await waitForPort(sandbox, port);
+    const tail = await runSandbox(sandbox, `tail -n 30 ${log}`, cwd, 10_000).catch(() => ({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    }));
     const url = `https://${sandbox.getHost(port)}/`;
-    return res.json({ ok: true, command, port, url, log: start.stdout.slice(0, 2000) });
+    const logTail = `pid ${start.stdout.trim()}\n${tail.stdout}`.slice(0, 2000);
+    if (!ready.listening) {
+      return res.status(502).json({
+        error: `Dev server did not open port ${port}. Fix the command and retry (log: cat ${log} in the terminal).`,
+        command,
+        port,
+        url,
+        listening: false,
+        log: logTail,
+      });
+    }
+    return res.json({ ok: true, command, port, url, listening: true, log: logTail });
   } catch (error) {
     console.error("Dev server start failed", error);
     return res.status(503).json({ error: "Could not start dev server: sandbox unreachable." });
