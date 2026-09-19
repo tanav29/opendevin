@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  IconPlus,
   IconGitBranch,
   IconTrash,
   IconFolder,
@@ -25,6 +24,7 @@ import { ConfirmProvider, useConfirm } from "@/components/ui/confirm";
 import { timeAgo, repoName } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import TaskForm from "@/components/task-form";
 import {
   Dialog,
   DialogContent,
@@ -32,8 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { GitBranch, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 type Project = {
   id: string;
@@ -74,12 +73,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   const [sessions, setSessions] = useState<ProjectSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [prompt, setPrompt] = useState("");
-  const [branches, setBranches] = useState<string[]>([]);
-  const [branch, setBranch] = useState("");
-  const [branchSearch, setBranchSearch] = useState("");
   const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [setupScript, setSetupScript] = useState("");
   const [devCommand, setDevCommand] = useState("");
@@ -113,13 +107,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     refetchInterval: hasProvisioning ? 3000 : false,
     retry: false,
   });
-  const branchesQuery = useQuery({
-    queryKey: ["project-branches", projectId],
-    queryFn: () =>
-      api<{ branches: string[]; defaultBranch: string }>(`/api/projects/${projectId}/branches`),
-    enabled: Boolean(projectId),
-    retry: false,
-  });
 
   useEffect(() => {
     if (projectQuery.isError) setNotFound(true);
@@ -138,41 +125,11 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       }
     }
     if (sessionsQuery.data) setSessions(sessionsQuery.data);
-    if (branchesQuery.data) {
-      setBranches(branchesQuery.data.branches);
-      setBranch(branchesQuery.data.defaultBranch || "");
-    }
-    if (!projectQuery.isPending && !sessionsQuery.isPending && !branchesQuery.isPending) {
+    if (!projectQuery.isPending && !sessionsQuery.isPending) {
       setLoading(false);
     }
-  }, [projectQuery.data, projectQuery.isError, projectQuery.isPending, sessionsQuery.data, sessionsQuery.isPending, branchesQuery.data, branchesQuery.isPending]);
+  }, [projectQuery.data, projectQuery.isError, projectQuery.isPending, sessionsQuery.data, sessionsQuery.isPending]);
   /* eslint-enable react-hooks/set-state-in-effect */
-
-  const filteredBranches = branches.filter((item) =>
-    item.toLowerCase().includes(branchSearch.trim().toLowerCase()),
-  );
-  const branchToCreate = branchSearch.trim();
-  const canCreateBranch =
-    branchToCreate.length > 0 &&
-    !branches.some((item) => item.toLowerCase() === branchToCreate.toLowerCase());
-
-  async function createSession(event: FormEvent) {
-    event.preventDefault();
-    if (!prompt.trim() || !projectId || creating) return;
-    const activeBranch = branch;
-    setCreating(true);
-    setError("");
-    try {
-      const data = await api<{ id: string }>(`/api/projects/${projectId}/sessions`, {
-        method: "POST",
-        body: JSON.stringify({ message: prompt.trim(), branch: activeBranch }),
-      });
-      window.location.href = `/s/${data.id}`;
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not create session");
-      setCreating(false);
-    }
-  }
 
   async function saveEnvironment() {
     if (!projectId || savingEnv) return;
@@ -276,8 +233,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     );
   }
 
-  const showBranchPicker = Boolean(project.repo);
-
   return (
     <AppShell>
       <PageShell
@@ -305,79 +260,15 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       >
         <PageContainer size="wide" className="py-6">
           <div className="mt-6">
-            <form onSubmit={createSession} className="space-y-3 relative">
-              <Textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Inspect the repo and propose a plan…"
-                rows={5}
-                className="min-h-36 resize-none p-4"
-              />
-              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 pb-3">
-              {showBranchPicker && (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center ">
-                  <div className="min-w-0 flex-1">
-                    <Select
-                      value={branch}
-                      onValueChange={(value) => {
-                        if (!value) {
-                          setBranch("");
-                          setBranchSearch("");
-                          return;
-                        }
-                        if (value.startsWith("__create__:")) {
-                          const newBranch = value.slice("__create__:".length);
-                          setBranch(newBranch);
-                          setBranches((current) =>
-                            current.includes(newBranch) ? current : [...current, newBranch],
-                          );
-                          setBranchSearch("");
-                          return;
-                        }
-                        setBranch(value);
-                        setBranchSearch("");
-                      }}
-                    >
-                      <SelectTrigger className="border-0">
-                        <GitBranch className="size-3" />
-                        <SelectValue placeholder="Select a branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <div className="p-1" onKeyDown={(event) => event.stopPropagation()}>
-                          <Input
-                            value={branchSearch}
-                            onChange={(event) => setBranchSearch(event.target.value)}
-                            placeholder="Search branches…"
-                            className="h-7 text-xs"
-                            onClick={(event) => event.stopPropagation()}
-                          />
-                        </div>
-                        {filteredBranches.map((item) => (
-                          <SelectItem key={item} value={item}>
-                            {item}
-                          </SelectItem>
-                        ))}
-                        {canCreateBranch && (
-                          <SelectItem value={`__create__:${branchToCreate}`}>
-                            <IconPlus className="size-3.5" />
-                            Create branch “{branchToCreate}”
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
-              {error && (
-                <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-              <Button type="submit" disabled={creating || !prompt.trim()} variant={"outline"} size="sm">
-                {creating ? <Loader2 className="animate-spin" /> : "New"}
-              </Button>
-              </div>
-            </form>
+            <TaskForm
+              projects={[{ id: project.id, repo: project.repo }]}
+              initialProjectId={project.id}
+            />
+            {error && (
+              <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
 
             <Dialog open={configOpen} onOpenChange={setConfigOpen}>
               <DialogContent className="max-w-lg">

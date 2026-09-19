@@ -135,47 +135,12 @@ export function AppSidebar() {
             </SidebarMenuItem>
           </SidebarMenu>
 
-          {signedIn !== false && (
-          <div className="px-0 pt-1 group-data-[collapsible=icon]:hidden">
-              <div className="relative">
-                <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <SidebarInput
-                  aria-label="Filter projects and sessions"
-                  placeholder="Search…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  className="h-8 pl-8 text-[13px]"
-                />
-              </div>
-            </div>
-          )}
         </SidebarHeader>
 
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={isDashboard}
-                    tooltip="Dashboard"
-                    render={<Link href="/" prefetch />}
-                  >
-                    <IconLayoutDashboard />
-                    <span>Dashboard</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                {signedIn !== false && (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      tooltip="New workspace"
-                      onClick={() => setNewOpen(true)}
-                    >
-                      <IconPlus />
-                      <span>New workspace</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )}
                 {signedIn === false && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
@@ -191,6 +156,21 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+
+          {signedIn !== false && (
+          <div className="px-3 pt-1 group-data-[collapsible=icon]:hidden">
+              <div className="relative">
+                <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <SidebarInput
+                  aria-label="Filter projects and sessions"
+                  placeholder="Search…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="h-8 pl-8 text-[13px]"
+                />
+              </div>
+            </div>
+          )}
 
           {signedIn === false ? (
             <SidebarGroup>
@@ -355,16 +335,6 @@ export function AppSidebar() {
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
-
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create a workspace</DialogTitle>
-            <DialogDescription>Choose the repository for this workspace.</DialogDescription>
-          </DialogHeader>
-          <NewProjectForm onClose={() => setNewOpen(false)} />
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
