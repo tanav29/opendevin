@@ -34,7 +34,7 @@ export function sanitizeBranch(branch: unknown): string {
   const name = branch.trim().slice(0, 200);
   // Allow typical git branch chars, reject shell metachars / traversal.
   if (!name) return "";
-  if (!/^[\w.\-\/]+$/.test(name)) return "";
+  if (!/^[\w.\-/]+$/.test(name)) return "";
   if (name.includes("..") || name.startsWith("/") || name.startsWith("-")) return "";
   return name;
 }

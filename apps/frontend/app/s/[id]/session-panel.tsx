@@ -14,7 +14,6 @@ export default function SessionPanel({
   sessionId,
   sandboxId,
   sandboxReady,
-  workspacePath,
   defaultTitle,
   prefs,
   onPrefs,
@@ -24,7 +23,6 @@ export default function SessionPanel({
   sessionId: string;
   sandboxId: string;
   sandboxReady: boolean;
-  workspacePath: string;
   defaultTitle: string;
   prefs: PanelPrefs;
   onPrefs: (next: PanelPrefs) => void;

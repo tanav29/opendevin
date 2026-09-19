@@ -3,10 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  IconGitBranch,
   IconBrandGithub,
   IconLock,
-  IconStar,
   IconSearch,
   IconChevronDown,
   IconCheck,
@@ -18,11 +16,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/format";
 import { api } from "@/lib/api";
 
 type Repo = {

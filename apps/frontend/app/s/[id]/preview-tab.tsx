@@ -31,6 +31,7 @@ export default function PreviewTab({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [devInfo, setDevInfo] = useState("");
+  const [copied, setCopied] = useState(false);
   // Request-scoped state (url/error) resets via the parent's key on session/sandbox change.
   const effectivePort = port ?? (defaultPort ? String(defaultPort) : "3000");
 

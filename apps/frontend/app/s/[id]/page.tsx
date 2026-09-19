@@ -728,7 +728,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             sessionId={sessionId}
             sandboxId={status?.sandboxId || detail?.sandboxId || ""}
             sandboxReady={ready}
-            workspacePath={status?.workspacePath || detail?.workspacePath || ""}
             defaultTitle={detail?.title || ""}
             prefs={prefs}
             onPrefs={setPrefs}

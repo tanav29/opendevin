@@ -596,7 +596,7 @@ function toolCallMarker(name: string, input: unknown): string {
   return `\n\n<details data-tool="call" data-arg="${argument}"><summary>${name}</summary>\n\n`;
 }
 
-function toolDoneMarker(name: string, partType: string, output: unknown, error: unknown): string {
+function toolDoneMarker(name: string, partType: string, output: unknown): string {
   if (name === "ask_user" || name === "update_plan") return `\n</div>\n\n`;
   if (partType === "tool-error") return `\n<div data-tool-status="failed"></div>\n\n</details>\n\n`;
   if (typeof output === "string" && output.startsWith("__PLAN__")) {
@@ -640,7 +640,7 @@ async function drainAgentStream(
       sink(toolCallMarker(typeof p.toolName === "string" ? p.toolName : "tool", p.input));
     } else if (p.type === "tool-result" || p.type === "tool-error") {
       const name = typeof p.toolName === "string" ? p.toolName : "";
-      sink(toolDoneMarker(name, p.type, p.output, p.error));
+      sink(toolDoneMarker(name, p.type, p.output));
       if (
         name === "update_plan" &&
         typeof p.output === "string" &&

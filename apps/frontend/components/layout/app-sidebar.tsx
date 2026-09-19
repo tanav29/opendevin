@@ -7,8 +7,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   IconChevronDown,
   IconFolder,
-  IconLayoutDashboard,
-  IconPlus,
   IconSearch,
   IconSettings,
   IconSparkles,
@@ -19,7 +17,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -30,22 +27,13 @@ import {
   SidebarMenuItem,
   SidebarMenuSkeleton,
   SidebarRail,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { StatusDot } from "@/components/ui/status-dot";
-import NewProjectForm from "@/components/new-project-dialog";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
 import { Code2 } from "lucide-react";
@@ -68,7 +56,6 @@ const EMPTY_SESSIONS: Session[] = [];
 export function AppSidebar() {
   const pathname = usePathname();
   const [query, setQuery] = useState("");
-  const [newOpen, setNewOpen] = useState(false);
   const me = useSession();
 
   const projectsQuery = useQuery({
@@ -110,7 +97,6 @@ export function AppSidebar() {
   }, [sessions]);
 
   const runningCount = sessions.filter((s) => s.status === "running").length;
-  const isDashboard = pathname === "/";
   const displayName = me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…");
   const displaySub =
     me?.user.email || (signedIn === false ? "Sign in to sync" : "Loading…");
