@@ -2,53 +2,55 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  IconLayoutDashboard,
+  IconChevronDown,
   IconFolder,
+  IconLayoutDashboard,
   IconPlus,
-  IconSettings,
   IconSearch,
-  IconTerminal,
-  IconGitBranch,
-  IconCode,
+  IconSettings,
   IconSparkles,
 } from "@tabler/icons-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
+  SidebarGroupAction,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
-  SidebarMenuItem,
+  SidebarMenuBadge,
   SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSkeleton,
+  SidebarRail,
   SidebarSeparator,
-  SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { StatusDot } from "@/components/ui/status-dot";
-import { timeAgo } from "@/lib/format";
-import NewProjectForm from "@/components/new-project-dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
+import { StatusDot } from "@/components/ui/status-dot";
+import NewProjectForm from "@/components/new-project-dialog";
 import { useSession } from "@/hooks/use-session";
+import { api } from "@/lib/api";
+import { Code2 } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-
-type Project = { id: string; name: string; repo: string | null; updatedAt?: string };
+type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
   id: string;
   title: string;
@@ -57,267 +59,312 @@ type Session = {
   branch: string;
   updatedAt: string;
   projectId: string;
-  project: { id: string; name: string };
+  project: { id: string; repo: string };
 };
+
+const EMPTY_PROJECTS: Project[] = [];
+const EMPTY_SESSIONS: Session[] = [];
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [query, setQuery] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
   const me = useSession();
 
-  useEffect(() => {
-    let cancelled = false;
-    function load() {
-      fetch(`${API}/api/projects`, { credentials: "include" })
-        .then((r) => {
-          if (r.status === 401) throw new Error("unauth");
-          if (!r.ok) throw new Error("fail");
-          return r.json();
-        })
-        .then((data) => {
-          if (cancelled) return;
-          setProjects(data as Project[]);
-          setSignedIn(true);
-        })
-        .catch(() => {
-          if (!cancelled) setSignedIn(false);
-        });
-
-      fetch(`${API}/api/sessions`, { credentials: "include" })
-        .then((r) => (r.ok ? r.json() : []))
-        .then((data) => {
-          if (!cancelled) setSessions(data as Session[]);
-        })
-        .catch(() => undefined);
-    }
-    load();
-    const id = setInterval(load, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
+  const projectsQuery = useQuery({
+    queryKey: ["projects"],
+    queryFn: () => api<Project[]>("/api/projects"),
+    retry: false,
+    refetchInterval: 15000,
+  });
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions"],
+    queryFn: () => api<Session[]>("/api/sessions"),
+    retry: false,
+    refetchInterval: 15000,
+  });
+  const projects = projectsQuery.data ?? EMPTY_PROJECTS;
+  const sessions = sessionsQuery.data ?? EMPTY_SESSIONS;
+  const projectsLoading = projectsQuery.isPending;
+  const sessionsLoading = sessionsQuery.isPending;
+  const signedIn = projectsQuery.isPending ? null : projectsQuery.isSuccess;
 
   const filteredProjects = useMemo(() => {
     if (!query.trim()) return projects.slice(0, 6);
     const q = query.toLowerCase();
-    return projects
-      .filter((p) => p.name.toLowerCase().includes(q) || (p.repo || "").toLowerCase().includes(q))
-      .slice(0, 6);
+    return projects.filter((p) => p.repo.toLowerCase().includes(q)).slice(0, 6);
   }, [projects, query]);
 
   const filteredSessions = useMemo(() => {
     if (!query.trim()) return sessions.slice(0, 8);
     const q = query.toLowerCase();
     return sessions
-      .filter((s) => s.title.toLowerCase().includes(q) || s.project.name.toLowerCase().includes(q))
+      .filter((s) => s.title.toLowerCase().includes(q) || s.project.repo.toLowerCase().includes(q))
       .slice(0, 8);
   }, [sessions, query]);
 
+  const sessionCountByProject = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sessions) counts.set(s.projectId, (counts.get(s.projectId) ?? 0) + 1);
+    return counts;
+  }, [sessions]);
+
+  const runningCount = sessions.filter((s) => s.status === "running").length;
   const isDashboard = pathname === "/";
-  const isSettings = pathname === "/settings";
+  const displayName = me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…");
+  const displaySub =
+    me?.user.email || (signedIn === false ? "Sign in to sync" : "Loading…");
 
   return (
-    <Sidebar collapsible="icon" variant="sidebar">
-      <SidebarHeader className="gap-0">
-        <div className="flex items-center gap-2 px-1 h-8">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-md font-semibold tracking-[-0.02em] group-data-[collapsible=icon]:hidden">
-              OpenDevin
-            </span>
-          </Link>
-        </div>
-
-        {signedIn !== false && (
-          <div className="px-1 py-2 group-data-[collapsible=icon]:hidden">
-            <div className="relative">
-              <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <SidebarInput
-                placeholder="Search…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="h-7 pl-7 text-[13px]"
-              />
-            </div>
-          </div>
-        )}
-      </SidebarHeader>
-
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={isDashboard}
-                  tooltip="Dashboard"
-                  render={<Link href="/" prefetch />}
-                >
-                  <IconLayoutDashboard className="size-4" />
-                  <span>Dashboard</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <NewProjectForm />
-              </SidebarMenuItem>
-              {signedIn === false && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={pathname === "/login"}
-                    tooltip="Sign in"
-                    render={<Link href="/login" prefetch />}
-                  >
-                    <IconSparkles className="size-4" />
-                    <span>Sign in</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {signedIn === false ? (
-          <SidebarGroup>
-            <div className="rounded-md border border-dashed border-border bg-card p-3 group-data-[collapsible=icon]:hidden">
-              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Sign in
-              </p>
-              <Link
-                href="/login"
-                className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background"
+    <>
+      <Sidebar collapsible="icon" variant="inset">
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="OpenDevin home"
+                render={<Link href="/" prefetch />}
               >
-                Continue with GitHub
-              </Link>
-            </div>
-          </SidebarGroup>
-        ) : (
-          <>
-            <SidebarGroup>
-              <SidebarGroupLabel className="flex items-center gap-1.5">
-                {/*<IconFolder className="size-3.5" />*/}
-                Projects
-                <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-                  {projects.length}
+                <span className="flex aspect-square items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground p-2">
+                  <Code2 className="size-4" />
                 </span>
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {filteredProjects.length === 0 ? (
-                    <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
-                      {projects.length === 0 ? "No projects yet." : "No matches."}
-                    </p>
-                  ) : (
-                    filteredProjects.map((p) => {
-                      const active = pathname === `/p/${p.id}` || pathname === `/projects/${p.id}`;
-                      return (
-                        <SidebarMenuItem key={p.id}>
-                          <SidebarMenuButton
-                            isActive={active}
-                            tooltip={p.name}
-                            render={<Link href={`/p/${p.id}`} prefetch />}
-                          >
-                            <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="truncate">{p.name}</span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })
-                  )}
-                </SidebarMenu>
-                {projects.length > 6 && !query && (
-                  <Link
-                    href="/"
-                    className="mt-1 block px-2 text-[11px] text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
-                  >
-                    View all →
-                  </Link>
-                )}
-              </SidebarGroupContent>
-            </SidebarGroup>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
+                  <span className="truncate font-semibold text-sm">OpenDevin</span>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
 
-            <SidebarGroup>
-              <SidebarGroupLabel className="flex items-center gap-1.5">
-                {/*<IconTerminal className="size-3.5" />*/}
-                Sessions
-                {/*<span className="ml-auto flex items-center gap-1.5">
-                  {sessions.filter((s) => s.status === "running").length > 0 && (
-                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <span className="size-1.5 animate-pulse rounded-full bg-warning" />
-                      {sessions.filter((s) => s.status === "running").length}
-                    </span>
-                  )}
-                </span>*/}
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {filteredSessions.length === 0 ? (
-                    <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
-                      No sessions.
-                    </p>
-                  ) : (
-                    filteredSessions.map((s) => {
-                      const active = pathname === `/s/${s.id}` || pathname === `/sessions/${s.id}`;
-                      return (
-                        <SidebarMenuItem key={s.id}>
-                          <SidebarMenuButton
-                            isActive={active}
-                            tooltip={s.title}
-                            render={<Link href={`/s/${s.id}`} prefetch />}
-                          >
-                            <span className="truncate">{s.title}</span>
-                            {/*{s.branch && (
-                              <Badge variant="outline" className="ml-auto hidden h-4 px-1 font-mono text-[10px] group-data-[collapsible=icon]:hidden xl:inline-flex">
-                                <IconGitBranch className="size-3" />
-                                {s.branch.length > 12 ? `${s.branch.slice(0, 12)}…` : s.branch}
-                              </Badge>
-                            )}*/}
-                            <StatusDot status={s.status} />
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })
-                  )}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </>
-        )}
-      </SidebarContent>
-
-      <SidebarFooter>
-        <SidebarSeparator className="mx-0" />
-        <div className="flex items-center gap-2 p-2 group-data-[collapsible=icon]:justify-center">
-          {me?.github.avatarUrl || me?.user.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={me.github.avatarUrl || me.user.image || ""}
-              alt=""
-              className="size-7 shrink-0 rounded-full border border-border group-data-[collapsible=icon]:size-8"
-            />
-          ) : (
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs text-muted-foreground group-data-[collapsible=icon]:size-8">
-              {(me?.github.login || me?.user.name || "?").slice(0, 1).toUpperCase()}
+          {signedIn !== false && (
+          <div className="px-0 pt-1 group-data-[collapsible=icon]:hidden">
+              <div className="relative">
+                <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <SidebarInput
+                  aria-label="Filter projects and sessions"
+                  placeholder="Search…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="h-8 pl-8 text-[13px]"
+                />
+              </div>
             </div>
           )}
-          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-[13px] font-medium leading-none">
-              {me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…")}
-            </p>
-          </div>
-          <Link href="/settings">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-7 shrink-0 group-data-[collapsible=icon]:hidden"
-            >
-              <IconSettings className="size-4" />
-            </Button>
-          </Link>
-        </div>
-      </SidebarFooter>
-    </Sidebar>
+        </SidebarHeader>
+
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={isDashboard}
+                    tooltip="Dashboard"
+                    render={<Link href="/" prefetch />}
+                  >
+                    <IconLayoutDashboard />
+                    <span>Dashboard</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                {signedIn !== false && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      tooltip="New workspace"
+                      onClick={() => setNewOpen(true)}
+                    >
+                      <IconPlus />
+                      <span>New workspace</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
+                {signedIn === false && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={pathname === "/login"}
+                      tooltip="Sign in"
+                      render={<Link href="/login" prefetch />}
+                    >
+                      <IconSparkles />
+                      <span>Sign in</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          {signedIn === false ? (
+            <SidebarGroup>
+              <div className="rounded-xl border border-dashed bg-card p-3 group-data-[collapsible=icon]:hidden">
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Sign in
+                </p>
+                <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
+                  Connect GitHub to browse repos and start a workspace.
+                </p>
+                <Link
+                  href="/login"
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground"
+                >
+                  Continue with GitHub
+                </Link>
+              </div>
+            </SidebarGroup>
+          ) : (
+            <>
+              <Collapsible defaultOpen className="group/collapsible">
+                <SidebarGroup>
+                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
+                    Projects
+                    <IconChevronDown className="ml-auto transition-transform group-data-open/collapsible:rotate-180" />
+                  </SidebarGroupLabel>
+                  <CollapsibleContent>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {projectsLoading ? (
+                          <>
+                            {[0, 1, 2].map((i) => (
+                              <SidebarMenuItem key={i}>
+                                <SidebarMenuSkeleton showIcon />
+                              </SidebarMenuItem>
+                            ))}
+                          </>
+                        ) : filteredProjects.length === 0 ? (
+                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                            {projects.length === 0 ? "No workspaces yet." : "No matches."}
+                          </p>
+                        ) : (
+                          filteredProjects.map((p) => {
+                            const active =
+                              pathname === `/p/${p.id}` || pathname === `/projects/${p.id}`;
+                            const count = sessionCountByProject.get(p.id) ?? 0;
+                            return (
+                              <SidebarMenuItem key={p.id}>
+                                <SidebarMenuButton
+                                  isActive={active}
+                                  tooltip={p.repo}
+                                  render={<Link href={`/p/${p.id}`} prefetch />}
+                                >
+                                  <IconFolder className="shrink-0 text-muted-foreground" />
+                                  <span className="min-w-0 flex-1 truncate">{p.repo}</span>
+                                </SidebarMenuButton>
+                                {count > 0 && (
+                                  <SidebarMenuBadge>{count}</SidebarMenuBadge>
+                                )}
+                              </SidebarMenuItem>
+                            );
+                          })
+                        )}
+                      </SidebarMenu>
+                      {projects.length > 6 && !query && (
+                        <Link
+                          href="/"
+                          className="mt-1 block px-2 text-[11px] text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
+                        >
+                          View all →
+                        </Link>
+                      )}
+                    </SidebarGroupContent>
+                  </CollapsibleContent>
+                </SidebarGroup>
+              </Collapsible>
+
+              <Collapsible defaultOpen className="group/collapsible">
+                <SidebarGroup>
+                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
+                    Sessions
+                    <span className="ml-auto flex items-center gap-1.5">
+                      {runningCount > 0 && (
+                        <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                          <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+                          {runningCount}
+                        </span>
+                      )}
+                      <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
+                    </span>
+                  </SidebarGroupLabel>
+                  <CollapsibleContent>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {sessionsLoading ? (
+                          <>
+                            {[0, 1, 2, 3].map((i) => (
+                              <SidebarMenuItem key={i}>
+                                <SidebarMenuSkeleton />
+                              </SidebarMenuItem>
+                            ))}
+                          </>
+                        ) : filteredSessions.length === 0 ? (
+                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                            No sessions.
+                          </p>
+                        ) : (
+                          filteredSessions.map((s) => {
+                            const active =
+                              pathname === `/s/${s.id}` || pathname === `/sessions/${s.id}`;
+                            return (
+                              <SidebarMenuItem key={s.id}>
+                                <SidebarMenuButton
+                                  isActive={active}
+                                  tooltip={`${s.title} · ${s.project.repo}`}
+                                  render={<Link href={`/s/${s.id}`} prefetch />}
+                                >
+                                  <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                                  <StatusDot status={s.status} className="ml-auto" />
+                                </SidebarMenuButton>
+                              </SidebarMenuItem>
+                            );
+                          })
+                        )}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </CollapsibleContent>
+                </SidebarGroup>
+              </Collapsible>
+            </>
+          )}
+        </SidebarContent>
+
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                size="lg"
+                tooltip={displayName}
+                render={<Link href={signedIn === false ? "/login" : "/settings"} prefetch />}
+              >
+                {me?.github.avatarUrl || me?.user.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={me.github.avatarUrl || me.user.image || ""}
+                    alt=""
+                    className="size-7 shrink-0 rounded-full border border-border"
+                  />
+                ) : (
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs text-muted-foreground">
+                    {displayName.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
+                  <span className="truncate text-[13px] font-medium">{displayName}</span>
+                  <span className="truncate text-xs text-muted-foreground">{displaySub}</span>
+                </span>
+                <IconSettings className="ml-auto shrink-0 text-muted-foreground" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+
+      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create a workspace</DialogTitle>
+            <DialogDescription>Choose the repository for this workspace.</DialogDescription>
+          </DialogHeader>
+          <NewProjectForm onClose={() => setNewOpen(false)} />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -14,7 +14,7 @@ export default function SessionSidebar({
 }) {
   const groups = new Map<string, { name: string; sessions: SidebarSession[] }>();
   for (const session of sessions) {
-    const group = groups.get(session.projectId) || { name: session.project.name, sessions: [] };
+    const group = groups.get(session.projectId) || { name: session.project.repo, sessions: [] };
     group.sessions.push(session);
     groups.set(session.projectId, group);
   }

@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePanelPrefs } from "./panel-prefs";
+import { api } from "@/lib/api";
 const Message = dynamic(() => import("./message"), {
   ssr: false,
   loading: () => <span className="text-muted-foreground">Loading response…</span>,
@@ -133,16 +134,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
   const refresh = useCallback(async (id: string, includeMessages: boolean) => {
     const [nextDetail, nextStatus, history] = await Promise.all([
-      fetch(`${API}/api/sessions/${id}`, { credentials: "include" }).then((r) =>
-        r.ok ? r.json() : null,
-      ),
-      fetch(`${API}/api/sessions/${id}/status`, { credentials: "include" }).then((r) =>
-        r.ok ? r.json() : null,
-      ),
+      api<SessionDetail>(`/api/sessions/${id}`).catch(() => null),
+      api<SessionStatus>(`/api/sessions/${id}/status`).catch(() => null),
       includeMessages
-        ? fetch(`${API}/api/sessions/${id}/messages`, { credentials: "include" }).then((r) =>
-            r.ok ? r.json() : null,
-          )
+        ? api<ChatMessage[]>(`/api/sessions/${id}/messages`).catch(() => null)
         : Promise.resolve(null),
     ]);
     if (nextDetail) setDetail(nextDetail);
@@ -188,16 +183,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setReconnecting(true);
     setError("");
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/reconnect`, {
+      await api(`/api/sessions/${sessionId}/reconnect`, {
         method: "POST",
-        credentials: "include",
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Could not reconnect sandbox");
-      } else {
-        await refresh(sessionId, false);
-      }
+      await refresh(sessionId, false);
     } catch {
       setError("Could not reconnect sandbox: the server is unreachable.");
     } finally {
@@ -281,9 +270,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     abortRef.current?.abort();
     // Server-side abort: actually stops the model turn, not just the stream.
     if (sessionId) {
-      void fetch(`${API}/api/sessions/${sessionId}/stop`, {
+      void api(`/api/sessions/${sessionId}/stop`, {
         method: "POST",
-        credentials: "include",
       })
         .then(() => refresh(sessionId, true))
         .catch(() => undefined);
@@ -305,16 +293,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setKilling(true);
     setError("");
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/kill`, {
+      await api(`/api/sessions/${sessionId}/kill`, {
         method: "POST",
-        credentials: "include",
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Could not kill sandbox");
-      } else {
-        await refresh(sessionId, false);
-      }
+      await refresh(sessionId, false);
     } catch {
       setError("Could not kill sandbox: the server is unreachable.");
     } finally {
@@ -331,16 +313,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       return;
     setDeleting(true);
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}`, {
+      await api(`/api/sessions/${sessionId}`, {
         method: "DELETE",
-        credentials: "include",
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Could not delete session");
-        setDeleting(false);
-        return;
-      }
       window.location.href = detail ? `/p/${detail.projectId}` : "/";
     } catch {
       setError("Could not delete session: the server is unreachable.");

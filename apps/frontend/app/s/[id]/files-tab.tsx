@@ -7,7 +7,7 @@ import {
   useFileTreeSearch,
   useFileTreeSelection,
 } from "@pierre/trees/react";
-import { API } from "./lib";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,14 +48,9 @@ export default function FilesTab({
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/files`, {
-        credentials: "include",
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(data.error || "Could not list files");
-        return;
-      }
+      const data = await api<{ paths?: string[]; truncated?: boolean }>(
+        `/api/sessions/${sessionId}/files`,
+      );
       setPaths(Array.isArray(data.paths) ? data.paths : []);
       setTruncated(Boolean(data.truncated));
     } catch {
@@ -79,19 +74,9 @@ export default function FilesTab({
       setFileError("");
       setDirty(false);
       try {
-        const response = await fetch(
-          `${API}/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`,
-          { credentials: "include" },
-        );
-        const data = (await response.json().catch(() => ({}))) as {
+        const data = await api<{
           content?: string;
-          error?: string;
-        };
-        if (!response.ok) {
-          setFileError(data.error || "Could not open file");
-          setFileContent("");
-          return;
-        }
+        }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`);
         setFileContent(typeof data.content === "string" ? data.content : "");
       } catch {
         setFileError("Could not open file: server unreachable.");
@@ -118,17 +103,10 @@ export default function FilesTab({
     setSaving(true);
     setFileError("");
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/file`, {
+      await api(`/api/sessions/${sessionId}/file`, {
         method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: openPath, content: fileContent }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setFileError(data.error || "Could not save file");
-        return;
-      }
       setDirty(false);
     } catch {
       setFileError("Could not save file: server unreachable.");

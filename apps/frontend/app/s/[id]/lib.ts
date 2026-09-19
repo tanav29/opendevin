@@ -43,7 +43,7 @@ export type SidebarSession = {
   branch: string;
   updatedAt: string;
   projectId: string;
-  project: { id: string; name: string };
+  project: { id: string; repo: string };
 };
 
 export const PROVISIONING_SANDBOX = new Set(["pending", "creating", "cloning"]);

@@ -1,19 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconPlus,
   IconGitBranch,
   IconTrash,
   IconFolder,
   IconTerminal,
+  IconSettings,
 } from "@tabler/icons-react";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
@@ -23,22 +24,20 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { ConfirmProvider, useConfirm } from "@/components/ui/confirm";
 import { timeAgo, repoName } from "@/lib/format";
 import { Label } from "@/components/ui/label";
+import { api } from "@/lib/api";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+import { GitBranch, Loader2 } from "lucide-react";
 
 type Project = {
   id: string;
-  name: string;
-  repo: string | null;
+  repo: string;
   setupScript?: string;
   devCommand?: string;
   devPort?: number;
@@ -78,8 +77,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
-  const [customBranch, setCustomBranch] = useState("");
-  const [newBranchSelected, setNewBranchSelected] = useState(false);
   const [branchSearch, setBranchSearch] = useState("");
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
@@ -92,85 +89,89 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   const [setupSaved, setSetupSaved] = useState("");
   const [savingEnv, setSavingEnv] = useState(false);
   const [envSaved, setEnvSaved] = useState("");
+  const [configOpen, setConfigOpen] = useState(false);
 
-  const loadSessions = useCallback(async (id: string) => {
-    const response = await fetch(`${API}/api/projects/${id}/sessions`, { credentials: "include" });
-    if (response.ok) setSessions((await response.json()) as ProjectSession[]);
-  }, []);
-
+  // Query data initializes the editable project form state.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    let cancelled = false;
     void params.then(({ projectId: id }) => {
       setProjectId(id);
-      void Promise.all([
-        fetch(`${API}/api/projects/${id}`, { credentials: "include" })
-          .then((r) => {
-            if (r.status === 404) return null;
-            return r.ok ? r.json() : null;
-          })
-          .catch(() => null),
-        fetch(`${API}/api/projects/${id}/sessions`, { credentials: "include" })
-          .then((r) => (r.ok ? r.json() : []))
-          .catch(() => []),
-        fetch(`${API}/api/projects/${id}/branches`, { credentials: "include" })
-          .then((r) => (r.ok ? r.json() : { branches: [], defaultBranch: "" }))
-          .catch(() => ({ branches: [], defaultBranch: "" })),
-      ]).then(([nextProject, nextSessions, nextBranches]) => {
-        if (cancelled) return;
-        if (!nextProject) setNotFound(true);
-        setProject(nextProject);
-        setSessions(nextSessions);
-        if (nextProject?.setupScript) setSetupScript(nextProject.setupScript);
-        if (nextProject?.devCommand) setDevCommand(nextProject.devCommand);
-        if (typeof nextProject?.devPort === "number") setDevPort(String(nextProject.devPort));
-        if (nextProject?.envVars) {
-          try {
-            const parsed = JSON.parse(nextProject.envVars) as Record<string, string>;
-            setEnvVars(Object.entries(parsed).map(([key, value]) => ({ key, value })));
-          } catch {
-            setEnvVars([]);
-          }
-        }
-        const list = Array.isArray(nextBranches.branches) ? nextBranches.branches : [];
-        setBranches(list);
-        setBranch(nextBranches.defaultBranch || "");
-        setLoading(false);
-      });
     });
-    return () => {
-      cancelled = true;
-    };
   }, [params]);
 
   const hasProvisioning = sessions.some(isProvisioning);
+  const projectQuery = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => api<Project>(`/api/projects/${projectId}`),
+    enabled: Boolean(projectId),
+    retry: false,
+  });
+  const sessionsQuery = useQuery({
+    queryKey: ["project-sessions", projectId],
+    queryFn: () => api<ProjectSession[]>(`/api/projects/${projectId}/sessions`),
+    enabled: Boolean(projectId),
+    refetchInterval: hasProvisioning ? 3000 : false,
+    retry: false,
+  });
+  const branchesQuery = useQuery({
+    queryKey: ["project-branches", projectId],
+    queryFn: () =>
+      api<{ branches: string[]; defaultBranch: string }>(`/api/projects/${projectId}/branches`),
+    enabled: Boolean(projectId),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (projectQuery.isError) setNotFound(true);
+    if (projectQuery.data) {
+      setProject(projectQuery.data);
+      if (projectQuery.data.setupScript) setSetupScript(projectQuery.data.setupScript);
+      if (projectQuery.data.devCommand) setDevCommand(projectQuery.data.devCommand);
+      if (typeof projectQuery.data.devPort === "number") setDevPort(String(projectQuery.data.devPort));
+      if (projectQuery.data.envVars) {
+        try {
+          const parsed = JSON.parse(projectQuery.data.envVars) as Record<string, string>;
+          setEnvVars(Object.entries(parsed).map(([key, value]) => ({ key, value })));
+        } catch {
+          setEnvVars([]);
+        }
+      }
+    }
+    if (sessionsQuery.data) setSessions(sessionsQuery.data);
+    if (branchesQuery.data) {
+      setBranches(branchesQuery.data.branches);
+      setBranch(branchesQuery.data.defaultBranch || "");
+    }
+    if (!projectQuery.isPending && !sessionsQuery.isPending && !branchesQuery.isPending) {
+      setLoading(false);
+    }
+  }, [projectQuery.data, projectQuery.isError, projectQuery.isPending, sessionsQuery.data, sessionsQuery.isPending, branchesQuery.data, branchesQuery.isPending]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   const filteredBranches = branches.filter((item) =>
     item.toLowerCase().includes(branchSearch.trim().toLowerCase()),
   );
-  useEffect(() => {
-    if (!projectId || !hasProvisioning) return;
-    const timer = setInterval(() => void loadSessions(projectId), 3000);
-    return () => clearInterval(timer);
-  }, [projectId, hasProvisioning, loadSessions]);
+  const branchToCreate = branchSearch.trim();
+  const canCreateBranch =
+    branchToCreate.length > 0 &&
+    !branches.some((item) => item.toLowerCase() === branchToCreate.toLowerCase());
 
   async function createSession(event: FormEvent) {
     event.preventDefault();
     if (!prompt.trim() || !projectId || creating) return;
-    const activeBranch = customBranch.trim() || branch;
+    const activeBranch = branch;
     setCreating(true);
     setError("");
-    const response = await fetch(`${API}/api/projects/${projectId}/sessions`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: prompt.trim(), branch: activeBranch }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setError(data.error || "Could not create session");
+    try {
+      const data = await api<{ id: string }>(`/api/projects/${projectId}/sessions`, {
+        method: "POST",
+        body: JSON.stringify({ message: prompt.trim(), branch: activeBranch }),
+      });
+      window.location.href = `/s/${data.id}`;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not create session");
       setCreating(false);
-      return;
     }
-    window.location.href = `/s/${data.id}`;
   }
 
   async function saveEnvironment() {
@@ -178,10 +179,8 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     setSavingEnv(true);
     setEnvSaved("");
     try {
-      const response = await fetch(`${API}/api/projects/${projectId}`, {
+      const data = await api<Project>(`/api/projects/${projectId}`, {
         method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           envVars: Object.fromEntries(
             envVars
@@ -190,14 +189,10 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
           ),
         }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) setEnvSaved(data.error || "Could not save environment variables.");
-      else {
-        setProject(data);
-        setEnvSaved("Saved for new sessions.");
-      }
-    } catch {
-      setEnvSaved("Could not reach server.");
+      setProject(data);
+      setEnvSaved("Saved for new sessions.");
+    } catch (error) {
+      setEnvSaved(error instanceof Error ? error.message : "Could not reach server.");
     } finally {
       setSavingEnv(false);
     }
@@ -208,20 +203,14 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     setSavingSetup(true);
     setSetupSaved("");
     try {
-      const response = await fetch(`${API}/api/projects/${projectId}`, {
+      const data = await api<Project>(`/api/projects/${projectId}`, {
         method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ setupScript, devCommand, devPort: Number(devPort) || 3000 }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) setSetupSaved(data.error || "Could not save project setup.");
-      else {
-        setProject(data);
-        setSetupSaved("Saved for new sessions.");
-      }
-    } catch {
-      setSetupSaved("Could not reach server.");
+      setProject(data);
+      setSetupSaved("Saved for new sessions.");
+    } catch (error) {
+      setSetupSaved(error instanceof Error ? error.message : "Could not reach server.");
     } finally {
       setSavingSetup(false);
     }
@@ -238,16 +227,13 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     });
     if (!ok) return;
     setDeleting(true);
-    const response = await fetch(`${API}/api/projects/${projectId}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (!response.ok) {
+    try {
+      await api(`/api/projects/${projectId}`, { method: "DELETE" });
+      window.location.href = "/";
+    } catch {
       setError("Could not delete project.");
       setDeleting(false);
-      return;
     }
-    window.location.href = "/";
   }
 
   if (loading) {
@@ -297,20 +283,20 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       <PageShell
         header={
           <PageHeader
-            title={project.name}
-            description={project.repo ? repoName(project.repo) : "Local workspace"}
-            icon={<IconFolder className="size-4" />}
+            title={repoName(project.repo)}
+            description={project.repo}
             actions={
               <div className="flex items-center gap-1.5">
+                <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>
+                  <IconSettings className="size-4" /> Config
+                </Button>
                 <Button
-                  variant="ghost"
-                  size="sm"
+                  variant="destructive"
+                  size="icon-sm"
                   onClick={() => void deleteProject()}
                   disabled={deleting}
-                  className="text-muted-foreground hover:text-destructive"
                 >
-                  <IconTrash className="size-4" />{" "}
-                  <span className="hidden sm:inline">{deleting ? "Deleting…" : "Delete"}</span>
+                  {deleting ? <Loader2 className="animate-spin" /> : <IconTrash />}
                 </Button>
               </div>
             }
@@ -319,32 +305,41 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       >
         <PageContainer size="wide" className="py-6">
           <div className="mt-6">
-            <form onSubmit={createSession} className="space-y-3">
+            <form onSubmit={createSession} className="space-y-3 relative">
               <Textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Inspect the repo and propose a plan…"
                 rows={5}
-                className="min-h-[110px] resize-none"
+                className="min-h-36 resize-none p-4"
               />
+              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 pb-3">
               {showBranchPicker && (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center ">
                   <div className="min-w-0 flex-1">
-                    <Label className="sr-only">Branch</Label>
                     <Select
-                      value={newBranchSelected ? "__new__" : branch}
+                      value={branch}
                       onValueChange={(value) => {
-                        if (value === "__new__") {
+                        if (!value) {
                           setBranch("");
-                          setNewBranchSelected(true);
+                          setBranchSearch("");
                           return;
                         }
-                        setNewBranchSelected(false);
-                        setCustomBranch("");
-                        setBranch(value || "");
+                        if (value.startsWith("__create__:")) {
+                          const newBranch = value.slice("__create__:".length);
+                          setBranch(newBranch);
+                          setBranches((current) =>
+                            current.includes(newBranch) ? current : [...current, newBranch],
+                          );
+                          setBranchSearch("");
+                          return;
+                        }
+                        setBranch(value);
+                        setBranchSearch("");
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="border-0">
+                        <GitBranch className="size-3" />
                         <SelectValue placeholder="Select a branch" />
                       </SelectTrigger>
                       <SelectContent>
@@ -362,19 +357,15 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                             {item}
                           </SelectItem>
                         ))}
-                        <SelectItem value="__new__">＋ New branch</SelectItem>
+                        {canCreateBranch && (
+                          <SelectItem value={`__create__:${branchToCreate}`}>
+                            <IconPlus className="size-3.5" />
+                            Create branch “{branchToCreate}”
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
-                  <Input
-                    value={customBranch}
-                    onChange={(e) => {
-                      setCustomBranch(e.target.value);
-                      setNewBranchSelected(Boolean(e.target.value));
-                    }}
-                    placeholder="Optional new branch"
-                    className="sm:max-w-56 font-mono text-xs"
-                  />
                 </div>
               )}
               {error && (
@@ -382,56 +373,60 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
                   {error}
                 </p>
               )}
-              <Button type="submit" disabled={creating || !prompt.trim()} className="w-full">
-                {creating ? "Opening sandbox…" : "New session"}
+              <Button type="submit" disabled={creating || !prompt.trim()} variant={"outline"} size="sm">
+                {creating ? <Loader2 className="animate-spin" /> : "New"}
               </Button>
+              </div>
             </form>
 
-            <Card className="mt-4">
-              <CardHeader>
-                <CardTitle className="text-sm">Project setup</CardTitle>
-                <CardDescription>Saved globally for this project and used by new sessions.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <Label>Setup script</Label>
-                  <Textarea value={setupScript} onChange={(e) => setSetupScript(e.target.value)} placeholder="pnpm install" rows={2} className="mt-2 font-mono text-xs" />
-                </div>
-                <div className="flex gap-2">
-                  <div className="min-w-0 flex-1"><Label>Dev command</Label><Input value={devCommand} onChange={(e) => setDevCommand(e.target.value)} placeholder="pnpm dev" className="mt-2 font-mono text-xs" /></div>
-                  <div className="w-24 shrink-0"><Label>Port</Label><Input value={devPort} onChange={(e) => setDevPort(e.target.value)} inputMode="numeric" className="mt-2 font-mono text-xs" /></div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => void saveProjectSetup()} disabled={savingSetup}>
-                    {savingSetup ? "Saving…" : "Save project setup"}
-                  </Button>
-                  {setupSaved && <span className="text-xs text-muted-foreground">{setupSaved}</span>}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Dialog>
-              <DialogTrigger render={<Button variant="outline" className="mt-3 w-full" />}>
-                <IconPlus className="size-4" /> Environment variables
-              </DialogTrigger>
+            <Dialog open={configOpen} onOpenChange={setConfigOpen}>
               <DialogContent className="max-w-lg">
                 <DialogHeader>
-                  <DialogTitle>Environment variables</DialogTitle>
-                  <DialogDescription>Available to setup scripts and dev servers in new sessions.</DialogDescription>
+                  <DialogTitle>Project config</DialogTitle>
+                  <DialogDescription>Setup and environment used by new sessions.</DialogDescription>
                 </DialogHeader>
-                <div className="space-y-2">
-                  {envVars.map((item, index) => (
-                    <div key={index} className="flex gap-2">
-                      <Input value={item.key} onChange={(e) => setEnvVars((items) => items.map((current, i) => i === index ? { ...current, key: e.target.value } : current))} placeholder="KEY" className="font-mono text-xs" />
-                      <Input value={item.value} onChange={(e) => setEnvVars((items) => items.map((current, i) => i === index ? { ...current, value: e.target.value } : current))} placeholder="value" className="font-mono text-xs" />
-                      <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEnvVars((items) => items.filter((_, i) => i !== index))} aria-label="Remove variable"><IconTrash className="size-3.5" /></Button>
+                <div className="space-y-6">
+                  <section className="space-y-3">
+                    <div>
+                      <h3 className="text-sm font-medium">Project setup</h3>
+                      <p className="text-xs text-muted-foreground">Saved globally for this project.</p>
                     </div>
-                  ))}
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setEnvVars((items) => [...items, { key: "", value: "" }])}>＋ Add variable</Button>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">{envSaved}</span>
-                  <Button onClick={() => void saveEnvironment()} disabled={savingEnv}>{savingEnv ? "Saving…" : "Save variables"}</Button>
+                    <div>
+                      <Label>Setup script</Label>
+                      <Textarea value={setupScript} onChange={(e) => setSetupScript(e.target.value)} placeholder="pnpm install" rows={2} className="mt-2 font-mono text-xs" />
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="min-w-0 flex-1"><Label>Dev command</Label><Input value={devCommand} onChange={(e) => setDevCommand(e.target.value)} placeholder="pnpm dev" className="mt-2 font-mono text-xs" /></div>
+                      <div className="w-24 shrink-0"><Label>Port</Label><Input value={devPort} onChange={(e) => setDevPort(e.target.value)} inputMode="numeric" className="mt-2 font-mono text-xs" /></div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => void saveProjectSetup()} disabled={savingSetup}>
+                        {savingSetup ? "Saving…" : "Save project setup"}
+                      </Button>
+                      {setupSaved && <span className="text-xs text-muted-foreground">{setupSaved}</span>}
+                    </div>
+                  </section>
+
+                  <section className="space-y-3 border-t pt-4">
+                    <div>
+                      <h3 className="text-sm font-medium">Environment variables</h3>
+                      <p className="text-xs text-muted-foreground">Available to setup scripts and dev servers in new sessions.</p>
+                    </div>
+                    <div className="space-y-2">
+                      {envVars.map((item, index) => (
+                        <div key={index} className="flex gap-2">
+                          <Input value={item.key} onChange={(e) => setEnvVars((items) => items.map((current, i) => i === index ? { ...current, key: e.target.value } : current))} placeholder="KEY" className="font-mono text-xs" />
+                          <Input value={item.value} onChange={(e) => setEnvVars((items) => items.map((current, i) => i === index ? { ...current, value: e.target.value } : current))} placeholder="value" className="font-mono text-xs" />
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEnvVars((items) => items.filter((_, i) => i !== index))} aria-label="Remove variable"><IconTrash className="size-3.5" /></Button>
+                        </div>
+                      ))}
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setEnvVars((items) => [...items, { key: "", value: "" }])}>＋ Add variable</Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => void saveEnvironment()} disabled={savingEnv}>{savingEnv ? "Saving…" : "Save variables"}</Button>
+                      {envSaved && <span className="text-xs text-muted-foreground">{envSaved}</span>}
+                    </div>
+                  </section>
                 </div>
               </DialogContent>
             </Dialog>

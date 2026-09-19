@@ -22,13 +22,11 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "z-10 flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-card px-2 sm:px-3",
+        "z-10 flex h-12 shrink-0 items-center gap-1.5 px-2 sm:px-3",
         className,
       )}
     >
       <SidebarTrigger className="size-7" />
-      <span className="mx-1 hidden h-4 w-px shrink-0 bg-border sm:inline" aria-hidden />
-
       {icon && <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span>}
       {title && (
         <h1 className="min-w-0 truncate font-serif text-[13px] font-medium tracking-[-0.02em] text-foreground">
@@ -37,7 +35,7 @@ export function PageHeader({
       )}
       {description && (
         <span className="mono hidden min-w-0 truncate text-[11.5px] text-muted-foreground/70 sm:inline">
-          · {description}
+          {description}
         </span>
       )}
       {children}
@@ -56,7 +54,7 @@ export function PageShell({
   className?: string;
 }) {
   return (
-    <div className={cn("flex h-screen flex-col overflow-hidden bg-background", className)}>
+    <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden bg-background", className)}>
       {header}
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </div>

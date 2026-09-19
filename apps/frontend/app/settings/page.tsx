@@ -1,6 +1,7 @@
 "use client";
 
 import { IconSettings, IconLogout, IconArrowLeft, IconBrandGithub } from "@tabler/icons-react";
+import { useMutation } from "@tanstack/react-query";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
@@ -8,16 +9,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/hooks/use-session";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+import { api } from "@/lib/api";
 
 export default function Settings() {
   const me = useSession();
-
-  async function signOut() {
-    await fetch(`${API}/api/auth/sign-out`, { method: "POST", credentials: "include" });
-    window.location.href = "/";
-  }
+  const signOut = useMutation({
+    mutationFn: () => api("/api/auth/sign-out", { method: "POST" }),
+    onSuccess: () => {
+      window.location.href = "/";
+    },
+  });
 
   const avatar = me?.github.avatarUrl || me?.user.image;
   const name = me?.github.login || me?.user.name;
@@ -67,7 +68,7 @@ export default function Settings() {
                       </a>
                     )}
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => void signOut()}>
+              <Button variant="outline" size="sm" onClick={() => signOut.mutate()} disabled={signOut.isPending}>
                     <IconLogout className="size-4" /> Sign out
                   </Button>
                 </>

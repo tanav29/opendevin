@@ -1,25 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useMutation } from "@tanstack/react-query";
 import { IconBrandGithub, IconCode, IconArrowLeft } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-
-async function signIn() {
-  const response = await fetch(`${API}/api/auth/sign-in/social`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ provider: "github", callbackURL: window.location.origin }),
-  });
-  const data = (await response.json()) as { url?: string };
-  if (data.url) window.location.href = data.url;
-}
+import { api } from "@/lib/api";
 
 export default function Login() {
+  const signIn = useMutation({
+    mutationFn: () =>
+      api<{ url?: string }>("/api/auth/sign-in/social", {
+        method: "POST",
+        body: JSON.stringify({ provider: "github", callbackURL: window.location.origin }),
+      }),
+    onSuccess: (data) => {
+      if (data.url) window.location.href = data.url;
+    },
+  });
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-md">
@@ -41,7 +41,7 @@ export default function Login() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button onClick={() => void signIn()} className="w-full">
+            <Button onClick={() => signIn.mutate()} disabled={signIn.isPending} className="w-full">
               <IconBrandGithub className="size-4" />
               Continue with GitHub
             </Button>

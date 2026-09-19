@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API } from "./lib";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -28,21 +28,17 @@ export default function PreviewTab({
     setError("");
     setDevInfo("");
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/devserver`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ port: Number(port) || 3000 }),
-      });
-      const data = (await response.json().catch(() => ({}))) as {
+      const data = await api<{
         url?: string;
         command?: string;
         port?: number;
         log?: string;
-        error?: string;
-      };
-      if (!response.ok || !data.url) {
-        setError(data.error || "Could not start dev server.");
+      }>(`/api/sessions/${sessionId}/devserver`, {
+        method: "POST",
+        body: JSON.stringify({ port: Number(port) || 3000 }),
+      });
+      if (!data.url) {
+        setError("Could not start dev server.");
         return;
       }
       setPort(String(data.port ?? port));
@@ -59,13 +55,11 @@ export default function PreviewTab({
     setResolving(true);
     setError("");
     try {
-      const response = await fetch(
-        `${API}/api/sessions/${sessionId}/preview?port=${encodeURIComponent(port)}&path=${encodeURIComponent(path || "/")}`,
-        { credentials: "include" },
+      const data = await api<{ url?: string }>(
+        `/api/sessions/${sessionId}/preview?port=${encodeURIComponent(port)}&path=${encodeURIComponent(path || "/")}`,
       );
-      const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (!response.ok || !data.url) {
-        setError(data.error || "Preview unavailable.");
+      if (!data.url) {
+        setError("Preview unavailable.");
         setUrl("");
         return;
       }

@@ -206,10 +206,10 @@ app.get("/api/projects/:id", async (req, res) => {
 app.post("/api/projects", async (req, res) => {
   const session = await currentUser(req);
   if (!session) return res.status(401).json({ error: "Sign in required" });
-  const { name, repo } = req.body as { name?: string; repo?: string };
-  if (!name?.trim()) return res.status(400).json({ error: "Project name is required" });
+  const { repo } = req.body as { repo?: string };
+  if (!repo?.trim()) return res.status(400).json({ error: "Repository is required" });
   const project = await prisma.project.create({
-    data: { name: name.trim(), repo, userId: session.user.id },
+    data: { repo: repo.trim(), userId: session.user.id },
   });
   return res.status(201).json(project);
 });
@@ -221,15 +221,13 @@ app.put("/api/projects/:id", async (req, res) => {
     where: { id: req.params.id, userId: session.user.id },
   });
   if (!project) return res.status(404).json({ error: "Project not found" });
-  const { name, setupScript, devCommand, devPort, envVars } = req.body as {
-    name?: string;
+  const { setupScript, devCommand, devPort, envVars } = req.body as {
     setupScript?: string;
     devCommand?: string;
     devPort?: number;
     envVars?: Record<string, string>;
   };
   const data: Record<string, unknown> = {};
-  if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 200);
   if (typeof setupScript === "string") data.setupScript = setupScript.slice(0, 2000);
   if (typeof devCommand === "string") data.devCommand = devCommand.slice(0, 500);
   if (typeof devPort === "number" && Number.isInteger(devPort) && devPort >= 1 && devPort <= 65535)
@@ -292,6 +290,47 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
   const repo = project.repo?.trim() || "";
   if (!isRepoUrl(repo)) return res.json({ branches: [], defaultBranch: "" });
   try {
+    const githubRepo = parseGitHubRepo(repo);
+    if (githubRepo) {
+      const token = await githubTokenForUser(session.user.id);
+      const headers: Record<string, string> = {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "opendevin",
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const apiRepo = `https://api.github.com/repos/${encodeURIComponent(githubRepo.owner)}/${encodeURIComponent(githubRepo.name)}`;
+      const repoResponse = await fetch(apiRepo, { headers });
+      if (!repoResponse.ok) {
+        return res.status(repoResponse.status === 404 ? 404 : 502).json({
+          error: `Could not fetch GitHub repository (${repoResponse.status})`,
+          branches: [],
+          defaultBranch: "",
+        });
+      }
+      const repoData = (await repoResponse.json()) as { default_branch?: string };
+
+      const branches: string[] = [];
+      for (let page = 1; ; page += 1) {
+        const branchResponse = await fetch(`${apiRepo}/branches?per_page=100&page=${page}`, {
+          headers,
+        });
+        if (!branchResponse.ok) {
+          return res.status(502).json({
+            error: `Could not fetch GitHub branches (${branchResponse.status})`,
+            branches: [],
+            defaultBranch: "",
+          });
+        }
+        const pageBranches = (await branchResponse.json()) as Array<{ name?: string }>;
+        branches.push(...pageBranches.flatMap((item) => (item.name ? [item.name] : [])));
+        if (pageBranches.length < 100) break;
+      }
+
+      return res.json({ branches, defaultBranch: repoData.default_branch || branches[0] || "" });
+    }
+
     const execFileAsync = promisify(execFile);
     // Private repos need the owner's token for ls-remote. Pass it via an
     // http.extraHeader flag (never embedded in the URL) and redact it from
@@ -320,8 +359,7 @@ app.get("/api/projects/:projectId/branches", async (req, res) => {
     const branches = stdout
       .split("\n")
       .map((line) => line.split("\t")[1]?.replace("refs/heads/", "").trim())
-      .filter((b): b is string => Boolean(b))
-      .slice(0, 200);
+      .filter((b): b is string => Boolean(b));
     if (!defaultBranch) {
       defaultBranch = branches.includes("main")
         ? "main"
@@ -936,7 +974,7 @@ app.get("/api/sessions", async (req, res) => {
   if (!session) return res.status(401).json({ error: "Sign in required" });
   const sessions = await prisma.projectSession.findMany({
     where: { project: { userId: session.user.id } },
-    include: { project: { select: { id: true, name: true } } },
+    include: { project: { select: { id: true, repo: true } } },
     omit: { toolLog: true, lastDiff: true },
     orderBy: { updatedAt: "desc" },
   });

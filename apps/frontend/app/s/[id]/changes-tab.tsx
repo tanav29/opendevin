@@ -3,7 +3,7 @@
 import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { API } from "./lib";
+import { api } from "@/lib/api";
 
 export default function ChangesTab({
   sessionId,
@@ -36,11 +36,8 @@ export default function ChangesTab({
   const readDiff = useCallback(async (): Promise<{ ok: boolean; payload: DiffPayload }> => {
     if (!sessionId) return { ok: false, payload: { error: "" } };
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/diff`, {
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => ({}))) as DiffPayload;
-      return { ok: response.ok, payload };
+      const payload = await api<DiffPayload>(`/api/sessions/${sessionId}/diff`);
+      return { ok: true, payload };
     } catch {
       return {
         ok: false,
@@ -127,18 +124,11 @@ export default function ChangesTab({
   async function revertFile(path: string) {
     setReverting(path);
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/revert`, {
+      await api(`/api/sessions/${sessionId}/revert`, {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path }),
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || `Could not revert ${path}`);
-      } else {
-        refresh();
-      }
+      refresh();
     } catch {
       setError("Could not revert: server unreachable.");
     } finally {
@@ -150,18 +140,11 @@ export default function ChangesTab({
     setPublishing(true);
     setPublishResult("");
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/publish`, {
+      const data = await api<{ prUrl?: string }>(`/api/sessions/${sessionId}/publish`, {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: publishBranch, title: publishTitle || defaultTitle }),
       });
-      const data = (await response.json().catch(() => ({}))) as {
-        branch?: string;
-        prUrl?: string;
-        error?: string;
-      };
-      setPublishResult(response.ok ? `PR_OPENED:${data.prUrl}` : data.error || "Publish failed.");
+      setPublishResult(`PR_OPENED:${data.prUrl}`);
     } catch {
       setPublishResult("Publish failed: could not reach the server.");
     } finally {

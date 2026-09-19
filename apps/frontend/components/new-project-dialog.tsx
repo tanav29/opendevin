@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   IconGitBranch,
   IconBrandGithub,
@@ -12,7 +13,6 @@ import {
   IconRefresh,
   IconAlertCircle,
   IconExternalLink,
-  IconPlus,
 } from "@tabler/icons-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,17 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/format";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "./ui/dialog";
-import { SidebarMenuButton } from "./ui/sidebar";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+import { api } from "@/lib/api";
 
 type Repo = {
   id: number;
@@ -50,61 +40,32 @@ type Repo = {
   owner: string;
 };
 
-export default function NewProjectForm() {
-  const [name, setName] = useState("");
+type GithubReposResponse = { repos?: Repo[]; error?: string; needsAuth?: boolean };
+const EMPTY_REPOS: Repo[] = [];
+
+export default function NewProjectForm({ onClose }: { onClose?: () => void }) {
   const [repo, setRepo] = useState("");
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
 
   // repo picker state
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [reposLoading, setReposLoading] = useState(true);
-  const [reposError, setReposError] = useState("");
-  const [needsAuth, setNeedsAuth] = useState(false);
   const [filter, setFilter] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
-  async function fetchRepos() {
-    setReposLoading(true);
-    setReposError("");
-    setNeedsAuth(false);
-    try {
-      const res = await fetch(`${API}/api/github/repos`, { credentials: "include" });
-      const data = (await res.json().catch(() => ({}))) as {
-        repos?: Repo[];
-        error?: string;
-        needsAuth?: boolean;
-      };
-      if (res.status === 401 && data.needsAuth !== false) {
-        setNeedsAuth(true);
-        setReposError(data.error || "Sign in with GitHub to browse your repositories.");
-        setRepos([]);
-        return;
-      }
-      if (!res.ok && !data.repos) {
-        setReposError(data.error || "Could not load GitHub repos.");
-        setRepos([]);
-        return;
-      }
-      setRepos(data.repos || []);
-      if (data.needsAuth) {
-        setNeedsAuth(true);
-        setReposError(data.error || "Sign in with GitHub to browse your repositories.");
-      } else if (data.error) {
-        setReposError(data.error);
-      }
-    } catch {
-      setReposError("Could not reach GitHub. Check your connection.");
-    } finally {
-      setReposLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchRepos();
-  }, []);
+  const reposQuery = useQuery({
+    queryKey: ["github-repos"],
+    queryFn: () => api<GithubReposResponse>("/api/github/repos"),
+    retry: false,
+  });
+  const repos = reposQuery.data?.repos ?? EMPTY_REPOS;
+  const reposLoading = reposQuery.isPending;
+  const needsAuth = reposQuery.data?.needsAuth ?? reposQuery.isError;
+  const reposError = reposQuery.data?.error ?? (reposQuery.isError ? reposQuery.error.message : "");
+  const createProjectMutation = useMutation({
+    mutationFn: (payload: { repo: string }) =>
+      api<{ id: string }>("/api/projects", { method: "POST", body: JSON.stringify(payload) }),
+  });
 
   // close picker on outside click / escape
   useEffect(() => {
@@ -147,7 +108,6 @@ export default function NewProjectForm() {
 
   function handleSelect(r: Repo) {
     setRepo(r.htmlUrl);
-    if (!name.trim()) setName(r.name);
     setPickerOpen(false);
     setFilter("");
     setError("");
@@ -155,59 +115,26 @@ export default function NewProjectForm() {
 
   async function createProject(event: React.FormEvent) {
     event.preventDefault();
-    if (!name.trim()) return;
-    setCreating(true);
+    if (!repo.trim()) return;
     setError("");
     try {
-      const response = await fetch(`${API}/api/projects`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), repo: repo.trim() || null }),
+      setCreating(true);
+      const data = await createProjectMutation.mutateAsync({
+        repo: repo.trim(),
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Could not create project.");
-        setCreating(false);
-        return;
-      }
-      const data = (await response.json()) as { id: string };
       window.location.href = `/p/${data.id}`;
-    } catch {
-      setError("Could not reach the server. Check that the backend is running.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not reach the server.");
       setCreating(false);
     }
   }
 
   return (
-    <Dialog>
-      <DialogTrigger render={<SidebarMenuButton tooltip="New project" />}>
-        <IconPlus className="size-4" />
-        <span>New project</span>
-      </DialogTrigger>
-      <DialogContent className="w-108">
-        <DialogHeader>
-          <DialogTitle>Create a workspace</DialogTitle>
-          <DialogDescription>Pick a repo or start blank.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={createProject} className="space-y-5 min-h-0">
-          <label className="block">
-            <span className="text-sm font-medium">Project name</span>
-            <Input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. opendevin, landing-page, api-refactor"
-              className="mt-2"
-              autoFocus
-            />
-          </label>
-
+    <form onSubmit={createProject} className="space-y-5 min-h-0">
           {/* Repo select */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Repository</span>
-              <span className="text-xs text-muted-foreground">(optional)</span>
+                <span className="text-sm font-medium">Repository</span>
             </div>
 
             {/* GitHub repo picker */}
@@ -306,7 +233,7 @@ export default function NewProjectForm() {
                           variant="outline"
                           size="sm"
                           className="mt-3"
-                          onClick={() => void fetchRepos()}
+                          onClick={() => void reposQuery.refetch()}
                         >
                           <IconRefresh className="size-4" /> Try again
                         </Button>
@@ -418,15 +345,15 @@ export default function NewProjectForm() {
           )}
 
           <div className="flex gap-2 pt-2">
-            <Button type="submit" disabled={creating || !name.trim()} className="min-w-32">
+            <Button type="submit" disabled={creating || !repo.trim()} className="min-w-32">
               {creating ? "Creating…" : "Create project"}
             </Button>
-            <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
-              Cancel
-            </Button>
+            {onClose && (
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+            )}
           </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    </form>
   );
 }

@@ -67,8 +67,7 @@ model Verification {
 
 model Project {
   id        String    @id @default(cuid())
-  name      String
-  repo      String?
+  repo      String
   setupScript String @default("")
   devCommand String @default("")
   devPort   Int     @default(3000)
