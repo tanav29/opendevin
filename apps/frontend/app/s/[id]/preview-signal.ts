@@ -2,17 +2,21 @@
 
 import { useSyncExternalStore } from "react";
 
-export type PreviewSignal = { url: string; port: number; at: number } | null;
+export type PreviewSignal = { sessionId: string; url: string; port: number; at: number } | null;
 
 let signal: PreviewSignal = null;
-const listeners = new Set<() => void>();
+const listeners = new Set<(signal: NonNullable<PreviewSignal>) => void>();
 
-export function emitPreview(url: string, port: number) {
-  signal = { url, port, at: Date.now() };
-  for (const listener of listeners) listener();
+export function emitPreview(sessionId: string, url: string, port: number) {
+  signal = { sessionId, url, port, at: Date.now() };
+  for (const listener of listeners) listener(signal);
 }
 
-function subscribe(listener: () => void) {
+export function getPreviewSignal(): PreviewSignal {
+  return signal;
+}
+
+export function subscribePreview(listener: (signal: NonNullable<PreviewSignal>) => void) {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -28,5 +32,9 @@ function getServerSnapshot(): PreviewSignal {
 }
 
 export function usePreviewSignal(): PreviewSignal {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return useSyncExternalStore(
+    (listener) => subscribePreview(() => listener()),
+    getSnapshot,
+    getServerSnapshot,
+  );
 }

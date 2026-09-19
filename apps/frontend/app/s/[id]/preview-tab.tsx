@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { usePreviewSignal } from "./preview-signal";
+import { getPreviewSignal, subscribePreview } from "./preview-signal";
 
 export default function PreviewTab({
   sessionId,
@@ -17,33 +17,33 @@ export default function PreviewTab({
   onReconnect: () => void;
   defaultPort?: number;
 }) {
-  const [port, setPort] = useState("3000");
-  const [portEdited, setPortEdited] = useState(false);
+  const [port, setPort] = useState<string | null>(null);
   const [path, setPath] = useState("/");
-  const [url, setUrl] = useState("");
+  // The session header's Run-dev button starts the saved dev command and hands
+  // the resolved URL over via emitPreview. A freshly mounted pane reads the
+  // latest signal for this session; an already-open pane picks it up via the
+  // subscription below.
+  const [url, setUrl] = useState(() => {
+    const pending = getPreviewSignal();
+    return pending && pending.sessionId === sessionId ? pending.url : "";
+  });
   const [resolving, setResolving] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [devInfo, setDevInfo] = useState("");
-  const [copied, setCopied] = useState(false);
-  // Request-scoped state resets via the parent's key on session/sandbox change.
-  const appliedSignal = useRef(0);
+  // Request-scoped state (url/error) resets via the parent's key on session/sandbox change.
+  const effectivePort = port ?? (defaultPort ? String(defaultPort) : "3000");
 
-  // Adopt the project's saved dev port until the user edits the field.
-  if (!portEdited && !url && defaultPort && port !== String(defaultPort)) {
-    setPort(String(defaultPort));
-  }
-  // The session header's Run-dev button starts the saved dev command and hands
-  // the resolved URL over via emitPreview — pick it up here.
-  const signal = usePreviewSignal();
-  useEffect(() => {
-    if (signal && signal.at !== appliedSignal.current) {
-      appliedSignal.current = signal.at;
-      setPort(String(signal.port));
-      setUrl(signal.url);
-      setError("");
-    }
-  }, [signal]);
+  useEffect(
+    () =>
+      subscribePreview((next) => {
+        if (next.sessionId !== sessionId) return;
+        setPort(String(next.port));
+        setUrl(next.url);
+        setError("");
+      }),
+    [sessionId],
+  );
 
   async function startDev() {
     setStarting(true);
@@ -57,13 +57,13 @@ export default function PreviewTab({
         log?: string;
       }>(`/api/sessions/${sessionId}/devserver`, {
         method: "POST",
-        body: JSON.stringify({ port: Number(port) || 3000 }),
+        body: JSON.stringify({ port: Number(effectivePort) || 3000 }),
       });
       if (!data.url) {
         setError("Could not start dev server.");
         return;
       }
-      setPort(String(data.port ?? port));
+      setPort(String(data.port ?? effectivePort));
       setDevInfo(`Started: ${data.command}`);
       setUrl(data.url);
     } catch (e) {
@@ -78,7 +78,7 @@ export default function PreviewTab({
     setError("");
     try {
       const data = await api<{ url?: string }>(
-        `/api/sessions/${sessionId}/preview?port=${encodeURIComponent(port)}&path=${encodeURIComponent(path || "/")}`,
+        `/api/sessions/${sessionId}/preview?port=${encodeURIComponent(effectivePort)}&path=${encodeURIComponent(path || "/")}`,
       );
       if (!data.url) {
         setError("Preview unavailable.");
@@ -125,11 +125,8 @@ export default function PreviewTab({
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-1.5 border-b border-border p-2">
         <Input
-          value={port}
-          onChange={(e) => {
-            setPortEdited(true);
-            setPort(e.target.value);
-          }}
+          value={effectivePort}
+          onChange={(e) => setPort(e.target.value)}
           placeholder="3000"
           inputMode="numeric"
           className="w-16"

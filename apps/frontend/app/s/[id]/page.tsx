@@ -28,6 +28,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePanelPrefs } from "./panel-prefs";
 import { api } from "@/lib/api";
+import DevRunButton from "./dev-run-button";
 const Message = dynamic(() => import("./message"), {
   ssr: false,
   loading: () => <span className="text-muted-foreground">Loading response…</span>,
@@ -494,6 +495,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Tooltip>
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+          <DevRunButton
+            sessionId={sessionId}
+            sandboxReady={ready}
+            devCommand={status?.devCommand}
+            devPort={status?.devPort}
+            onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
+            onError={setError}
+          />
           <SessionInfoDialog
             sessionId={sessionId}
             detail={detail}
