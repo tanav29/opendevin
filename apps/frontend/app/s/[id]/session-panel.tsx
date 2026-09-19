@@ -73,12 +73,13 @@ export default function SessionPanel({
         onMouseDown={onDragStart}
         className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-ring/50"
       />
-      <div className="flex h-full flex-col border-l border-border bg-card">
+      <div className="flex h-full flex-col border-l border-t border-border">
         <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
           <div className="flex gap-1">
             {tabs.map((tab) => (
               <Button
                 key={tab.id}
+                size="xs"
                 onClick={() => selectTab(tab.id)}
                 variant={activeTab === tab.id ? "outline" : "ghost"}
               >
@@ -87,12 +88,6 @@ export default function SessionPanel({
             ))}
           </div>
         </div>
-        <p
-          className="truncate border-b border-border px-3 py-1 font-mono text-[10px] text-muted-foreground"
-          title={workspacePath || "/home/user/workspace"}
-        >
-          {workspacePath || "/home/user/workspace"}
-        </p>
         <div className="min-h-0 flex-1">
           {activeTab === "files" && (
             <FilesTab

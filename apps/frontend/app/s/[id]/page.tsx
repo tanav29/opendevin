@@ -4,16 +4,26 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   IconArrowLeft,
+  IconCopy,
+  IconInfoCircle,
   IconPlayerStop,
-  IconSend2,
   IconRefresh,
   IconTrash,
   IconTerminal,
   IconLayoutSidebarRight,
 } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePanelPrefs } from "./panel-prefs";
@@ -29,68 +39,189 @@ const SessionPanel = dynamic(() => import("./session-panel"), {
 import {
   API,
   PROVISIONING_SANDBOX,
+  formatDate,
   isWorking,
   type ChatMessage,
   type SessionDetail,
   type SessionStatus,
 } from "./lib";
-import { Bot, Box, PaperclipIcon } from "lucide-react";
+import { PaperclipIcon } from "lucide-react";
 
-function AgentBadge({
-  working,
-  failed,
-  streaming,
-}: {
-  working: boolean;
-  failed: boolean;
-  streaming: boolean;
-}) {
-  const label = streaming || working ? "Working" : failed ? "Failed" : "Idle";
+function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex cursor-help" />}>
-        <Badge variant={failed ? "destructive" : "ghost"}>
-          <Bot className="w-3" />
-          {label}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent>
-        {failed
-          ? "The last agent run failed. Retry from the conversation."
-          : working || streaming
-            ? "The agent is currently processing this session."
-            : "The agent is ready for your next message."}
-      </TooltipContent>
-    </Tooltip>
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b border-border/60 py-2.5 last:border-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-xs font-medium">{value || "—"}</dd>
+    </div>
   );
 }
 
-function SandboxBadge({ status }: { status: SessionStatus | null }) {
-  const sandboxStatus = status?.sandboxStatus || "pending";
-  const label = status
-    ? sandboxStatus === "ready"
-      ? status.sandboxAvailable
-        ? "Active"
-        : "Unreachable"
-      : sandboxStatus === "error"
-        ? "Failed"
-        : "Provisioning"
-    : "…";
-  const description = status
-    ? `${status.workspacePath || "/home/user/workspace"} · ${
-        sandboxStatus === "ready" && status.sandboxAvailable ? "Connected" : label
-      }`
-    : "Loading sandbox status…";
+function CompactValue({ value, onCopy }: { value: string; onCopy: (value: string) => void }) {
+  if (!value) return <span>—</span>;
+  const visible = value.length > 5 ? `${value.slice(0, 5)}…` : value;
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex cursor-help" />}>
-        <Badge variant={sandboxStatus === "error" ? "destructive" : "ghost"}>
-          <Box className="w-3" />
-          {label}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent>{description}</TooltipContent>
-    </Tooltip>
+    <span className="inline-flex max-w-full items-center justify-end gap-1">
+      <span className="truncate font-mono" title={value}>
+        {visible}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={`Copy ${value}`}
+        onClick={() => onCopy(value)}
+      >
+        <IconCopy />
+      </Button>
+    </span>
+  );
+}
+
+function SessionInfoDialog({
+  sessionId,
+  detail,
+  status,
+  onReconnect,
+  onKill,
+  reconnecting,
+  killing,
+}: {
+  sessionId: string;
+  detail: SessionDetail | null;
+  status: SessionStatus | null;
+  onReconnect: () => void;
+  onKill: () => void;
+  reconnecting: boolean;
+  killing: boolean;
+}) {
+  const sandboxStatus = status?.sandboxStatus || detail?.sandboxStatus || "pending";
+  const agentStatus = status?.status || detail?.status || "idle";
+  const plan = status?.plan || [];
+  const usage = status?.usage;
+  const createdAt = detail?.createdAt || status?.createdAt;
+  const [copied, setCopied] = useState("");
+  const sandboxId = status?.sandboxId || detail?.sandboxId || "";
+  const canReconnect =
+    sandboxStatus === "error" || (sandboxStatus === "ready" && !status?.sandboxAvailable);
+
+  function copyValue(value: string) {
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(value);
+      window.setTimeout(() => setCopied(""), 1400);
+    });
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger
+        render={<Button variant="ghost" size="icon-sm" aria-label="View session information" />}
+      >
+        <IconInfoCircle />
+      </DialogTrigger>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Session information</DialogTitle>
+          <DialogDescription>
+            Runtime details for {detail?.title || "this session"}.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <section className="rounded-lg border bg-muted/20 px-3">
+            <h3 className="border-b border-border/60 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Session
+            </h3>
+            <dl>
+              <InfoRow
+                label="Session ID"
+                value={<CompactValue value={sessionId} onCopy={copyValue} />}
+              />
+              <InfoRow
+                label="Project"
+                value={<CompactValue value={detail?.projectId || ""} onCopy={copyValue} />}
+              />
+              <InfoRow label="Branch" value={status?.branch || detail?.branch || ""} />
+              <InfoRow label="Agent status" value={agentStatus} />
+              <InfoRow label="Model" value={status?.model || detail?.model || ""} />
+            </dl>
+          </section>
+          <section className="rounded-lg border bg-muted/20 px-3">
+            <h3 className="border-b border-border/60 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Workspace
+            </h3>
+            <dl>
+              <InfoRow label="Sandbox" value={sandboxStatus} />
+              <InfoRow
+                label="Availability"
+                value={status ? (status.sandboxAvailable ? "Connected" : "Unreachable") : ""}
+              />
+              <InfoRow
+                label="Sandbox ID"
+                value={<CompactValue value={sandboxId} onCopy={copyValue} />}
+              />
+              <InfoRow label="Path" value={status?.workspacePath || detail?.workspacePath || ""} />
+              <InfoRow label="Repository" value={status?.repo || ""} />
+            </dl>
+          </section>
+          <section className="rounded-lg border bg-muted/20 px-3 sm:col-span-2">
+            <h3 className="border-b border-border/60 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Activity
+            </h3>
+            <dl className="grid sm:grid-cols-2 sm:gap-x-6">
+              <InfoRow label="Created" value={createdAt ? formatDate(createdAt) : ""} />
+              <InfoRow
+                label="Updated"
+                value={detail?.updatedAt ? formatDate(detail.updatedAt) : ""}
+              />
+              <InfoRow
+                label="Plan"
+                value={
+                  plan.length
+                    ? `${plan.filter((item) => item.status === "done").length}/${plan.length} complete`
+                    : "No plan"
+                }
+              />
+              <InfoRow
+                label="Tokens"
+                value={usage?.totalTokens ? usage.totalTokens.toLocaleString() : "—"}
+              />
+              <InfoRow
+                label="Last error"
+                value={status?.lastError || detail?.lastError || "None"}
+              />
+            </dl>
+          </section>
+        </div>
+        <div className="flex items-center justify-between gap-2 border-t pt-4">
+          <span className="text-xs text-muted-foreground">
+            {copied ? "Copied full value" : "IDs are shortened for readability"}
+          </span>
+          <div className="flex gap-2">
+            {canReconnect && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onReconnect}
+                disabled={reconnecting}
+              >
+                <IconRefresh /> {reconnecting ? "Reconnecting…" : "Reconnect"}
+              </Button>
+            )}
+            {sandboxId && sandboxStatus !== "error" && (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={onKill}
+                disabled={killing}
+              >
+                <IconPlayerStop /> {killing ? "Stopping…" : "Kill sandbox"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -293,9 +424,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setKilling(true);
     setError("");
     try {
-      await api(`/api/sessions/${sessionId}/kill`, {
-        method: "POST",
-      });
+      await api(`/api/sessions/${sessionId}/kill`, { method: "POST" });
       await refresh(sessionId, false);
     } catch {
       setError("Could not kill sandbox: the server is unreachable.");
@@ -334,7 +463,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   return (
     <main className="flex h-screen flex-col bg-background">
-      <header className="z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-card/90 px-3 py-2.5 backdrop-blur sm:px-5">
+      <header className="z-10 flex shrink-0 items-center justify-between gap-3 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Tooltip>
             <TooltipTrigger render={<span className="inline-flex" />}>
@@ -352,9 +481,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <Tooltip>
             <TooltipTrigger render={<div className="min-w-0 cursor-default" />}>
               <div className="flex min-w-0 items-center gap-2">
-                  <h1 className="max-w-[min(42vw,24rem)] truncate text-sm">
-                    {detail?.title || "Loading session…"}
-                  </h1>
+                <h1 className="max-w-[min(42vw,24rem)] truncate text-sm">
+                  {detail?.title || "Loading session…"}
+                </h1>
                 {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
               </div>
             </TooltipTrigger>
@@ -365,45 +494,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Tooltip>
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-          <AgentBadge
-            working={agentStatus === "running"}
-            failed={agentStatus === "failed"}
-            streaming={sending}
+          <SessionInfoDialog
+            sessionId={sessionId}
+            detail={detail}
+            status={status}
+            onReconnect={() => void reconnect()}
+            onKill={() => void kill()}
+            reconnecting={reconnecting}
+            killing={killing}
           />
-          <SandboxBadge status={status} />
-          {(failed || (sandboxStatus === "ready" && !status?.sandboxAvailable)) && (
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void reconnect()}
-                  disabled={reconnecting}
-                >
-                  {reconnecting ? "…" : "Reconnect"}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Reconnect the workspace sandbox</TooltipContent>
-            </Tooltip>
-          )}
-          {(status?.sandboxId || detail?.sandboxId) && !failed && (
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  aria-label="Stop sandbox"
-                  onClick={() => void kill()}
-                  disabled={killing}
-                  className="gap-1.5"
-                >
-                  <IconPlayerStop className="size-3.5" />
-                  <span className="hidden sm:inline">{killing ? "Stopping…" : "Stop sandbox"}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Stop the sandbox, terminal, and preview</TooltipContent>
-            </Tooltip>
-          )}
           <Tooltip>
             <TooltipTrigger render={<span className="inline-flex" />}>
               <Button
@@ -429,7 +528,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 <IconLayoutSidebarRight />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{prefs.open ? "Hide workspace panel" : "Show workspace panel"}</TooltipContent>
+            <TooltipContent>
+              {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+            </TooltipContent>
           </Tooltip>
         </div>
       </header>
@@ -455,15 +556,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 <p className="text-sm font-medium text-destructive">
                   Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}
                 </p>
-                <Button
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => void reconnect()}
-                  disabled={reconnecting}
-                >
-                  <IconRefresh className="size-4" />{" "}
-                  {reconnecting ? "Reconnecting…" : "Reconnect sandbox"}
-                </Button>
+                <p className="mt-2 text-xs text-destructive/80">
+                  Open session information to reconnect the sandbox.
+                </p>
               </div>
             )}
             {agentStatus === "failed" && !sending && (
