@@ -66,8 +66,8 @@ export default function PreviewTab({
       setPort(String(data.port ?? effectivePort));
       setDevInfo(`Started: ${data.command}`);
       setUrl(data.url);
-    } catch {
-      setError("Could not start dev server: server unreachable.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start dev server.");
     } finally {
       setStarting(false);
     }
@@ -86,11 +86,22 @@ export default function PreviewTab({
         return;
       }
       setUrl(data.url);
-    } catch {
-      setError("Preview unavailable: could not reach the server.");
+    } catch (e) {
+      // The backend only resolves URLs that actually serve, so a failure here
+      // means nothing listens on this port — drop the stale iframe, if any.
+      setUrl("");
+      setError(e instanceof Error ? e.message : "Preview unavailable.");
     } finally {
       setResolving(false);
     }
+  }
+
+  function copyUrl() {
+    if (!url) return;
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
   }
 
   if (!available) {
@@ -133,6 +144,24 @@ export default function PreviewTab({
           {starting ? "…" : "Auto-start"}
         </Button>
       </div>
+      {url && (
+        <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+            {url}
+          </span>
+          <Button variant="ghost" size="xs" onClick={copyUrl}>
+            {copied ? "Copied" : "Copy"}
+          </Button>
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-primary hover:underline"
+          >
+            Open ↗
+          </a>
+        </div>
+      )}
       {devInfo && (
         <p className="truncate border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
           {devInfo}
@@ -147,18 +176,25 @@ export default function PreviewTab({
         </p>
       )}
       {url ? (
-        <iframe
-          title="Sandbox preview"
-          src={url}
-          className="min-h-0 flex-1"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
+        <>
+          <iframe
+            key={url}
+            title="Sandbox preview"
+            src={url}
+            className="min-h-0 flex-1"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+          <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+            Blank here but the site works via Open ↗? The app blocks iframe embedding — use the
+            external link.
+          </p>
+        </>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <p className="text-sm font-medium">No preview loaded</p>
           <p className="max-w-64 text-[13px] text-muted-foreground">
-            Start a dev server in the terminal or via the agent, then open the port above. The URL
-            appears only after it resolves.
+            Start a dev server in the terminal, via the agent, or with Auto-start, then open the
+            port above. The preview appears only once something actually serves that port.
           </p>
         </div>
       )}

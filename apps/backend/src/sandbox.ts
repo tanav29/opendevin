@@ -276,6 +276,41 @@ export async function checkSandboxAvailable(sandboxId: string): Promise<boolean>
   }
 }
 
+// Preview readiness: E2B's getHost() yields a URL for any port, even when
+// nothing listens there — the iframe then shows a dead page. Probe from inside
+// the sandbox so /preview and /devserver only hand out URLs that serve.
+export async function probePort(
+  sandbox: Sandbox,
+  port: number,
+  timeoutMs = 10_000,
+): Promise<{ listening: boolean; httpCode: number }> {
+  const out = await runSandbox(
+    sandbox,
+    `curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:${port}/ || true`,
+    "/tmp",
+    timeoutMs,
+  ).catch(() => ({ exitCode: 1, stdout: "", stderr: "" }));
+  const code = Number((out.stdout || "").trim().slice(-3));
+  // curl prints 000 when TCP connect fails. Any real HTTP status (even 404/500
+  // rendered by the app itself) means something is serving the port.
+  if (Number.isInteger(code) && code > 0) return { listening: true, httpCode: code };
+  return { listening: false, httpCode: 0 };
+}
+
+export async function waitForPort(
+  sandbox: Sandbox,
+  port: number,
+  timeoutMs = 25_000,
+): Promise<{ listening: boolean; httpCode: number }> {
+  const start = Date.now();
+  let last = { listening: false, httpCode: 0 };
+  for (;;) {
+    last = await probePort(sandbox, port);
+    if (last.listening || Date.now() - start > timeoutMs) return last;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 // Attach sandbox tools when the workspace sandbox is reachable, otherwise
 // return a note so the agent answers from general knowledge.
 export async function connectSandboxTools(
