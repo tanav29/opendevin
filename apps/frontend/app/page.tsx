@@ -1,19 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { IconTerminal, IconArrowUpRight } from "@tabler/icons-react";
+import { IconTerminal } from "@tabler/icons-react";
 
-import { AppShell } from "@/components/layout/app-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusDot } from "@/components/ui/status-dot";
-import { timeAgo, repoName } from "@/lib/format";
 import TaskForm from "@/components/task-form";
 import { api } from "@/lib/api";
+import { SessionSummary } from "@/components/session-summary";
 
 type Project = {
   id: string;
@@ -25,6 +21,7 @@ type Session = {
   status: string;
   sandboxStatus: string;
   branch: string;
+  createdAt: string;
   updatedAt: string;
   projectId: string;
   project?: { id: string; repo: string };
@@ -73,85 +70,60 @@ export default function Home() {
 
   if (signedIn === false) {
     return (
-      <AppShell>
-        <PageShell
-          header={
-            <PageHeader
-              title="OpenDevin"
-              description="Developer workspace"
-              actions={
-                <Button size="sm" onClick={() => (window.location.href = "/login")}>
-                  Sign in
-                </Button>
-              }
-            />
-          }
-        >
-          <SignedOut />
-        </PageShell>
-      </AppShell>
+      <PageShell
+        header={
+          <PageHeader
+            title="OpenDevin"
+            description="Developer workspace"
+            actions={
+              <Button size="sm" onClick={() => (window.location.href = "/login")}>
+                Sign in
+              </Button>
+            }
+          />
+        }
+      >
+        <SignedOut />
+      </PageShell>
     );
   }
 
   return (
-    <AppShell>
-      <PageShell header={<PageHeader title="Home" description="Run a task" />}>
-        <PageContainer size="wide" className="py-8">
-
+    <PageShell header={<PageHeader title="Home" />}>
+      <PageContainer size="wide" className="py-8">
         <TaskForm projects={projects} />
 
-          <div className="mt-8">
-            <h2 className="text-xs font-medium text-muted-foreground">Recent</h2>
-            {loading ? (
-              <div className="mt-3 divide-y rounded-lg border">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="flex items-center justify-between p-4">
-                    <div className="space-y-2">
-                      <Skeleton className="h-3 w-40" />
-                      <Skeleton className="h-3 w-24" />
-                    </div>
-                    <Skeleton className="h-3 w-16" />
+        <div className="mt-8">
+          <h2 className="text-xs font-medium text-muted-foreground">Recent</h2>
+          {loading ? (
+            <div className="mt-3 divide-y rounded-lg border">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center justify-between p-4">
+                  <div className="space-y-2">
+                    <Skeleton className="h-3 w-40" />
+                    <Skeleton className="h-3 w-24" />
                   </div>
-                ))}
-              </div>
-            ) : recent.length === 0 ? (
-              <div className="mt-3 rounded-lg border">
-                <EmptyState
-                  icon={<IconTerminal className="size-4" />}
-                  title="No sessions yet"
-                  description="Run your first task above."
-                />
-              </div>
-            ) : (
-              <div className="mt-3 divide-y overflow-hidden rounded-lg border">
-                {recent.map((s) => (
-                  <Link
-                    key={s.id}
-                    href={`/s/${s.id}`}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50"
-                  >
-                    <StatusDot status={s.status} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium">{s.title}</p>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        {s.project?.repo ? repoName(s.project.repo) : "Repository"}
-                        {s.branch ? ` · ${s.branch}` : ""} · {timeAgo(s.updatedAt)}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="hidden font-mono text-[11px] sm:inline-flex"
-                    >
-                      {s.sandboxStatus}
-                    </Badge>
-                    <IconArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        </PageContainer>
-      </PageShell>
-    </AppShell>
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              ))}
+            </div>
+          ) : recent.length === 0 ? (
+            <div className="mt-3 rounded-lg border">
+              <EmptyState
+                icon={<IconTerminal className="size-4" />}
+                title="No sessions yet"
+                description="Run your first task above."
+              />
+            </div>
+          ) : (
+            <div className="mt-3 divide-y overflow-hidden rounded-lg border">
+              {recent.map((s) => (
+                <SessionSummary key={s.id} href={`/s/${s.id}`} showRepo session={s} />
+              ))}
+            </div>
+          )}
+        </div>
+      </PageContainer>
+    </PageShell>
   );
 }

@@ -29,6 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { usePanelPrefs } from "./panel-prefs";
 import { api } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
+import { SessionSummary } from "@/components/session-summary";
 const Message = dynamic(() => import("./message"), {
   ssr: false,
   loading: () => <span className="text-muted-foreground">Loading response…</span>,
@@ -363,7 +364,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         // (the server may have persisted nothing, e.g. 409 already-running)
         // and re-sync from the DB instead of leaving ghosts behind.
         setMessages((current) =>
-          current.filter((message) => message.id !== "streaming" && !message.id.startsWith("local-")),
+          current.filter(
+            (message) => message.id !== "streaming" && !message.id.startsWith("local-"),
+          ),
         );
         await refresh(sessionId, true);
         return;
@@ -549,6 +552,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Tooltip>
         </div>
       </header>
+
+      <div className="border-y bg-muted/20 px-3 sm:px-6">
+        <div className="mx-auto max-w-4xl">
+          <SessionSummary
+            className="px-0 py-2.5"
+            session={{
+              id: sessionId,
+              title: detail?.title || "Loading session…",
+              repo: status?.repo,
+              branch: status?.branch || detail?.branch,
+              createdAt: detail?.createdAt || status?.createdAt,
+              status: agentStatus,
+              sandboxStatus,
+            }}
+          />
+        </div>
+      </div>
 
       <div className="flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col bg-background">

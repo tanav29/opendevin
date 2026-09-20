@@ -3,7 +3,6 @@
 import { IconSettings, IconLogout, IconArrowLeft, IconBrandGithub } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
@@ -25,8 +24,7 @@ export default function Settings() {
   const profileUrl = me?.github.profileUrl;
 
   return (
-    <AppShell>
-      <PageShell
+    <PageShell
         header={
           <PageHeader
             title="Settings"
@@ -85,6 +83,5 @@ export default function Settings() {
           </Card>
         </PageContainer>
       </PageShell>
-    </AppShell>
   );
 }

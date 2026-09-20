@@ -11,7 +11,6 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,8 +194,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
 
   if (loading) {
     return (
-      <AppShell>
-        <PageShell header={<PageHeader title="Loading…" description="Workspace" />}>
+      <PageShell header={<PageHeader title="Loading…" description="Workspace" />}>
           <PageContainer size="wide" className="py-8">
             <div className="animate-pulse space-y-6">
               <div className="h-9 w-48 rounded bg-muted" />
@@ -212,14 +210,12 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             </div>
           </PageContainer>
         </PageShell>
-      </AppShell>
     );
   }
 
   if (notFound || !project) {
     return (
-      <AppShell>
-        <PageShell header={<PageHeader title="Not found" />}>
+      <PageShell header={<PageHeader title="Not found" />}>
           <PageContainer className="py-16 text-center">
             <EmptyState
               icon={<IconFolder className="size-4" />}
@@ -229,13 +225,11 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             />
           </PageContainer>
         </PageShell>
-      </AppShell>
     );
   }
 
   return (
-    <AppShell>
-      <PageShell
+    <PageShell
         header={
           <PageHeader
             title={repoName(project.repo)}
@@ -395,6 +389,5 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
           </div>
         </PageContainer>
       </PageShell>
-    </AppShell>
   );
 }

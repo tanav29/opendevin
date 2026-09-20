@@ -47,7 +47,7 @@ export function StatusDot({
       className={cn(
         "relative inline-flex h-2 w-2 shrink-0 rounded-full",
         TONE[tone].dot,
-        // tone === "running" && "animate-halo",
+        tone === "running" && "animate-halo",
         className,
       )}
     />

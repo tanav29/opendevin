@@ -33,10 +33,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { StatusDot } from "@/components/ui/status-dot";
+import { statusLabel, StatusDot } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import { Code2 } from "lucide-react";
+import { CircleX, Code2, Loader, Loader2 } from "lucide-react";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -52,6 +52,20 @@ type Session = {
 
 const EMPTY_PROJECTS: Project[] = [];
 const EMPTY_SESSIONS: Session[] = [];
+
+function sandboxTone(status: string) {
+  if (status === "ready") return "bg-emerald-500";
+  if (status === "error") return "bg-destructive";
+  if (["pending", "creating", "cloning"].includes(status)) return "bg-amber-400";
+  return "bg-muted-foreground/40";
+}
+
+function sandboxLabel(status: string) {
+  if (status === "ready") return "Ready";
+  if (status === "error") return "Failed";
+  if (["pending", "creating", "cloning"].includes(status)) return "Starting";
+  return status || "Unknown";
+}
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -103,17 +117,14 @@ export function AppSidebar() {
 
   return (
     <>
-      <Sidebar collapsible="icon" variant="inset">
+      <Sidebar collapsible="icon" variant="sidebar">
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
                 tooltip="OpenDevin home"
                 render={<Link href="/" prefetch />}
-              >
-                <span className="flex aspect-square items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground p-2">
-                  <Code2 className="size-4" />
-                </span>
+              ><Code2 className="size-4" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
                   <span className="truncate font-semibold text-sm">OpenDevin</span>
                 </span>
@@ -211,7 +222,7 @@ export function AppSidebar() {
                                   render={<Link href={`/p/${p.id}`} prefetch />}
                                 >
                                   <IconFolder className="shrink-0 text-muted-foreground" />
-                                  <span className="min-w-0 flex-1 truncate">{p.repo}</span>
+                                  <span className="min-w-0 flex-1 truncate">{p.repo.split("/")[p.repo.split("/").length - 2]}/{p.repo.split("/")[p.repo.split("/").length - 1]}</span>
                                 </SidebarMenuButton>
                                 {count > 0 && (
                                   <SidebarMenuBadge>{count}</SidebarMenuBadge>
@@ -221,14 +232,6 @@ export function AppSidebar() {
                           })
                         )}
                       </SidebarMenu>
-                      {projects.length > 6 && !query && (
-                        <Link
-                          href="/"
-                          className="mt-1 block px-2 text-[11px] text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
-                        >
-                          View all →
-                        </Link>
-                      )}
                     </SidebarGroupContent>
                   </CollapsibleContent>
                 </SidebarGroup>
@@ -239,7 +242,7 @@ export function AppSidebar() {
                   <SidebarGroupLabel render={<CollapsibleTrigger />}>
                     Sessions
                     <span className="ml-auto flex items-center gap-1.5">
-                      {runningCount > 0 && (
+                      {runningCount < 0 && (
                         <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
                           <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
                           {runningCount}
@@ -270,12 +273,28 @@ export function AppSidebar() {
                             return (
                               <SidebarMenuItem key={s.id}>
                                 <SidebarMenuButton
+                                  size={"sm"}
                                   isActive={active}
-                                  tooltip={`${s.title} · ${s.project.repo}`}
+                                  tooltip={`${s.title} · Agent ${statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
                                   render={<Link href={`/s/${s.id}`} prefetch />}
                                 >
+                                  {
+                                    s.status == "running" && <Loader className="h-3 animate-spin text-muted-foreground" />
+                                  }
+                                  {
+                                    s.status == "failed" && <CircleX className="h-3 text-muted-foreground" />
+                                  }
+                                  {/*{
+                                    s.status == "stopped" && < className="h-3 animate-spin text-muted-foreground" />
+                                  }*/}
+
                                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                                  <StatusDot status={s.status} className="ml-auto" />
+                                  {/*<span
+                                    role="img"
+                                    aria-label={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
+                                    title={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
+                                    className={`size-1.5 shrink-0 rounded-full ${sandboxTone(s.sandboxStatus)}`}
+                                  />*/}
                                 </SidebarMenuButton>
                               </SidebarMenuItem>
                             );
