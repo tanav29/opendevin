@@ -215,6 +215,21 @@ export async function cloneRepo(
   }
 }
 
+export async function ensureRipgrep(sandbox: Sandbox): Promise<void> {
+  // Best-effort: E2B base images don't ship rg. Search falls back to grep,
+  // so never fail provisioning when the install fails (offline, no apt, ...).
+  try {
+    await runSandbox(
+      sandbox,
+      "command -v rg >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep || { apt-get update -qq && apt-get install -y -qq ripgrep; }; }",
+      "/tmp",
+      120_000,
+    );
+  } catch {
+    // Ignore — search tool falls back to grep.
+  }
+}
+
 export async function provisionSandbox(sessionId: string): Promise<void> {
   const existing = await prisma.projectSession.findUnique({
     where: { id: sessionId },
@@ -232,6 +247,7 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
       throw new Error("E2B_API_KEY is not configured");
     }
     const sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+    await ensureRipgrep(sandbox);
     await prisma.projectSession.update({
       where: { id: sessionId },
       data: {
@@ -515,7 +531,7 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
     }),
     search: tool({
       description:
-        "Grep for text in the workspace (excludes .git/node_modules). Use to find symbols, imports, TODOs before reading files.",
+        "Search text in the workspace with ripgrep (excludes .git/node_modules). Use to find symbols, imports, TODOs before reading files.",
       inputSchema: z.object({
         pattern: z.string().describe("Fixed string or regex, e.g. 'useState'"),
         dir: z.string().default(".").describe("Relative dir to search"),
@@ -524,9 +540,11 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         const rel = sanitizeRel(dir ?? ".");
         if (rel === null) return "Invalid dir.";
         if (!pattern || pattern.length > 300) return "Invalid pattern.";
+        const target = shellQuote(rel === "" ? "." : rel);
+        const query = shellQuote(pattern);
         const out = await runSandbox(
           sandbox,
-          `grep -rn -I --exclude-dir=.git --exclude-dir=node_modules -- ${shellQuote(pattern)} ${shellQuote(rel === "" ? "." : rel)} | head -n 100`,
+          `if command -v rg >/dev/null 2>&1; then rg --no-heading --line-number --hidden --no-messages --glob '!.git/*' --glob '!node_modules/*' -M 500 -e ${query} ${target} | head -n 100; else grep -rn -I --exclude-dir=.git --exclude-dir=node_modules -- ${query} ${target} | head -n 100; fi`,
           cwd,
         );
         const text = (out.stdout || "").slice(0, 12000);
