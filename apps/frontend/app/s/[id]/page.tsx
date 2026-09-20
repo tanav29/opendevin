@@ -553,23 +553,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       </header>
 
-      <div className="border-y bg-muted/20 px-3 sm:px-6">
-        <div className="mx-auto max-w-4xl">
-          <SessionSummary
-            className="px-0 py-2.5"
-            session={{
-              id: sessionId,
-              title: detail?.title || "Loading session…",
-              repo: status?.repo,
-              branch: status?.branch || detail?.branch,
-              createdAt: detail?.createdAt || status?.createdAt,
-              status: agentStatus,
-              sandboxStatus,
-            }}
-          />
-        </div>
-      </div>
-
       <div className="flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col bg-background">
           <div className="chat-scroll mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-4 py-7 sm:px-8">
