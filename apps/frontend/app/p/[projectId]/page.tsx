@@ -1,26 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  IconGitBranch,
-  IconTrash,
-  IconFolder,
-  IconTerminal,
-  IconSettings,
-} from "@tabler/icons-react";
+import { IconTrash, IconFolder, IconTerminal, IconSettings } from "@tabler/icons-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusDot } from "@/components/ui/status-dot";
 import { ConfirmProvider, useConfirm } from "@/components/ui/confirm";
-import { timeAgo, repoName } from "@/lib/format";
+import { repoName } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import TaskForm from "@/components/task-form";
@@ -32,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
+import { SessionSummary } from "@/components/session-summary";
 
 type Project = {
   id: string;
@@ -113,7 +105,8 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       setProject(projectQuery.data);
       if (projectQuery.data.setupScript) setSetupScript(projectQuery.data.setupScript);
       if (projectQuery.data.devCommand) setDevCommand(projectQuery.data.devCommand);
-      if (typeof projectQuery.data.devPort === "number") setDevPort(String(projectQuery.data.devPort));
+      if (typeof projectQuery.data.devPort === "number")
+        setDevPort(String(projectQuery.data.devPort));
       if (projectQuery.data.envVars) {
         try {
           const parsed = JSON.parse(projectQuery.data.envVars) as Record<string, string>;
@@ -127,7 +120,13 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     if (!projectQuery.isPending && !sessionsQuery.isPending) {
       setLoading(false);
     }
-  }, [projectQuery.data, projectQuery.isError, projectQuery.isPending, sessionsQuery.data, sessionsQuery.isPending]);
+  }, [
+    projectQuery.data,
+    projectQuery.isError,
+    projectQuery.isPending,
+    sessionsQuery.data,
+    sessionsQuery.isPending,
+  ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   async function saveEnvironment() {
@@ -195,199 +194,236 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   if (loading) {
     return (
       <PageShell header={<PageHeader title="Loading…" description="Workspace" />}>
-          <PageContainer size="wide" className="py-8">
-            <div className="animate-pulse space-y-6">
-              <div className="h-9 w-48 rounded bg-muted" />
-              <div className="h-4 w-64 rounded bg-muted" />
-              <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-                <div className="space-y-3">
-                  {[0, 1, 2].map((i) => (
-                    <Skeleton key={i} className="h-16" />
-                  ))}
-                </div>
-                <Skeleton className="h-64" />
+        <PageContainer size="wide" className="py-8">
+          <div className="animate-pulse space-y-6">
+            <div className="h-9 w-48 rounded bg-muted" />
+            <div className="h-4 w-64 rounded bg-muted" />
+            <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
               </div>
+              <Skeleton className="h-64" />
             </div>
-          </PageContainer>
-        </PageShell>
+          </div>
+        </PageContainer>
+      </PageShell>
     );
   }
 
   if (notFound || !project) {
     return (
       <PageShell header={<PageHeader title="Not found" />}>
-          <PageContainer className="py-16 text-center">
-            <EmptyState
-              icon={<IconFolder className="size-4" />}
-              title="Project not found"
-              description="It may have been deleted or you don't have access."
-              action={{ label: "Back to dashboard", onClick: () => (window.location.href = "/") }}
-            />
-          </PageContainer>
-        </PageShell>
+        <PageContainer className="py-16 text-center">
+          <EmptyState
+            icon={<IconFolder className="size-4" />}
+            title="Project not found"
+            description="It may have been deleted or you don't have access."
+            action={{ label: "Back to dashboard", onClick: () => (window.location.href = "/") }}
+          />
+        </PageContainer>
+      </PageShell>
     );
   }
 
   return (
     <PageShell
-        header={
-          <PageHeader
-            title={repoName(project.repo)}
-            description={project.repo}
-            actions={
-              <div className="flex items-center gap-1.5">
-                <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>
-                  <IconSettings className="size-4" /> Config
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="icon-sm"
-                  onClick={() => void deleteProject()}
-                  disabled={deleting}
-                >
-                  {deleting ? <Loader2 className="animate-spin" /> : <IconTrash />}
-                </Button>
-              </div>
-            }
+      header={
+        <PageHeader
+          title={repoName(project.repo)}
+          description={project.repo}
+          actions={
+            <div className="flex items-center gap-1.5">
+              <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>
+                <IconSettings className="size-4" /> Config
+              </Button>
+              <Button
+                variant="destructive"
+                size="icon-sm"
+                onClick={() => void deleteProject()}
+                disabled={deleting}
+              >
+                {deleting ? <Loader2 className="animate-spin" /> : <IconTrash />}
+              </Button>
+            </div>
+          }
+        />
+      }
+    >
+      <PageContainer size="wide" className="py-6">
+        <div className="mt-6">
+          <TaskForm
+            projects={[{ id: project.id, repo: project.repo }]}
+            initialProjectId={project.id}
           />
-        }
-      >
-        <PageContainer size="wide" className="py-6">
-          <div className="mt-6">
-            <TaskForm
-              projects={[{ id: project.id, repo: project.repo }]}
-              initialProjectId={project.id}
-            />
-            {error && (
-              <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </p>
-            )}
+          {error && (
+            <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
 
-            <Dialog open={configOpen} onOpenChange={setConfigOpen}>
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>Project config</DialogTitle>
-                  <DialogDescription>Setup and environment used by new sessions.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-6">
-                  <section className="space-y-3">
-                    <div>
-                      <h3 className="text-sm font-medium">Project setup</h3>
-                      <p className="text-xs text-muted-foreground">Saved globally for this project.</p>
-                    </div>
-                    <div>
-                      <Label>Setup script</Label>
-                      <Textarea value={setupScript} onChange={(e) => setSetupScript(e.target.value)} placeholder="pnpm install" rows={2} className="mt-2 font-mono text-xs" />
-                    </div>
-                    <div className="flex gap-2">
-                      <div className="min-w-0 flex-1"><Label>Dev command</Label><Input value={devCommand} onChange={(e) => setDevCommand(e.target.value)} placeholder="pnpm dev" className="mt-2 font-mono text-xs" /></div>
-                      <div className="w-24 shrink-0"><Label>Port</Label><Input value={devPort} onChange={(e) => setDevPort(e.target.value)} inputMode="numeric" className="mt-2 font-mono text-xs" /></div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" onClick={() => void saveProjectSetup()} disabled={savingSetup}>
-                        {savingSetup ? "Saving…" : "Save project setup"}
-                      </Button>
-                      {setupSaved && <span className="text-xs text-muted-foreground">{setupSaved}</span>}
-                    </div>
-                  </section>
-
-                  <section className="space-y-3 border-t pt-4">
-                    <div>
-                      <h3 className="text-sm font-medium">Environment variables</h3>
-                      <p className="text-xs text-muted-foreground">Available to setup scripts and dev servers in new sessions.</p>
-                    </div>
-                    <div className="space-y-2">
-                      {envVars.map((item, index) => (
-                        <div key={index} className="flex gap-2">
-                          <Input value={item.key} onChange={(e) => setEnvVars((items) => items.map((current, i) => i === index ? { ...current, key: e.target.value } : current))} placeholder="KEY" className="font-mono text-xs" />
-                          <Input value={item.value} onChange={(e) => setEnvVars((items) => items.map((current, i) => i === index ? { ...current, value: e.target.value } : current))} placeholder="value" className="font-mono text-xs" />
-                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEnvVars((items) => items.filter((_, i) => i !== index))} aria-label="Remove variable"><IconTrash className="size-3.5" /></Button>
-                        </div>
-                      ))}
-                      <Button type="button" variant="ghost" size="sm" onClick={() => setEnvVars((items) => [...items, { key: "", value: "" }])}>＋ Add variable</Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" onClick={() => void saveEnvironment()} disabled={savingEnv}>{savingEnv ? "Saving…" : "Save variables"}</Button>
-                      {envSaved && <span className="text-xs text-muted-foreground">{envSaved}</span>}
-                    </div>
-                  </section>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            {/* Sessions */}
-            <div className="mt-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-medium text-muted-foreground">Sessions</h2>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {sessions.length} total
-                </span>
-              </div>
-
-              <div className="rounded-xl border overflow-hidden my-3">
-                {sessions.length === 0 ? (
-                  <EmptyState
-                    icon={<IconTerminal className="size-4" />}
-                    title="No sessions yet"
-                    description="Give the agent a first task."
-                  />
-                ) : (
-                  <div className="divide-y">
-                    {sessions.map((session) => {
-                      const provisioning = isProvisioning(session);
-                      return (
-                        <Link
-                          key={session.id}
-                          href={`/s/${session.id}`}
-                          prefetch
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50"
-                        >
-                          <StatusDot status={session.status} />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13px] font-medium">{session.title}</p>
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                              {session.branch && (
-                                <Badge
-                                  variant="outline"
-                                  className="h-5 px-1.5 font-mono text-[11px]"
-                                >
-                                  <IconGitBranch className="size-3" /> {session.branch}
-                                </Badge>
-                              )}
-                              {provisioning ? (
-                                <Badge variant="secondary" className="gap-1 text-[11px]">
-                                  <span className="size-2 animate-spin rounded-full border border-muted-foreground border-t-transparent" />
-                                  Provisioning
-                                </Badge>
-                              ) : (
-                                <Badge
-                                  variant="outline"
-                                  className="font-mono text-[11px] capitalize"
-                                >
-                                  {session.status}
-                                </Badge>
-                              )}
-                              <span className="font-mono text-[11px] text-muted-foreground">
-                                · {timeAgo(session.updatedAt)}
-                              </span>
-                            </div>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className="hidden shrink-0 font-mono text-[11px] sm:inline-flex"
-                          >
-                            {session.sandboxStatus}
-                          </Badge>
-                        </Link>
-                      );
-                    })}
+          <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Project config</DialogTitle>
+                <DialogDescription>Setup and environment used by new sessions.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-6">
+                <section className="space-y-3">
+                  <div>
+                    <h3 className="text-sm font-medium">Project setup</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Saved globally for this project.
+                    </p>
                   </div>
-                )}
+                  <div>
+                    <Label>Setup script</Label>
+                    <Textarea
+                      value={setupScript}
+                      onChange={(e) => setSetupScript(e.target.value)}
+                      placeholder="pnpm install"
+                      rows={2}
+                      className="mt-2 font-mono text-xs"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Label>Dev command</Label>
+                      <Input
+                        value={devCommand}
+                        onChange={(e) => setDevCommand(e.target.value)}
+                        placeholder="pnpm dev"
+                        className="mt-2 font-mono text-xs"
+                      />
+                    </div>
+                    <div className="w-24 shrink-0">
+                      <Label>Port</Label>
+                      <Input
+                        value={devPort}
+                        onChange={(e) => setDevPort(e.target.value)}
+                        inputMode="numeric"
+                        className="mt-2 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void saveProjectSetup()}
+                      disabled={savingSetup}
+                    >
+                      {savingSetup ? "Saving…" : "Save project setup"}
+                    </Button>
+                    {setupSaved && (
+                      <span className="text-xs text-muted-foreground">{setupSaved}</span>
+                    )}
+                  </div>
+                </section>
+
+                <section className="space-y-3 border-t pt-4">
+                  <div>
+                    <h3 className="text-sm font-medium">Environment variables</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Available to setup scripts and dev servers in new sessions.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {envVars.map((item, index) => (
+                      <div key={index} className="flex gap-2">
+                        <Input
+                          value={item.key}
+                          onChange={(e) =>
+                            setEnvVars((items) =>
+                              items.map((current, i) =>
+                                i === index ? { ...current, key: e.target.value } : current,
+                              ),
+                            )
+                          }
+                          placeholder="KEY"
+                          className="font-mono text-xs"
+                        />
+                        <Input
+                          value={item.value}
+                          onChange={(e) =>
+                            setEnvVars((items) =>
+                              items.map((current, i) =>
+                                i === index ? { ...current, value: e.target.value } : current,
+                              ),
+                            )
+                          }
+                          placeholder="value"
+                          className="font-mono text-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setEnvVars((items) => items.filter((_, i) => i !== index))}
+                          aria-label="Remove variable"
+                        >
+                          <IconTrash className="size-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEnvVars((items) => [...items, { key: "", value: "" }])}
+                    >
+                      ＋ Add variable
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void saveEnvironment()}
+                      disabled={savingEnv}
+                    >
+                      {savingEnv ? "Saving…" : "Save variables"}
+                    </Button>
+                    {envSaved && <span className="text-xs text-muted-foreground">{envSaved}</span>}
+                  </div>
+                </section>
               </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Sessions */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-medium text-muted-foreground">Sessions</h2>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {sessions.length} total
+              </span>
+            </div>
+
+            <div className="rounded-xl border overflow-hidden my-3">
+              {sessions.length === 0 ? (
+                <EmptyState
+                  icon={<IconTerminal className="size-4" />}
+                  title="No sessions yet"
+                  description="Give the agent a first task."
+                />
+              ) : (
+                <div className="divide-y">
+                  {sessions.map((session) => (
+                    <SessionSummary
+                      key={session.id}
+                      href={`/s/${session.id}`}
+                      showRepo
+                      session={{ ...session, repo: project.repo }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-        </PageContainer>
-      </PageShell>
+        </div>
+      </PageContainer>
+    </PageShell>
   );
 }

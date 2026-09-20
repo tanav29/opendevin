@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { IconArrowUpRight, IconGitBranch, IconClock } from "@tabler/icons-react";
+import { IconGitBranch, IconClock } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { repoName, timeAgo, timestamp } from "@/lib/format";
@@ -29,15 +29,7 @@ function isWorking(session: SessionSummaryData) {
   );
 }
 
-function SummaryContent({
-  session,
-  showRepo,
-  showArrow,
-}: {
-  session: SessionSummaryData;
-  showRepo: boolean;
-  showArrow: boolean;
-}) {
+function SummaryContent({ session, showRepo }: { session: SessionSummaryData; showRepo: boolean }) {
   const working = isWorking(session);
   const sandboxStatus = session.sandboxStatus || "pending";
 
@@ -103,14 +95,14 @@ export function SessionSummary({
   if (href) {
     return (
       <Link href={href} className={classes}>
-        <SummaryContent session={session} showRepo={showRepo} showArrow />
+        <SummaryContent session={session} showRepo={showRepo} />
       </Link>
     );
   }
 
   return (
     <div className={classes}>
-      <SummaryContent session={session} showRepo={showRepo} showArrow={false} />
+      <SummaryContent session={session} showRepo={showRepo} />
     </div>
   );
 }

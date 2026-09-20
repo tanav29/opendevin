@@ -118,7 +118,12 @@ export default function Home() {
           ) : (
             <div className="mt-3 divide-y overflow-hidden rounded-lg border">
               {recent.map((s) => (
-                <SessionSummary key={s.id} href={`/s/${s.id}`} showRepo session={s} />
+                <SessionSummary
+                  key={s.id}
+                  href={`/s/${s.id}`}
+                  showRepo
+                  session={{ ...s, repo: s.project?.repo }}
+                />
               ))}
             </div>
           )}
