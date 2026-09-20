@@ -6,3 +6,4 @@
 
 [future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
 [future] 15 integrations: linear/jira/figma/sentry, MCP servers, web-search/docs-fetch tool
+[future] add a coauthor to commits that is opendevin

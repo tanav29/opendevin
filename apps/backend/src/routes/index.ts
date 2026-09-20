@@ -18,6 +18,7 @@ import {
   WORKSPACE_PATH,
   checkSandboxAvailable,
   connectSandboxTools,
+  githubIdentityForToken,
   githubTokenForUser,
   isRepoUrl,
   probePort,
@@ -1320,8 +1321,7 @@ app.post("/api/sessions/:id/commit", async (req, res) => {
       error: "Commit unavailable: no GitHub access token. Sign in with GitHub and retry.",
     });
   }
-  const message =
-    typeof req.body.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+  const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 500) : "";
   if (!owner.sandboxId) {
     return res.status(409).json({ error: "Commit unavailable: sandbox is still provisioning." });
   }
@@ -1360,8 +1360,10 @@ app.post("/api/sessions/:id/commit", async (req, res) => {
       return res.status(400).json({ error: "Nothing to commit: the workspace has no changes." });
     }
     const who = await currentUser(req);
-    const name = who?.user.name || "OpenDevin";
-    const email = `${(who?.user.email || "opendevin").split("@")[0]}@opendevin.local`;
+    const gh = await githubIdentityForToken(token);
+    const name = gh?.name || gh?.login || who?.user.name || "OpenDevin";
+    const email =
+      gh?.email || who?.user.email || `${gh?.login || "opendevin"}@users.noreply.github.com`;
     if (treeDirty) {
       if (!message) return res.status(400).json({ error: "A commit message is required." });
       const commit = await run(

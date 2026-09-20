@@ -73,6 +73,62 @@ export async function githubTokenForUser(userId: string): Promise<string | null>
   return account?.accessToken || null;
 }
 
+// Resolve the GitHub user behind an OAuth token so git commits are authored
+// as the user, not a synthetic identity. Falls back to null (caller uses
+// session profile) when the API is unreachable or the token is stale.
+export async function githubIdentityForToken(
+  token: string,
+): Promise<{ name: string | null; email: string | null; login: string | null } | null> {
+  try {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "opendevin",
+    };
+    const res = await fetch("https://api.github.com/user", { headers });
+    if (!res.ok) return null;
+    const user = (await res.json()) as {
+      login?: string;
+      name?: string | null;
+      email?: string | null;
+      id?: number;
+    };
+    const login = user.login || null;
+    let email = user.email || null;
+    if (!email) {
+      try {
+        const emailsRes = await fetch("https://api.github.com/user/emails", { headers });
+        if (emailsRes.ok) {
+          const emails = (await emailsRes.json()) as Array<{
+            email?: string;
+            primary?: boolean;
+            verified?: boolean;
+          }>;
+          email =
+            emails.find((e) => e.primary && e.verified)?.email ||
+            emails.find((e) => e.verified)?.email ||
+            emails[0]?.email ||
+            null;
+        }
+      } catch {
+        // Keep profile email (possibly null) — caller falls back to noreply.
+      }
+    }
+    if (!email && login) {
+      // Private email: GitHub's noreply address still attributes the commit
+      // to the user account.
+      email =
+        typeof user.id === "number"
+          ? `${user.id}+${login}@users.noreply.github.com`
+          : `${login}@users.noreply.github.com`;
+    }
+    return { name: user.name || login, email, login };
+  } catch {
+    return null;
+  }
+}
+
 export async function cloneRepo(
   sandbox: Sandbox,
   repo: string,
