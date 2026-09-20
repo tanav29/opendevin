@@ -1,12 +1,12 @@
 import { Sandbox } from "e2b";
 import type { WebSocket } from "ws";
-import { WORKSPACE_PATH } from "./sandbox.js";
+import { WORKSPACE_PATH } from "./config.js";
 
 // Single shared PTY per session. Entries survive tab close/reconnect and die
 // only when the sandbox is replaced (dropPty) or the backend restarts, in
 // which case pty.connect(pid) reattaches to the still-running PTY.
 
-type PtyEntry = {
+export type PtyEntry = {
   sandboxId: string;
   pid: number;
   sockets: Set<WebSocket>;

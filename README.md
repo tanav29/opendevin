@@ -37,9 +37,15 @@ The frontend communicates with the backend over HTTP and WebSockets. The backend
 
 - `apps/frontend/app` — Next.js routes and session UI
 - `apps/frontend/components` — application components and local UI components
-- `apps/backend/src/index.ts` — API routes, chat streaming, and WebSocket handling
+- `apps/backend/src/index.ts` — API entrypoint (app + HTTP/WS server)
+- `apps/backend/src/app.ts` — Express app factory (CORS, auth, routes, errors)
+- `apps/backend/src/server.ts` — HTTP server + PTY WebSocket gateway
+- `apps/backend/src/routes/` — HTTP routes by domain (projects, sessions, chat, workspace, github)
 - `apps/backend/src/auth` — Better Auth configuration
-- `apps/backend/src/sandbox.ts` — E2B provisioning and sandbox tools
+- `apps/backend/src/sandbox.ts` — E2B provisioning, exec, and port probes
+- `apps/backend/src/tools.ts` — agent sandbox tools
+- `apps/backend/src/workspace.ts` — workspace diff snapshots and file tree
+- `apps/backend/src/chat.ts` — agent streaming, markers, and turn persistence
 - `apps/backend/src/pty.ts` — terminal PTY bridge
 - `apps/backend/prisma/schema.prisma` — SQLite data model
 - `docs` — implementation notes and state contracts

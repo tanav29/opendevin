@@ -1,7 +1,7 @@
 
 [x] change grep to use ripgrep, auto install them on sandbox setup
 [ ] fix the app sidebar as it is bit to lasrge and not looks great when collapdse, use a browser control to fix that nigga and specifically whole app ui like app shell thing
-[ ] refactor backend like a senoir dev has written it
+[x] refactor backend like a senoir dev has written it
 
 
 [future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
