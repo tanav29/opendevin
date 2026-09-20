@@ -1,7 +1,6 @@
 
+[ ] change grep to use ripgrep, auto install them on sandbox setup
 [ ] fix the app sidebar as it is bit to lasrge and not looks great when collapdse, use a browser control to fix that nigga and specifically whole app ui like app shell thing
-[x] as we are savign the dev commadn in setting and the port it runs there must be a run dev command in session header that run the dev command and opens the preview
-[x] find somekind of fix to preview pane bc currently it show the e2b.app url for every sandbox and the site is not served on that url
 [ ] refactor backend like a senoir dev has written it
 
 

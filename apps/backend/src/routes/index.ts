@@ -1006,11 +1006,19 @@ app.get("/api/sessions/:id/diff", async (req, res) => {
       sandbox,
       found.owner.workspacePath || WORKSPACE_PATH,
     );
-    // Snapshot so the tab survives sandbox expiry/refresh.
-    void prisma.projectSession
-      .update({ where: { id: found.owner.id }, data: { lastDiff: diff, lastDiffAt: new Date() } })
-      .catch(() => undefined);
-    return res.json({ diff, truncated, persisted: false });
+    if (diff) {
+      // Snapshot so the tab survives sandbox expiry/refresh.
+      void prisma.projectSession
+        .update({ where: { id: found.owner.id }, data: { lastDiff: diff, lastDiffAt: new Date() } })
+        .catch(() => undefined);
+      return res.json({ diff, truncated, persisted: false });
+    }
+    // Live workspace is clean but a previous snapshot exists (e.g. reconnect
+    // fresh-cloned into a new sandbox): keep the saved diff instead of
+    // clobbering it with "". Commit/revert clear lastDiff explicitly.
+    if (persisted)
+      return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
+    return res.json({ diff: "", truncated: false, persisted: false });
   } catch (error) {
     console.error("Could not read workspace diff", error);
     if (persisted)
@@ -1295,7 +1303,7 @@ function parseGitHubRepo(repo: string): { owner: string; name: string } | null {
   return match ? { owner: match[1], name: match[2] } : null;
 }
 
-app.post("/api/sessions/:id/publish", async (req, res) => {
+app.post("/api/sessions/:id/commit", async (req, res) => {
   const found = await ownedSession(req, req.params.id);
   if (!found.auth) return res.status(401).json({ error: "Sign in required" });
   if (!found.owner) return res.status(404).json({ error: "Session not found" });
@@ -1305,49 +1313,79 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
   if (!slug)
     return res
       .status(400)
-      .json({ error: "Publish unavailable: project repo is not a GitHub https URL." });
+      .json({ error: "Commit unavailable: project repo is not a GitHub https URL." });
   const token = await githubTokenForUser(owner.project.userId);
   if (!token) {
     return res.status(400).json({
-      error: "Publish unavailable: no GitHub access token. Sign in with GitHub and retry.",
+      error: "Commit unavailable: no GitHub access token. Sign in with GitHub and retry.",
     });
   }
-  const branch = sanitizeBranch(req.body.branch) || `opendevin/session-${owner.id.slice(-8)}`;
-  const title =
-    typeof req.body.title === "string" && req.body.title.trim()
-      ? req.body.title.trim().slice(0, 200)
-      : owner.title || "OpenDevin changes";
-  const body = typeof req.body.body === "string" ? req.body.body.slice(0, 4000) : "";
+  const message =
+    typeof req.body.message === "string" ? req.body.message.trim().slice(0, 500) : "";
   if (!owner.sandboxId) {
-    return res.status(409).json({ error: "Publish unavailable: sandbox is still provisioning." });
+    return res.status(409).json({ error: "Commit unavailable: sandbox is still provisioning." });
   }
   try {
     const sandbox = await Sandbox.connect(owner.sandboxId);
     const cwd = owner.workspacePath || WORKSPACE_PATH;
     // runSandbox unwraps non-zero exits into { exitCode, stdout, stderr }
-    // instead of throwing, so git failures stay publish errors (4xx), not 503s.
+    // instead of throwing, so git failures stay commit errors (4xx), not 503s.
     const run = (command: string) => runSandbox(sandbox, command, cwd, 120_000);
-    await run(`git checkout -B ${shellQuote(branch)}`);
+    const sessionBranch = sanitizeBranch(owner.branch);
+    let branch = sessionBranch;
+    if (branch) {
+      await run(`git checkout -B ${shellQuote(branch)}`);
+    } else {
+      const current = await run("git rev-parse --abbrev-ref HEAD");
+      branch = sanitizeBranch((current.stdout || "").trim()) || "HEAD";
+    }
+    const authedPushUrl = `https://oauth2:${token}@github.com/${slug.owner}/${slug.name}.git`;
     const status = await run("git status --porcelain=v1 -uall");
-    if (!status.stdout.trim()) {
-      return res.status(400).json({ error: "Nothing to publish: the workspace has no changes." });
+    const treeDirty = !!status.stdout.trim();
+    // A previous attempt may have committed locally but failed to push (e.g.
+    // the 403): working tree clean, yet the branch is ahead of the remote.
+    // Compare local HEAD against the live remote ref so we push in that case
+    // instead of reporting "nothing to commit".
+    const headOut = await run("git rev-parse HEAD");
+    const localSha = headOut.exitCode === 0 ? headOut.stdout.trim().split(/\s+/)[0] || "" : "";
+    let remoteSha = "";
+    if (localSha) {
+      const ls = await run(
+        `git ls-remote ${shellQuote(authedPushUrl)} ${shellQuote(`refs/heads/${branch}`)}`,
+      );
+      if (ls.exitCode === 0) remoteSha = ls.stdout.trim().split(/\s+/)[0] || "";
+    }
+    const unpushed = !!localSha && localSha !== remoteSha;
+    if (!treeDirty && !unpushed) {
+      return res.status(400).json({ error: "Nothing to commit: the workspace has no changes." });
     }
     const who = await currentUser(req);
     const name = who?.user.name || "OpenDevin";
     const email = `${(who?.user.email || "opendevin").split("@")[0]}@opendevin.local`;
-    const commit = await run(
-      `git add -A && git -c ${shellQuote(`user.name=${name}`)} -c ${shellQuote(`user.email=${email}`)} commit -m ${shellQuote(title)}`,
-    );
-    if (commit.exitCode !== 0) {
-      return res.status(409).json({
-        error: `Publish failed: ${(commit.stderr || commit.stdout || "git commit failed").slice(0, 500)}`,
-      });
+    if (treeDirty) {
+      if (!message) return res.status(400).json({ error: "A commit message is required." });
+      const commit = await run(
+        `git add -A && git -c ${shellQuote(`user.name=${name}`)} -c ${shellQuote(`user.email=${email}`)} commit -m ${shellQuote(message)}`,
+      );
+      if (commit.exitCode !== 0) {
+        return res.status(409).json({
+          error: `Commit failed: ${(commit.stderr || commit.stdout || "git commit failed").slice(0, 500)}`,
+        });
+      }
     }
-    const authedPushUrl = `https://oauth2:${token}@github.com/${slug.owner}/${slug.name}.git`;
     const push = await run(`git push ${shellQuote(authedPushUrl)} HEAD:${shellQuote(branch)}`);
     if (push.exitCode !== 0) {
+      const detail = (push.stderr || push.stdout || "git push failed").slice(0, 500);
+      // 403 / permission-denied means the stored OAuth token lacks push
+      // access (e.g. authorized before the `repo` scope was added). GitHub
+      // won't upgrade scopes on its own — the user must sign in again.
+      if (/403|permission[^.]*denied|denied[^.]*permission/i.test(detail)) {
+        return res.status(403).json({
+          error: `GitHub denied the push: ${detail.slice(0, 200)} The stored GitHub token lacks repository push access — sign out and sign in with GitHub again to grant it, then retry.`,
+        });
+      }
       return res.status(409).json({
-        error: `Publish failed: ${(push.stderr || push.stdout || "git push failed").slice(0, 500)}`,
+        error: `Push failed: ${detail}`,
       });
     }
     // Scrub the token that was embedded in the push URL so it can't linger in
@@ -1357,38 +1395,22 @@ app.post("/api/sessions/:id/publish", async (req, res) => {
     ).then(
       (r) => {
         if (r.exitCode !== 0)
-          console.warn("Could not scrub publish token from git config", r.stderr);
+          console.warn("Could not scrub commit token from git config", r.stderr);
       },
       () => undefined,
     );
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-    };
-    const repoInfo = await fetch(`https://api.github.com/repos/${slug.owner}/${slug.name}`, {
-      headers,
-    });
-    const base = repoInfo.ok
-      ? ((await repoInfo.json()) as { default_branch?: string }).default_branch || "main"
-      : "main";
-    const pr = await fetch(`https://api.github.com/repos/${slug.owner}/${slug.name}/pulls`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ title, head: branch, base, body }),
-    });
-    const prData = (await pr.json().catch(() => ({}))) as { html_url?: string; message?: string };
-    if (!pr.ok || !prData.html_url) {
-      return res.status(409).json({
-        error: `Branch pushed, but the pull request failed: ${(prData.message || "GitHub rejected the PR").slice(0, 500)}`,
-      });
-    }
-    return res.json({ branch, prUrl: prData.html_url });
+    // Workspace now matches HEAD: clear the saved diff so the Changes tab
+    // doesn't keep showing the pre-commit snapshot (GET /diff preserves
+    // non-empty snapshots, so this explicit clear is required).
+    await prisma.projectSession
+      .update({ where: { id: owner.id }, data: { lastDiff: "", lastDiffAt: null } })
+      .catch(() => undefined);
+    return res.json({ branch });
   } catch (error) {
-    console.error("Publish failed", error);
+    console.error("Commit failed", error);
     return res
       .status(503)
-      .json({ error: "Publish failed: sandbox is unreachable. Reconnect and retry." });
+      .json({ error: "Commit failed: sandbox is unreachable. Reconnect and retry." });
   }
 });
 

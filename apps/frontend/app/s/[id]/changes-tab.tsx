@@ -4,6 +4,13 @@ import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function ChangesTab({
   sessionId,
@@ -25,10 +32,11 @@ export default function ChangesTab({
   const [persisted, setPersisted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [publishBranch, setPublishBranch] = useState("");
-  const [publishTitle, setPublishTitle] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const [publishResult, setPublishResult] = useState("");
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [committing, setCommitting] = useState(false);
+  const [commitError, setCommitError] = useState("");
+  const [commitDone, setCommitDone] = useState("");
   const [reverting, setReverting] = useState("");
 
   type DiffPayload = { diff?: string; truncated?: boolean; persisted?: boolean; error?: string };
@@ -136,19 +144,24 @@ export default function ChangesTab({
     }
   }
 
-  async function publish() {
-    setPublishing(true);
-    setPublishResult("");
+  async function commit() {
+    if (committing) return;
+    const message = commitMessage.trim();
+    setCommitting(true);
+    setCommitError("");
     try {
-      const data = await api<{ prUrl?: string }>(`/api/sessions/${sessionId}/publish`, {
+      const data = await api<{ branch?: string }>(`/api/sessions/${sessionId}/commit`, {
         method: "POST",
-        body: JSON.stringify({ branch: publishBranch, title: publishTitle || defaultTitle }),
+        body: JSON.stringify({ message }),
       });
-      setPublishResult(`PR_OPENED:${data.prUrl}`);
-    } catch {
-      setPublishResult("Publish failed: could not reach the server.");
+      setCommitDone(data.branch ? `Pushed to ${data.branch}` : "Pushed");
+      setCommitOpen(false);
+      setCommitMessage("");
+      refresh();
+    } catch (err) {
+      setCommitError(err instanceof Error ? err.message : "Commit failed.");
     } finally {
-      setPublishing(false);
+      setCommitting(false);
     }
   }
 
@@ -194,8 +207,24 @@ export default function ChangesTab({
           >
             .patch
           </button>
+          <button
+            onClick={() => {
+              setCommitError("");
+              setCommitDone("");
+              setCommitOpen(true);
+            }}
+            disabled={!diff}
+            className="rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-40"
+          >
+            Commit
+          </button>
         </div>
       </div>
+      {commitDone && (
+        <p className="border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+          {commitDone}
+        </p>
+      )}
       {error && (
         <p className="border-b border-border bg-danger-muted px-3 py-2 text-xs text-danger">
           {error}{" "}
@@ -255,43 +284,41 @@ export default function ChangesTab({
           </div>
         ))}
       </div>
-      <div className="border-t border-border p-3">
-        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          Publish to GitHub
-        </p>
-        <input
-          value={publishBranch}
-          onChange={(e) => setPublishBranch(e.target.value)}
-          placeholder={`Branch (default opendevin/session-${sessionId.slice(-8)})`}
-          className="mt-2 w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-xs outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
-        />
-        <input
-          value={publishTitle}
-          onChange={(e) => setPublishTitle(e.target.value)}
-          placeholder={defaultTitle || "Pull request title"}
-          className="mt-1.5 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
-        />
-        <button
-          onClick={() => void publish()}
-          disabled={publishing || !diff}
-          className="mt-2 w-full rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-40"
-        >
-          {publishing ? "Publishing…" : "Push branch + open PR"}
-        </button>
-        {publishResult &&
-          (publishResult.startsWith("PR_OPENED:") ? (
-            <a
-              href={publishResult.slice(10)}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 block text-xs text-success underline"
+      <Dialog open={commitOpen} onOpenChange={setCommitOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Commit changes</DialogTitle>
+            <DialogDescription>
+              Commit workspace changes (if any) and push the session branch to the remote.
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            value={commitMessage}
+            onChange={(e) => setCommitMessage(e.target.value)}
+            placeholder={defaultTitle || "Commit message"}
+            rows={3}
+            autoFocus
+            className="w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+          />
+          {commitError && <p className="text-xs text-danger">{commitError}</p>}
+          <div className="flex justify-end gap-1.5">
+            <button
+              onClick={() => setCommitOpen(false)}
+              disabled={committing}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
             >
-              Pull request opened ↗
-            </a>
-          ) : (
-            <p className="mt-2 text-xs text-danger">{publishResult}</p>
-          ))}
-      </div>
+              Cancel
+            </button>
+            <button
+              onClick={() => void commit()}
+              disabled={committing}
+              className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-40"
+            >
+              {committing ? "Pushing…" : "Commit + push"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

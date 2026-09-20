@@ -359,7 +359,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => ({}));
         setError(data.error || "The agent could not respond");
-        setMessages((current) => current.filter((message) => message.id !== "streaming"));
+        // Server is the source of truth: drop the optimistic local messages
+        // (the server may have persisted nothing, e.g. 409 already-running)
+        // and re-sync from the DB instead of leaving ghosts behind.
+        setMessages((current) =>
+          current.filter((message) => message.id !== "streaming" && !message.id.startsWith("local-")),
+        );
+        await refresh(sessionId, true);
         return;
       }
       setDegraded(response.headers.get("x-sandbox-degraded") === "1");
