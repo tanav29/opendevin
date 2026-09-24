@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   IconArrowLeft,
+  IconArrowUp,
   IconCopy,
   IconInfoCircle,
   IconPlayerStop,
@@ -25,7 +26,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePanelPrefs } from "./panel-prefs";
 import { api } from "@/lib/api";
@@ -470,7 +470,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   return (
     <main className="flex h-screen flex-col bg-background">
-      <header className="z-10 flex shrink-0 items-center justify-between gap-3 px-3 py-2">
+      <header className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Tooltip>
             <TooltipTrigger render={<span className="inline-flex" />}>
@@ -488,7 +488,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <Tooltip>
             <TooltipTrigger render={<div className="min-w-0 cursor-default" />}>
               <div className="flex min-w-0 items-center gap-2">
-                <h1 className="max-w-[min(42vw,24rem)] truncate text-sm">
+                <h1 className="max-w-[min(42vw,24rem)] truncate text-[13px] font-medium tracking-[-0.01em]">
                   {detail?.title || "Loading session…"}
                 </h1>
                 {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
@@ -554,7 +554,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
       <div className="flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col bg-background">
-          <div className="chat-scroll mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-4 py-7 sm:px-8">
+          <div className="chat-scroll mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-4 pt-8 sm:px-8">
             {provisioning && (
               <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-sm text-muted-foreground">
                 <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
@@ -588,35 +588,51 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </div>
             )}
 
-            <div className="flex-1 space-y-6">
+            <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-7 pb-4">
               {messages.length === 0 && (
-                <EmptyState
-                  icon={<IconTerminal className="size-4" />}
-                  title="Agent is ready"
-                  description="Ask it to inspect, plan, or build."
-                />
+                <div className="flex min-h-[38vh] flex-col items-center justify-center text-center">
+                  <div className="mb-4 flex size-10 items-center justify-center rounded-xl border bg-card shadow-sm">
+                    <IconTerminal className="size-[18px] text-muted-foreground" />
+                  </div>
+                  <h2 className="text-lg font-medium tracking-tight">What should we work on?</h2>
+                  <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+                    Ask the agent to explore this workspace, make a change, or run a command.
+                  </p>
+                </div>
               )}
               {messages.map((message) => (
                 <article
                   key={message.id}
-                  className={message.role === "user" ? "group flex justify-end" : "group"}
+                  className={message.role === "user" ? "group flex justify-end" : "group flex gap-3"}
                 >
                   {message.role === "user" ? (
-                    <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-xs leading-4 text-primary-foreground shadow-sm sm:max-w-[75%]">
+                    <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-4 py-3 text-[14px] leading-6 text-foreground sm:max-w-[78%]">
                       {message.content}
                     </p>
                   ) : message.content ? (
-                    <div className="max-w-[94%] px-2 py-3 text-xs">
-                      <Message
-                        content={message.content}
-                        onAnswer={(text) => void sendMessage(text)}
-                      />
-                    </div>
+                    <>
+                      <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
+                        A
+                      </div>
+                      <div className="min-w-0 max-w-[94%] flex-1 py-1 text-[14px] leading-6">
+                        <div className="mb-1 text-xs font-medium text-muted-foreground">Agent</div>
+                        <Message
+                          content={message.content}
+                          onAnswer={(text) => void sendMessage(text)}
+                        />
+                      </div>
+                    </>
                   ) : (
-                    <div className="flex items-center gap-1 py-1" aria-label="Thinking">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                    <div className="flex items-center gap-3 py-1" aria-label="Thinking">
+                      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
+                        A
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span>Working</span>
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground" />
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:150ms]" />
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:300ms]" />
+                      </div>
                     </div>
                   )}
                 </article>
@@ -626,7 +642,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
             <form
               onSubmit={(e) => void send(e)}
-              className={`sticky bottom-0 mt-6 rounded-2xl border border-border bg-card shadow-lg shadow-black/[0.06] transition-shadow focus-within:border-ring focus-within:shadow-xl ${!ready ? "opacity-60" : ""}`}
+              className={`sticky bottom-0 mx-auto mt-3 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-[0_8px_30px_rgba(0,0,0,0.07)] transition-shadow focus-within:border-ring focus-within:shadow-[0_10px_36px_rgba(0,0,0,0.11)] ${!ready ? "opacity-60" : ""}`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -723,7 +739,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       variant="default"
                       disabled={chatDisabled || (!input.trim() && attachments.length === 0)}
                       className="gap-1.5 rounded-xl px-3"
+                      aria-label="Send message"
                     >
+                      <IconArrowUp className="size-4" />
                       <span className="hidden sm:inline">Send</span>
                     </Button>
                   )}
