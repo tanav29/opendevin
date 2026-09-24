@@ -28,7 +28,7 @@ export function PageHeader({
       <SidebarTrigger className="size-7" />
       {icon && <span className="flex shrink-0 items-center text-muted-foreground">{icon}</span>}
       {title && (
-        <h1 className="min-w-0 truncate font-serif text-md text-foreground">
+        <h1 className="min-w-0 truncate font-serif text-sm text-foreground">
           {title}
         </h1>
       )}

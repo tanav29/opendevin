@@ -13,12 +13,26 @@ export function registerSessionRoutes(app: Express): void {
       const session = await currentUser(req);
       if (!session) return res.status(401).json({ error: "Sign in required" });
       const sessions = await prisma.projectSession.findMany({
-        where: { project: { userId: session.user.id } },
+        where: { project: { userId: session.user.id }, archivedAt: null },
         include: { project: { select: { id: true, repo: true } } },
         omit: { toolLog: true, lastDiff: true },
         orderBy: { updatedAt: "desc" },
       });
       return res.json(sessions);
+    }),
+  );
+
+  app.post(
+    "/api/sessions/:id/archive",
+    asyncRoute(async (req, res) => {
+      const found = await ownedSession(req, routeParam(req, "id"));
+      if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+      if (!found.owner) return res.status(404).json({ error: "Session not found" });
+      await prisma.projectSession.update({
+        where: { id: found.owner.id },
+        data: { archivedAt: new Date() },
+      });
+      return res.json({ ok: true });
     }),
   );
 

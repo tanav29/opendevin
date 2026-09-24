@@ -328,7 +328,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || !sessionId || sending) return;
+    if ((!trimmed && attachments.length === 0) || !sessionId || sending || !ready) return;
     let full = trimmed;
     if (attachments.length > 0) {
       const blocks = attachments
@@ -356,8 +356,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
-        const data = await response.json().catch(() => ({}));
-        toast.error(data.error || "The agent could not respond");
+        toast.error("The agent couldn't respond. Please try again.");
         // Server is the source of truth: drop the optimistic local messages
         // (the server may have persisted nothing, e.g. 409 already-running)
         // and re-sync from the DB instead of leaving ghosts behind.
@@ -395,7 +394,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       if (err instanceof DOMException && err.name === "AbortError") {
         toast.info("Stopped. Partial reply kept — the server finishes in the background.");
       } else {
-        toast.error("The agent could not respond: the server is unreachable.");
+        toast.error("Couldn't reach the agent. Check your connection and try again.");
         setMessages((current) => current.filter((message) => message.id !== "streaming"));
       }
     } finally {
@@ -467,6 +466,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const provisioning = PROVISIONING_SANDBOX.has(sandboxStatus);
   const failed = sandboxStatus === "error";
   const ready = sandboxStatus === "ready" && (status?.sandboxAvailable ?? false);
+  const chatDisabled = !ready || sending;
 
   return (
     <main className="flex h-screen flex-col bg-background">
@@ -539,6 +539,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 size="icon-sm"
                 aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
                 onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
+                disabled={!ready}
+                title={!ready ? "Workspace panel needs a running sandbox" : undefined}
               >
                 <IconLayoutSidebarRight />
               </Button>
@@ -567,17 +569,21 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </div>
             )}
             {failed && (
-              <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
-                <p className="text-sm font-medium text-destructive">
-                  Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}
-                </p>
+              <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Workspace couldn’t start</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Reconnect the sandbox to continue.</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => void reconnect()} disabled={reconnecting}>
+                  <IconRefresh className="size-4" /> {reconnecting ? "Reconnecting…" : "Reconnect"}
+                </Button>
               </div>
             )}
             {agentStatus === "failed" && !sending && (
-              <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
-                <p className="text-sm font-medium text-destructive">Agent run failed.</p>
-                <Button size="sm" className="mt-3" onClick={retry}>
-                  <IconRefresh className="size-4" /> Retry last message
+              <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+                <p className="text-sm font-medium">The agent couldn’t finish that task.</p>
+                <Button size="sm" variant="outline" onClick={retry}>
+                  <IconRefresh className="size-4" /> Try again
                 </Button>
               </div>
             )}
@@ -620,11 +626,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
             <form
               onSubmit={(e) => void send(e)}
-              className="sticky bottom-0 mt-6 rounded-2xl border border-border bg-card shadow-lg shadow-black/[0.06] transition-shadow focus-within:border-ring focus-within:shadow-xl"
+              className={`sticky bottom-0 mt-6 rounded-2xl border border-border bg-card shadow-lg shadow-black/[0.06] transition-shadow focus-within:border-ring focus-within:shadow-xl ${!ready ? "opacity-60" : ""}`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                if (e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
+                if (ready && e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
               }}
             >
               <div className="">
@@ -651,6 +657,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 )}
                 <textarea
                   value={input}
+                  disabled={chatDisabled}
                   onChange={(e) => setInput(e.target.value)}
                   onPaste={(e) => {
                     if (e.clipboardData.files.length > 0) void addFiles(e.clipboardData.files);
@@ -674,6 +681,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       type="file"
                       multiple
                       className="hidden"
+                      disabled={chatDisabled}
                       onChange={(e) => {
                         if (e.target.files) void addFiles(e.target.files);
                         e.target.value = "";
@@ -684,7 +692,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => fileRef.current?.click()}
-                      disabled={sending}
+                      disabled={chatDisabled}
                       className="px-2 text-[12px]"
                     >
                       <PaperclipIcon />
@@ -713,7 +721,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       type="submit"
                       size="sm"
                       variant="default"
-                      disabled={!input.trim() && attachments.length === 0}
+                      disabled={chatDisabled || (!input.trim() && attachments.length === 0)}
                       className="gap-1.5 rounded-xl px-3"
                     >
                       <span className="hidden sm:inline">Send</span>

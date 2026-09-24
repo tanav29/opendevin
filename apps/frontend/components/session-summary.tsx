@@ -1,8 +1,15 @@
+"use client";
+
 import Link from "next/link";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconGitBranch, IconClock } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { repoName, timeAgo, timestamp } from "@/lib/format";
+import { Archive, Box, CircleDashed, Loader } from "lucide-react";
+import { Button } from "./ui/button";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 export type SessionSummaryData = {
   id?: string;
@@ -15,11 +22,11 @@ export type SessionSummaryData = {
 };
 
 const SANDBOX_TONE: Record<string, string> = {
-  ready: "border-success/30 bg-success-muted text-success",
-  error: "border-danger/30 bg-danger-muted text-danger",
-  pending: "border-warning/30 bg-warning-muted text-warning",
-  creating: "border-warning/30 bg-warning-muted text-warning",
-  cloning: "border-warning/30 bg-warning-muted text-warning",
+  ready: "text-success",
+  error: "text-danger",
+  pending: "text-warning",
+  creating: "text-warning",
+  cloning: "text-warning",
 };
 
 function isWorking(session: SessionSummaryData) {
@@ -35,18 +42,22 @@ function SummaryContent({ session, showRepo }: { session: SessionSummaryData; sh
 
   return (
     <>
-      <span
-        className={cn(
-          "mt-1 size-3 shrink-0 rounded-full",
-          working
-            ? "animate-spin border-2 border-muted-foreground/30 border-t-foreground"
-            : "bg-muted-foreground/45",
-        )}
+      <div
+        className="text-muted-foreground"
         aria-label={working ? "Agent is running" : `Agent is ${session.status || "idle"}`}
-      />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium">{session.title || "Untitled session"}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+      >
+        {working ? <Loader className="animate-spin size-3 " /> : <CircleDashed className="size-3" />}
+      </div>
+      <div className="min-w-0 flex-1 -my-1">
+        <p className="truncate text-sm font-medium">{session.title || "Untitled session"}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <div
+            className={cn(
+              SANDBOX_TONE[sandboxStatus] || "text-muted-foreground",
+            )}
+          >
+            <Box className="size-3" />
+          </div>
           {showRepo && session.repo && <span className="truncate">{repoName(session.repo)}</span>}
           {session.branch && (
             <span className="inline-flex min-w-0 items-center gap-1 font-mono">
@@ -60,17 +71,9 @@ function SummaryContent({ session, showRepo }: { session: SessionSummaryData; sh
               Created {timeAgo(session.createdAt)}
             </span>
           )}
-          {working && <span className="font-medium text-foreground">Agent running</span>}
         </div>
       </div>
-      <span
-        className={cn(
-          "shrink-0 rounded-md border px-1 font-mono text-xs font-medium",
-          SANDBOX_TONE[sandboxStatus] || "border-border bg-muted text-muted-foreground",
-        )}
-      >
-        {sandboxStatus}
-      </span>
+
     </>
   );
 }
@@ -86,23 +89,44 @@ export function SessionSummary({
   href?: string;
   className?: string;
 }) {
+  const queryClient = useQueryClient();
+  const archiveMutation = useMutation({
+    mutationFn: () => api(`/api/sessions/${session.id}/archive`, { method: "POST" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-sessions"] });
+      toast.success("Session archived");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Could not archive session"),
+  });
   const classes = cn(
     "flex min-w-0 items-start gap-3 px-4 py-3 transition-colors",
     href && "hover:bg-muted/50",
     className,
   );
 
-  if (href) {
-    return (
-      <Link href={href} className={classes}>
-        <SummaryContent session={session} showRepo={showRepo} />
-      </Link>
-    );
-  }
-
   return (
     <div className={classes}>
-      <SummaryContent session={session} showRepo={showRepo} />
+      {href ? (
+        <Link href={href} className="flex min-w-0 flex-1 items-start gap-3">
+          <SummaryContent session={session} showRepo={showRepo} />
+        </Link>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <SummaryContent session={session} showRepo={showRepo} />
+        </div>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-xs"
+        aria-label="Archive session"
+        title="Archive session"
+        disabled={!session.id || archiveMutation.isPending}
+        onClick={() => archiveMutation.mutate()}
+      >
+        <Archive />
+      </Button>
     </div>
   );
 }

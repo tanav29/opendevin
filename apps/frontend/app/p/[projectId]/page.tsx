@@ -194,7 +194,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
 
   if (loading) {
     return (
-      <PageShell header={<PageHeader title="Loading…" description="Workspace" />}>
+      <PageShell header={<PageHeader title="Loading…" />}>
         <PageContainer size="wide" className="py-8">
           <div className="animate-pulse space-y-6">
             <div className="h-9 w-48 rounded bg-muted" />
@@ -233,7 +233,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       header={
         <PageHeader
           title={repoName(project.repo)}
-          description={project.repo}
           actions={
             <div className="flex items-center gap-1.5">
               <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}>

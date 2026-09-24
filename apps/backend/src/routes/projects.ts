@@ -122,7 +122,7 @@ export function registerProjectRoutes(app: Express): void {
       if (!found.project) return res.status(404).json({ error: "Project not found" });
       return res.json(
         await prisma.projectSession.findMany({
-          where: { projectId: found.project.id },
+          where: { projectId: found.project.id, archivedAt: null },
           omit: { toolLog: true, lastDiff: true },
           orderBy: { updatedAt: "desc" },
         }),

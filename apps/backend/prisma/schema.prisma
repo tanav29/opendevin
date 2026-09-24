@@ -94,6 +94,7 @@ model ProjectSession {
   lastDiff      String?  @default("")
   lastDiffAt    DateTime?
   toolLog       String?  @default("[]")
+  archivedAt    DateTime?
   projectId     String
   project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   messages      Message[]

@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconBrandGithub, IconPlus } from "@tabler/icons-react";
-import { ArrowUp, GitBranch, CircleDot, Loader2, X } from "lucide-react";
+import { ArrowUp, GitBranch, CircleDot, Loader2, X, Paperclip } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +56,7 @@ export default function TaskForm({
   placeholder = "Inspect the repo and propose a plan…",
   autoFocus = false,
 }: Props) {
+  const queryClient = useQueryClient();
   const [repoSearch, setRepoSearch] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<GithubRepo | null>(null);
   const [resolvedProjectId, setResolvedProjectId] = useState(initialProjectId || "");
@@ -156,7 +157,7 @@ export default function TaskForm({
     if (!prompt.trim() || !activeProjectId || creating) return;
     setCreating(true);
     try {
-      const data = await toast.promise(
+      await toast.promise(
         api<{ id: string }>(`/api/projects/${activeProjectId}/sessions`, {
           method: "POST",
           body: JSON.stringify({
@@ -166,7 +167,12 @@ export default function TaskForm({
         }),
         { loading: "Starting your task…", success: "Task started", error: (e) => e instanceof Error ? e.message : "Could not create session" },
       );
-      window.location.href = `/s/${data.id}`;
+      setPrompt("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-sessions"] }),
+      ]);
+      setCreating(false);
     } catch (e) {
       setCreating(false);
     }
@@ -175,42 +181,34 @@ export default function TaskForm({
   return (
     <form onSubmit={runTask} className="relative space-y-3">
       <div className="relative">
-        {issue && (
-          <Badge variant="secondary" className="absolute left-3 top-2 z-10 max-w-[calc(100%-1.5rem)] gap-1.5 pr-1.5">
-            <CircleDot />
-            <span className="truncate" title={issue.htmlUrl}>{issue.htmlUrl}</span>
-            <button type="button" aria-label="Remove issue" onClick={() => setIssue(null)} className="rounded-full p-0.5 hover:bg-muted">
-              <X className="size-3" />
-            </button>
-          </Badge>
-        )}
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={placeholder}
           rows={4}
           autoFocus={autoFocus}
-          className={`min-h-32 resize-none p-4 pb-14 ${issue ? "pt-11" : ""}`}
+          className={`rounded-2xl min-h-32 resize-none p-4 pb-14`}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void runTask(e);
           }}
         />
       </div>
       <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pb-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center">
+          <Button className={"bg-transparent! text-muted-foreground!"} variant={"ghost"} size={"icon-sm"}>
+            <Paperclip className="size-3.5" />
+          </Button>
           {!isLockedToProject && (
             <Select
-              value={selectedRepo ? String(selectedRepo.id) : ""}
+              value={selectedRepo ? String(selectedRepo.fullName) : ""}
               onValueChange={(v: string | null) => {
                 const repo = repos.find((r) => String(r.id) === v) ?? null;
                 if (repo) void handleRepoSelect(repo);
               }}
             >
-              <SelectTrigger className="text-xs w-auto border-0">
-                <span className="flex min-w-0 items-center gap-1.5">
+              <SelectTrigger className="text-xs w-auto border-0 bg-transparent!">
                   <IconBrandGithub className="size-3.5 shrink-0 text-muted-foreground" />
                   <SelectValue placeholder="Select repo" />
-                </span>
               </SelectTrigger>
               <SelectContent>
                 <div onKeyDown={(e) => e.stopPropagation()}>
@@ -264,13 +262,11 @@ export default function TaskForm({
               setBranchSearch("");
             }}
           >
-            <SelectTrigger className="h-8 w-auto max-w-44 border-0 text-xs">
-              <span className="flex min-w-0 items-center gap-1.5">
+            <SelectTrigger className="h-8 bg-transparent w-auto max-w-44 border-0 text-xs bg-transparent!">
                 <GitBranch className="size-3 shrink-0 text-muted-foreground" />
                 <SelectValue
                   placeholder={resolving ? "Creating workspace…" : "Branch"}
                 />
-              </span>
             </SelectTrigger>
             <SelectContent>
               <div className="" onKeyDown={(e) => e.stopPropagation()}>
@@ -300,7 +296,6 @@ export default function TaskForm({
                   ))}
                   {canCreateBranch && (
                     <SelectItem value={`__create__:${branchToCreate}`}>
-                      <IconPlus className="size-3.5" />
                       Create “{branchToCreate}”
                     </SelectItem>
                   )}
@@ -315,7 +310,7 @@ export default function TaskForm({
           </Select>
 
           <Select
-            value={issue ? String(issue.number) : ""}
+            value={issue ? "Issue #"+String(issue.number) : ""}
             disabled={!branchEnabled}
             onValueChange={(value: string | null) => {
               const selected = issues.find((item) => String(item.number) === value);
@@ -323,10 +318,10 @@ export default function TaskForm({
               setIssueSearch("");
             }}
           >
-            <SelectTrigger className="h-8 w-auto max-w-44 border-0 text-xs">
+            <SelectTrigger className="h-8 w-auto max-w-44 border-0 text-xs bg-transparent!">
               <span className="flex min-w-0 items-center gap-1.5">
                 <CircleDot className="size-3 shrink-0 text-muted-foreground" />
-                <SelectValue placeholder="Issue (optional)" />
+                <SelectValue placeholder="Attach Issue" />
               </span>
             </SelectTrigger>
             <SelectContent>
