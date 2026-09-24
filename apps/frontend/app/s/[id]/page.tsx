@@ -13,6 +13,7 @@ import {
   IconLayoutSidebarRight,
 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -234,7 +235,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -250,7 +250,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     const list = Array.from(files).slice(0, 3);
     for (const f of list) {
       if (f.size > 200_000) {
-        setError(`Attachment ${f.name} too large (max 200KB).`);
+        toast.error(`Attachment ${f.name} too large (max 200KB).`);
         continue;
       }
       try {
@@ -261,7 +261,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             : [...cur, { name: f.name.slice(0, 100), content: text.slice(0, 50_000) }],
         );
       } catch {
-        setError(`Could not read ${f.name}.`);
+        toast.error(`Could not read ${f.name}.`);
       }
     }
   }
@@ -314,14 +314,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   async function reconnect() {
     if (!sessionId || reconnecting) return;
     setReconnecting(true);
-    setError("");
     try {
       await api(`/api/sessions/${sessionId}/reconnect`, {
         method: "POST",
       });
       await refresh(sessionId, false);
     } catch {
-      setError("Could not reconnect sandbox: the server is unreachable.");
+      toast.error("Could not reconnect sandbox: the server is unreachable.");
     } finally {
       setReconnecting(false);
     }
@@ -340,7 +339,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
     setInput("");
     setAttachments([]);
-    setError("");
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -359,7 +357,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       });
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => ({}));
-        setError(data.error || "The agent could not respond");
+        toast.error(data.error || "The agent could not respond");
         // Server is the source of truth: drop the optimistic local messages
         // (the server may have persisted nothing, e.g. 409 already-running)
         // and re-sync from the DB instead of leaving ghosts behind.
@@ -395,9 +393,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Stopped. Partial reply kept — the server finishes in the background.");
+        toast.info("Stopped. Partial reply kept — the server finishes in the background.");
       } else {
-        setError("The agent could not respond: the server is unreachable.");
+        toast.error("The agent could not respond: the server is unreachable.");
         setMessages((current) => current.filter((message) => message.id !== "streaming"));
       }
     } finally {
@@ -432,12 +430,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     )
       return;
     setKilling(true);
-    setError("");
     try {
       await api(`/api/sessions/${sessionId}/kill`, { method: "POST" });
       await refresh(sessionId, false);
     } catch {
-      setError("Could not kill sandbox: the server is unreachable.");
+      toast.error("Could not kill sandbox: the server is unreachable.");
     } finally {
       setKilling(false);
     }
@@ -457,7 +454,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       });
       window.location.href = detail ? `/p/${detail.projectId}` : "/";
     } catch {
-      setError("Could not delete session: the server is unreachable.");
+      toast.error("Could not delete session: the server is unreachable.");
       setDeleting(false);
     }
   }
@@ -510,7 +507,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             devCommand={status?.devCommand}
             devPort={status?.devPort}
             onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
-            onError={setError}
+            onError={(message) => toast.error(message)}
           />
           <SessionInfoDialog
             sessionId={sessionId}
@@ -557,14 +554,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         <section className="flex min-w-0 flex-1 flex-col bg-background">
           <div className="chat-scroll mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-4 py-7 sm:px-8">
             {provisioning && (
-              <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-[13px] text-muted-foreground">
+              <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-sm text-muted-foreground">
                 <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
                 Spinning up sandbox and cloning repo… the agent gets full workspace access once
                 ready.
               </div>
             )}
             {degraded && !failed && (
-              <div className="mb-5 rounded-lg border border-warning/40 bg-warning-muted/40 px-3 py-2.5 text-[13px]">
+              <div className="mb-5 rounded-lg border border-warning/40 bg-warning-muted/40 px-3 py-2.5 text-sm">
                 Sandbox unreachable — this answer is from general knowledge. Reconnect for workspace
                 tools.
               </div>
@@ -573,9 +570,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
                 <p className="text-sm font-medium text-destructive">
                   Sandbox failed: {status?.lastError || detail?.lastError || "unknown error"}
-                </p>
-                <p className="mt-2 text-xs text-destructive/80">
-                  Open session information to reconnect the sandbox.
                 </p>
               </div>
             )}
@@ -602,11 +596,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   className={message.role === "user" ? "group flex justify-end" : "group"}
                 >
                   {message.role === "user" ? (
-                    <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-[13.5px] leading-6 text-primary-foreground shadow-sm sm:max-w-[75%]">
+                    <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-xs leading-4 text-primary-foreground shadow-sm sm:max-w-[75%]">
                       {message.content}
                     </p>
                   ) : message.content ? (
-                    <div className="max-w-[94%] rounded-2xl rounded-tl-md border border-border/70 bg-card px-4 py-3 text-[13.5px] leading-7 shadow-sm sm:max-w-[88%]">
+                    <div className="max-w-[94%] px-2 py-3 text-xs">
                       <Message
                         content={message.content}
                         onAnswer={(text) => void sendMessage(text)}
@@ -727,7 +721,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   )}
                 </div>
               </div>
-              {error && <p className="mt-2 text-right text-sm text-destructive">{error}</p>}
             </form>
           </div>
         </section>

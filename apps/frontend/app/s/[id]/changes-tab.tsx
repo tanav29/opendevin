@@ -4,6 +4,7 @@ import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -56,7 +57,7 @@ export default function ChangesTab({
 
   const applyDiff = useCallback(({ ok, payload }: { ok: boolean; payload: DiffPayload }) => {
     if (!ok) {
-      setError(payload.error || "Changes unavailable.");
+      toast.error(payload.error || "Changes unavailable.");
     } else {
       // Keep the last diff readable: only overwrite on success.
       setDiff(payload.diff ?? "");
@@ -138,7 +139,7 @@ export default function ChangesTab({
       });
       refresh();
     } catch {
-      setError("Could not revert: server unreachable.");
+      toast.error("Could not revert: server unreachable.");
     } finally {
       setReverting("");
     }
@@ -159,7 +160,7 @@ export default function ChangesTab({
       setCommitMessage("");
       refresh();
     } catch (err) {
-      setCommitError(err instanceof Error ? err.message : "Commit failed.");
+      toast.error(err instanceof Error ? err.message : "Commit failed.");
     } finally {
       setCommitting(false);
     }
@@ -223,14 +224,6 @@ export default function ChangesTab({
       {commitDone && (
         <p className="border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
           {commitDone}
-        </p>
-      )}
-      {error && (
-        <p className="border-b border-border bg-danger-muted px-3 py-2 text-xs text-danger">
-          {error}{" "}
-          <button onClick={refresh} className="underline">
-            Retry
-          </button>
         </p>
       )}
       {!available && diff && (

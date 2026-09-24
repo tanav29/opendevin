@@ -3,11 +3,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { IconBrandGithub, IconPlus } from "@tabler/icons-react";
-import { ArrowUp, GitBranch, Loader2 } from "lucide-react";
+import { ArrowUp, GitBranch, CircleDot, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -16,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 export type TaskFormProject = { id: string; repo: string };
 
@@ -27,6 +29,8 @@ type GithubRepo = {
   cloneUrl: string;
   private: boolean;
 };
+
+type GithubIssue = { number: number; title: string; htmlUrl: string };
 
 type Props = {
   projects: TaskFormProject[];
@@ -59,7 +63,8 @@ export default function TaskForm({
   const [prompt, setPrompt] = useState("");
   const [branch, setBranch] = useState("");
   const [branchSearch, setBranchSearch] = useState("");
-  const [error, setError] = useState("");
+  const [issueSearch, setIssueSearch] = useState("");
+  const [issue, setIssue] = useState<GithubIssue | null>(null);
   const [creating, setCreating] = useState(false);
 
   const isLockedToProject = Boolean(initialProjectId);
@@ -83,7 +88,7 @@ export default function TaskForm({
     setSelectedRepo(repo);
     setRepoSearch("");
     setBranch("");
-    setError("");
+    setIssue(null);
     const existing = matchProject(projects, repo);
     if (existing) {
       setResolvedProjectId(existing.id);
@@ -99,7 +104,7 @@ export default function TaskForm({
       });
       setResolvedProjectId(created.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create workspace");
+      toast.error(e instanceof Error ? e.message : "Could not create workspace");
     } finally {
       setResolving(false);
     }
@@ -111,6 +116,13 @@ export default function TaskForm({
       api<{ branches: string[]; defaultBranch: string }>(
         `/api/projects/${activeProjectId}/branches`,
       ),
+    enabled: Boolean(activeProjectId),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const issuesQuery = useQuery({
+    queryKey: ["task-form-issues", activeProjectId],
+    queryFn: () => api<{ issues: GithubIssue[] }>(`/api/projects/${activeProjectId}/issues`),
     enabled: Boolean(activeProjectId),
     retry: false,
     staleTime: 30_000,
@@ -134,45 +146,61 @@ export default function TaskForm({
     !branches.some((item) => item.toLowerCase() === branchToCreate.toLowerCase());
 
   const branchEnabled = Boolean(activeProjectId) && !resolving;
+  const issues = issuesQuery.data?.issues ?? [];
+  const filteredIssues = issues.filter((item) =>
+    `${item.number} ${item.title}`.toLowerCase().includes(issueSearch.trim().toLowerCase()),
+  );
 
   async function runTask(event: FormEvent) {
     event.preventDefault();
     if (!prompt.trim() || !activeProjectId || creating) return;
     setCreating(true);
-    setError("");
     try {
-      const data = await api<{ id: string }>(
-        `/api/projects/${activeProjectId}/sessions`,
-        {
+      const data = await toast.promise(
+        api<{ id: string }>(`/api/projects/${activeProjectId}/sessions`, {
           method: "POST",
-          body: JSON.stringify({ message: prompt.trim(), branch }),
-        },
+          body: JSON.stringify({
+            message: issue ? `${prompt.trim()}\n\nRelated issue: ${issue.htmlUrl}` : prompt.trim(),
+            branch,
+          }),
+        }),
+        { loading: "Starting your task…", success: "Task started", error: (e) => e instanceof Error ? e.message : "Could not create session" },
       );
       window.location.href = `/s/${data.id}`;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create session");
       setCreating(false);
     }
   }
 
   return (
     <form onSubmit={runTask} className="relative space-y-3">
-      <Textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder={placeholder}
-        rows={4}
-        autoFocus={autoFocus}
-        className="min-h-32 resize-none p-4 pb-14"
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void runTask(e);
-        }}
-      />
+      <div className="relative">
+        {issue && (
+          <Badge variant="secondary" className="absolute left-3 top-2 z-10 max-w-[calc(100%-1.5rem)] gap-1.5 pr-1.5">
+            <CircleDot />
+            <span className="truncate" title={issue.htmlUrl}>{issue.htmlUrl}</span>
+            <button type="button" aria-label="Remove issue" onClick={() => setIssue(null)} className="rounded-full p-0.5 hover:bg-muted">
+              <X className="size-3" />
+            </button>
+          </Badge>
+        )}
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={placeholder}
+          rows={4}
+          autoFocus={autoFocus}
+          className={`min-h-32 resize-none p-4 pb-14 ${issue ? "pt-11" : ""}`}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void runTask(e);
+          }}
+        />
+      </div>
       <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pb-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {!isLockedToProject && (
             <Select
-              value={selectedRepo ? String(selectedRepo.name) : ""}
+              value={selectedRepo ? String(selectedRepo.id) : ""}
               onValueChange={(v: string | null) => {
                 const repo = repos.find((r) => String(r.id) === v) ?? null;
                 if (repo) void handleRepoSelect(repo);
@@ -261,6 +289,10 @@ export default function TaskForm({
                 </div>
               ) : (
                 <>
+                  {branch &&
+                    !branches.some((item) => item.toLowerCase() === branch.toLowerCase()) && (
+                      <SelectItem value={branch}>{branch}</SelectItem>
+                    )}
                   {filteredBranches.map((item) => (
                     <SelectItem key={item} value={item}>
                       {item}
@@ -281,6 +313,48 @@ export default function TaskForm({
               )}
             </SelectContent>
           </Select>
+
+          <Select
+            value={issue ? String(issue.number) : ""}
+            disabled={!branchEnabled}
+            onValueChange={(value: string | null) => {
+              const selected = issues.find((item) => String(item.number) === value);
+              setIssue(selected ?? null);
+              setIssueSearch("");
+            }}
+          >
+            <SelectTrigger className="h-8 w-auto max-w-44 border-0 text-xs">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <CircleDot className="size-3 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="Issue (optional)" />
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              <div onKeyDown={(e) => e.stopPropagation()}>
+                <Input
+                  value={issueSearch}
+                  onChange={(e) => setIssueSearch(e.target.value)}
+                  placeholder="Search issues…"
+                  className="text-xs rounded-sm"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <hr className="my-2" />
+              </div>
+              {issuesQuery.isPending ? (
+                <div className="px-2 py-4 text-center text-xs text-muted-foreground">Loading issues…</div>
+              ) : issuesQuery.isError ? (
+                <div className="px-2 py-4 text-center text-xs text-muted-foreground">Couldn’t load issues.</div>
+              ) : filteredIssues.length ? (
+                filteredIssues.map((item) => (
+                  <SelectItem key={item.number} value={String(item.number)}>
+                    #{item.number} · {item.title}
+                  </SelectItem>
+                ))
+              ) : (
+                <div className="px-2 py-4 text-center text-xs text-muted-foreground">No open issues found.</div>
+              )}
+            </SelectContent>
+          </Select>
         </div>
 
         <Button
@@ -291,11 +365,6 @@ export default function TaskForm({
           {creating ? <Loader2 className="animate-spin" /> : <ArrowUp />}
         </Button>
       </div>
-      {error && (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      )}
     </form>
   );
 }

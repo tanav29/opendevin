@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getPreviewSignal, subscribePreview } from "./preview-signal";
+import { toast } from "sonner";
 
 export default function PreviewTab({
   sessionId,
@@ -48,7 +49,6 @@ export default function PreviewTab({
 
   async function startDev() {
     setStarting(true);
-    setError("");
     setDevInfo("");
     try {
       const data = await api<{
@@ -61,14 +61,14 @@ export default function PreviewTab({
         body: JSON.stringify({ port: Number(effectivePort) || 3000 }),
       });
       if (!data.url) {
-        setError("Could not start dev server.");
+        toast.error("Could not start dev server.");
         return;
       }
       setPort(String(data.port ?? effectivePort));
       setDevInfo(`Started: ${data.command}`);
       setUrl(data.url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start dev server.");
+      toast.error(e instanceof Error ? e.message : "Could not start dev server.");
     } finally {
       setStarting(false);
     }
@@ -82,7 +82,7 @@ export default function PreviewTab({
         `/api/sessions/${sessionId}/preview?port=${encodeURIComponent(effectivePort)}&path=${encodeURIComponent(path || "/")}`,
       );
       if (!data.url) {
-        setError("Preview unavailable.");
+        toast.error("Preview unavailable.");
         setUrl("");
         return;
       }
@@ -91,7 +91,7 @@ export default function PreviewTab({
       // The backend only resolves URLs that actually serve, so a failure here
       // means nothing listens on this port — drop the stale iframe, if any.
       setUrl("");
-      setError(e instanceof Error ? e.message : "Preview unavailable.");
+      toast.error(e instanceof Error ? e.message : "Preview unavailable.");
     } finally {
       setResolving(false);
     }
@@ -166,14 +166,6 @@ export default function PreviewTab({
       {devInfo && (
         <p className="truncate border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
           {devInfo}
-        </p>
-      )}
-      {error && (
-        <p className="border-b border-border bg-danger-muted px-3 py-2 text-xs text-danger">
-          {error}{" "}
-          <button onClick={() => void resolve()} className="underline">
-            Retry
-          </button>
         </p>
       )}
       {url ? (

@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 type Repo = {
   id: number;
@@ -120,7 +121,7 @@ export default function NewProjectForm({ onClose }: { onClose?: () => void }) {
       });
       window.location.href = `/p/${data.id}`;
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not reach the server.");
+      toast.error(error instanceof Error ? error.message : "Could not reach the server.");
       setCreating(false);
     }
   }
@@ -334,11 +335,6 @@ export default function NewProjectForm({ onClose }: { onClose?: () => void }) {
             </p>
           )}
 
-          {error && (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
 
           <div className="flex gap-2 pt-2">
             <Button type="submit" disabled={creating || !repo.trim()} className="min-w-32">

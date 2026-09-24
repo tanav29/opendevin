@@ -14,25 +14,19 @@ function ToolCallCard({
   status: "working" | "done" | "failed";
   id: string;
 }) {
-  const statusStyles = {
-    working: "text-warning",
-    done: "text-success",
-    failed: "text-destructive",
-  } as const;
   const statusIcon = status === "working" ? "◌" : status === "done" ? "✓" : "×";
   return (
     <div
       key={id}
-      className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 bg-muted/35 px-2.5 py-1.5 font-mono text-[11px]"
+      className="flex min-w-0 items-center gap-2 font-mono text-md"
     >
       <span
-        className={`flex size-4 shrink-0 items-center justify-center rounded-full bg-background font-sans text-[10px] ${statusStyles[status]}`}
+        className="flex size-4 shrink-0 items-center justify-center text-md"
         aria-label={status}
       >
         {statusIcon}
       </span>
-      <span className="shrink-0 capitalize text-muted-foreground">{status}</span>
-      <span className="shrink-0 font-medium text-foreground">{name}</span>
+      <span className="shrink-0 font-medium text-foreground text-md">{name}</span>
       {argument && <span className="truncate text-muted-foreground">{argument}</span>}
     </div>
   );
@@ -240,11 +234,11 @@ function splitBlocks(content: string): Block[] {
 function Message({ content, onAnswer }: { content: string; onAnswer?: (text: string) => void }) {
   const blocks = splitBlocks(content);
   return (
-    <div className="space-y-2">
+    <div className="space-y-0">
       {blocks.map((b, k) => {
         if (b.kind === "md") {
           return (
-            <div key={`b-${k}`} className="typeset typeset-docs text-sm">
+            <div key={`b-${k}`} className="typeset typeset-docs text-sm py-2">
               <Markdown>{b.text}</Markdown>
             </div>
           );

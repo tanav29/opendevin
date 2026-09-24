@@ -10,6 +10,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import TaskForm from "@/components/task-form";
 import { api } from "@/lib/api";
 import { SessionSummary } from "@/components/session-summary";
+import Link from "next/link";
+import {
+  IconArrowUpRight,
+  IconBrandGithub,
+  IconCheck,
+  IconCode,
+  IconCommand,
+  IconFileCode,
+  IconGitBranch,
+  IconSparkles,
+  IconTerminal2,
+} from "@tabler/icons-react";
 
 type Project = {
   id: string;
@@ -32,22 +44,74 @@ const EMPTY_SESSIONS: Session[] = [];
 
 function SignedOut() {
   return (
-    <PageContainer size="wide" className="py-12 sm:py-20">
-      <div className="max-w-xl">
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          Developer workspace
-        </p>
-        <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-          Ship from the first prompt.
-        </h1>
-        <p className="mt-4 max-w-md text-[15px] leading-6 text-muted-foreground">
-          OpenDevin reads, edits, and runs your code in an isolated session.
-        </p>
-        <div className="mt-7">
-          <Button onClick={() => (window.location.href = "/login")}>Continue with GitHub</Button>
+    <main className="landing fixed inset-0 z-50 overflow-y-auto">
+      <div className="landing-grid" aria-hidden="true" />
+      <nav className="landing-nav">
+        <Link href="/" className="landing-brand" aria-label="OpenDevin home">
+          <span className="landing-mark"><IconCode size={18} stroke={2.3} /></span>
+          <span>opendevin<span className="brand-period">.</span></span>
+        </Link>
+        <div className="hidden items-center gap-8 text-[13px] font-medium text-[#66665f] sm:flex">
+          <a href="#workflow">How it works</a>
+          <a href="#workspace">The workspace</a>
         </div>
-      </div>
-    </PageContainer>
+        <Link className="landing-nav-cta" href="/login">Sign in <IconArrowUpRight size={15} /></Link>
+      </nav>
+
+      <section className="landing-hero">
+        <div className="hero-copy">
+          <div className="landing-eyebrow"><span className="eyebrow-dot" /> YOUR NEXT PAIR PROGRAMMER</div>
+          <h1>Make your repo<br />the <em>starting point.</em></h1>
+          <p className="hero-description">
+            Give an agent a task. OpenDevin gets to know your code, makes the change, and runs it in a real development environment.
+          </p>
+          <div className="hero-actions">
+            <Link href="/login" className="primary-cta"><IconBrandGithub size={17} /> Get started with GitHub <IconArrowUpRight size={16} /></Link>
+            <a href="#workflow" className="text-cta">Take a look around <span>↓</span></a>
+          </div>
+          <div className="hero-note"><IconCheck size={14} /> Your code stays in an isolated workspace</div>
+        </div>
+
+        <div className="workspace-wrap" id="workspace">
+          <div className="workspace-glow" />
+          <div className="workspace-window">
+            <div className="window-bar">
+              <div className="window-dots"><i /><i /><i /></div>
+              <div className="window-path"><IconGitBranch size={13} /> feature/checkout-flow</div>
+              <div className="window-live"><span /> LIVE SESSION</div>
+            </div>
+            <div className="workspace-body">
+              <aside className="workspace-rail">
+                <div className="rail-logo"><IconCode size={15} /></div>
+                <span className="rail-item active"><IconSparkles size={16} /></span>
+                <span className="rail-item"><IconFileCode size={16} /></span>
+                <span className="rail-item"><IconTerminal2 size={16} /></span>
+              </aside>
+              <div className="workspace-main">
+                <div className="session-heading"><div><span className="session-kicker">SESSION / 04</span><h3>Add a checkout confirmation</h3></div><span className="running-pill"><span /> Running</span></div>
+                <div className="task-card"><span className="task-label"><IconCommand size={13} /> YOUR TASK</span><p>Show a clear confirmation after checkout, including the order number and a link back to the shop.</p></div>
+                <div className="agent-row"><div className="agent-avatar"><IconSparkles size={14} /></div><div><b>OpenDevin</b><span>Found the checkout route. I’m adding a confirmation view and checking the existing order flow.</span></div></div>
+                <div className="change-card"><div className="change-head"><span>CHANGES</span><span className="change-count">2 files</span></div><div className="file-row"><IconFileCode size={14} /><span>app/checkout/success.tsx</span><b>+38</b></div><div className="file-row"><IconFileCode size={14} /><span>app/checkout/page.tsx</span><b>+6</b></div></div>
+                <div className="terminal-line"><span className="terminal-prompt">›</span><span>pnpm test checkout</span><span className="terminal-ok"><IconCheck size={12} /> 12 passed</span></div>
+                <div className="composer"><span>Ask for a change or give a follow-up task...</span><span className="composer-send">↑</span></div>
+              </div>
+            </div>
+            <div className="window-footer"><span><i /> Environment ready</span><span>~/storefront <span className="footer-divider">·</span> main</span></div>
+          </div>
+          <div className="preview-caption"><span className="caption-line" /> A real workspace, from first prompt to passing tests</div>
+        </div>
+      </section>
+
+      <section className="workflow" id="workflow">
+        <div className="workflow-intro"><span>FROM IDEA TO PATCH</span><p>One focused workspace for the work between “what if” and “it works.”</p></div>
+        <div className="workflow-steps">
+          <article><span className="step-icon"><IconBrandGithub size={17} /></span><div><h2>Bring your repo</h2><p>Connect a GitHub project and start in a clean, isolated environment.</p></div></article>
+          <article><span className="step-icon"><IconCommand size={17} /></span><div><h2>Describe the change</h2><p>Talk through the task in plain language. Keep the context and decisions together.</p></div></article>
+          <article><span className="step-icon"><IconTerminal2 size={17} /></span><div><h2>Run it, review it</h2><p>Inspect the code, use the terminal, and see the app as it comes together.</p></div></article>
+        </div>
+      </section>
+      <footer className="landing-footer"><Link href="/" className="landing-brand"><span className="landing-mark"><IconCode size={15} /></span><span>opendevin<span className="brand-period">.</span></span></Link><span>Built for the messy middle of making software.</span><Link href="/login">Start a session <IconArrowUpRight size={14} /></Link></footer>
+    </main>
   );
 }
 

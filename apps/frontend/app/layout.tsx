@@ -4,6 +4,7 @@ import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { QueryProvider } from "@/components/query-provider";
 import { AppShell } from "@/components/layout/app-shell";
+import { Toaster } from "sonner";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="bg-background text-foreground antialiased">
         <QueryProvider>
           <AppShell>{children}</AppShell>
+          <Toaster richColors position="bottom-right" />
         </QueryProvider>
       </body>
     </html>

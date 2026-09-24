@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 export default function FilesTab({
   sessionId,
@@ -54,7 +55,7 @@ export default function FilesTab({
       setPaths(Array.isArray(data.paths) ? data.paths : []);
       setTruncated(Boolean(data.truncated));
     } catch {
-      setError("Could not list files: the server is unreachable.");
+      toast.error("Could not list files: the server is unreachable.");
     } finally {
       setLoading(false);
     }
@@ -79,7 +80,7 @@ export default function FilesTab({
         }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`);
         setFileContent(typeof data.content === "string" ? data.content : "");
       } catch {
-        setFileError("Could not open file: server unreachable.");
+        toast.error("Could not open file: server unreachable.");
         setFileContent("");
       } finally {
         setFileLoading(false);
@@ -109,7 +110,7 @@ export default function FilesTab({
       });
       setDirty(false);
     } catch {
-      setFileError("Could not save file: server unreachable.");
+      toast.error("Could not save file: server unreachable.");
     } finally {
       setSaving(false);
     }
@@ -128,14 +129,6 @@ export default function FilesTab({
 
   return (
     <div className="flex h-full flex-col">
-      {error && (
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <p className="text-xs text-destructive">{error}</p>
-          <Button size="xs" variant="outline" onClick={() => void readPaths()}>
-            Retry
-          </Button>
-        </div>
-      )}
       <div className="border-b border-border p-2">
         <Input
           value={filter}

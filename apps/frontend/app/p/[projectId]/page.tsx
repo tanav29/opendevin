@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
 import { SessionSummary } from "@/components/session-summary";
+import { toast } from "sonner";
 
 type Project = {
   id: string;
@@ -147,7 +148,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       setProject(data);
       setEnvSaved("Saved for new sessions.");
     } catch (error) {
-      setEnvSaved(error instanceof Error ? error.message : "Could not reach server.");
+      toast.error(error instanceof Error ? error.message : "Could not reach server.");
     } finally {
       setSavingEnv(false);
     }
@@ -165,7 +166,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       setProject(data);
       setSetupSaved("Saved for new sessions.");
     } catch (error) {
-      setSetupSaved(error instanceof Error ? error.message : "Could not reach server.");
+      toast.error(error instanceof Error ? error.message : "Could not reach server.");
     } finally {
       setSavingSetup(false);
     }
@@ -186,7 +187,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       await api(`/api/projects/${projectId}`, { method: "DELETE" });
       window.location.href = "/";
     } catch {
-      setError("Could not delete project.");
+      toast.error("Could not delete project.");
       setDeleting(false);
     }
   }
@@ -257,11 +258,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             projects={[{ id: project.id, repo: project.repo }]}
             initialProjectId={project.id}
           />
-          {error && (
-            <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
 
           <Dialog open={configOpen} onOpenChange={setConfigOpen}>
             <DialogContent className="max-w-lg">

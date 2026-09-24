@@ -223,6 +223,41 @@ export function registerProjectRoutes(app: Express): void {
     }),
   );
 
+  app.get(
+    "/api/projects/:projectId/issues",
+    asyncRoute(async (req, res) => {
+      const found = await ownedProject(req, routeParam(req, "projectId"));
+      if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+      if (!found.project) return res.status(404).json({ error: "Project not found" });
+      const githubRepo = parseGitHubRepo(found.project.repo || "");
+      if (!githubRepo) return res.json({ issues: [] });
+
+      const token = await githubTokenForUser(found.user.id);
+      const headers = githubHeaders(token);
+      const url = `https://api.github.com/repos/${encodeURIComponent(githubRepo.owner)}/${encodeURIComponent(githubRepo.name)}/issues?state=open&per_page=100`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        return res.status(response.status === 404 ? 404 : 502).json({
+          error: `Could not fetch GitHub issues (${response.status})`,
+          issues: [],
+        });
+      }
+      const items = (await response.json()) as Array<{
+        number?: number;
+        title?: string;
+        html_url?: string;
+        pull_request?: unknown;
+      }>;
+      return res.json({
+        issues: items.flatMap((item) =>
+          item.number && item.title && item.html_url && !item.pull_request
+            ? [{ number: item.number, title: item.title, htmlUrl: item.html_url }]
+            : [],
+        ),
+      });
+    }),
+  );
+
   // Cursor-like: creating a session immediately returns a record, then a cloud
   // sandbox spins up in the background and clones the project's repo on the
   // requested branch (empty = repo default branch). Once ready, the opening
