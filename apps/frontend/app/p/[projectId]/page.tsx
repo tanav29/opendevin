@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { IconTrash, IconFolder, IconTerminal, IconSettings } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
+import { ApiErrorState, isNotFoundError } from "@/components/api-error-state";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader, PageShell, PageContainer } from "@/components/ui/page-header";
@@ -44,10 +45,14 @@ type ProjectSession = {
   updatedAt: string;
 };
 
-const PROVISIONING_SANDBOX = new Set(["pending", "creating", "cloning"]);
+const PROVISIONING_SANDBOX = new Set(["pending", "creating", "cloning", "setting-up"]);
 
 function isProvisioning(session: ProjectSession) {
-  return session.status === "running" || PROVISIONING_SANDBOX.has(session.sandboxStatus);
+  return (
+    session.status === "running" ||
+    session.status === "queued" ||
+    PROVISIONING_SANDBOX.has(session.sandboxStatus)
+  );
 }
 
 export default function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
@@ -65,7 +70,6 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   const [sessions, setSessions] = useState<ProjectSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [setupScript, setSetupScript] = useState("");
   const [devCommand, setDevCommand] = useState("");
@@ -101,8 +105,9 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
   });
 
   useEffect(() => {
-    if (projectQuery.isError) setNotFound(true);
+    if (projectQuery.isError) setNotFound(isNotFoundError(projectQuery.error));
     if (projectQuery.data) {
+      setNotFound(false);
       setProject(projectQuery.data);
       if (projectQuery.data.setupScript) setSetupScript(projectQuery.data.setupScript);
       if (projectQuery.data.devCommand) setDevCommand(projectQuery.data.devCommand);
@@ -123,6 +128,7 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     }
   }, [
     projectQuery.data,
+    projectQuery.error,
     projectQuery.isError,
     projectQuery.isPending,
     sessionsQuery.data,
@@ -213,6 +219,24 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
     );
   }
 
+  if (projectQuery.isError && !notFound && !project) {
+    return (
+      <PageShell header={<PageHeader title="Project unavailable" />}>
+        <PageContainer size="wide" className="py-8">
+          <ApiErrorState
+            error={projectQuery.error}
+            title="Project could not be loaded"
+            description="The API is unavailable or the request failed. Retry before starting a task."
+            onRetry={() => {
+              void projectQuery.refetch();
+              void sessionsQuery.refetch();
+            }}
+          />
+        </PageContainer>
+      </PageShell>
+    );
+  }
+
   if (notFound || !project) {
     return (
       <PageShell header={<PageHeader title="Not found" />}>
@@ -252,6 +276,18 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
       }
     >
       <PageContainer size="wide" className="py-6">
+        {projectQuery.isError && (
+          <ApiErrorState
+            error={projectQuery.error}
+            title="Project data could not be refreshed"
+            description="The last loaded configuration is shown. Retry before starting a task."
+            onRetry={() => {
+              void projectQuery.refetch();
+              void sessionsQuery.refetch();
+            }}
+            className="mb-6"
+          />
+        )}
         <div className="mt-6">
           <TaskForm
             projects={[{ id: project.id, repo: project.repo }]}
@@ -397,7 +433,15 @@ function ProjectPageInner({ params }: { params: Promise<{ projectId: string }> }
             </div>
 
             <div className="rounded-xl border overflow-hidden my-3">
-              {sessions.length === 0 ? (
+              {sessionsQuery.isError ? (
+                <ApiErrorState
+                  error={sessionsQuery.error}
+                  title="Sessions could not be loaded"
+                  description="Retry the project session list before relying on it."
+                  onRetry={() => void sessionsQuery.refetch()}
+                  compact
+                />
+              ) : sessions.length === 0 ? (
                 <EmptyState
                   icon={<IconTerminal className="size-4" />}
                   title="No sessions yet"

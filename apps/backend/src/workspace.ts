@@ -4,6 +4,20 @@ import { DIFF_MAX_BYTES, MAX_UNTRACKED_FILES, WORKSPACE_PATH } from "./config.js
 import { runSandbox } from "./sandbox.js";
 import { shellQuote } from "./sanitize.js";
 
+export const FRESH_CLONE_WARNING =
+  "Fresh sandbox created; the previous workspace was not restored. Review the saved patch before continuing.";
+
+export function hasUnrestoredWorkspace(lastError: string | null | undefined): boolean {
+  return typeof lastError === "string" && lastError.startsWith(FRESH_CLONE_WARNING);
+}
+
+export function withContinuityWarning(
+  previous: string | null | undefined,
+  message: string,
+): string {
+  return hasUnrestoredWorkspace(previous) ? `${FRESH_CLONE_WARNING}\n${message}` : message;
+}
+
 function truncateAtFileBoundary(diff: string): string {
   if (diff.length <= DIFF_MAX_BYTES) return diff;
   const cut = diff.lastIndexOf("\ndiff --git ", DIFF_MAX_BYTES);
@@ -21,9 +35,9 @@ export async function readWorkspaceDiff(
 
   try {
     const rev = await run("git rev-parse --git-dir");
-    if (rev.exitCode !== 0) return { diff: "", truncated: false };
-  } catch {
-    return { diff: "", truncated: false };
+    if (rev.exitCode !== 0) throw new Error("Workspace is not a Git repository.");
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("Could not inspect the Git workspace.");
   }
 
   let tracked = "";
@@ -77,23 +91,28 @@ export async function readWorkspaceDiff(
   return { diff: truncateAtFileBoundary(combined), truncated: true };
 }
 
-// Best-effort diff snapshot so the Changes tab survives sandbox expiry, then
-// reset the session status so it is never left "running".
-export async function snapshotDiffAndIdle(sessionId: string): Promise<void> {
+// Best-effort diff snapshot so the Changes tab survives sandbox expiry. The
+// caller owns the final lifecycle status; failures must not silently become idle.
+export async function snapshotWorkspaceDiff(sessionId: string): Promise<void> {
   const session = await prisma.projectSession.findUnique({ where: { id: sessionId } });
-  if (session?.sandboxId) {
-    try {
-      const sandbox = await Sandbox.connect(session.sandboxId);
-      const { diff } = await readWorkspaceDiff(sandbox, session.workspacePath || WORKSPACE_PATH);
-      await prisma.projectSession.update({
-        where: { id: sessionId },
-        data: { lastDiff: diff, lastDiffAt: new Date(), status: "idle" },
-      });
-      return;
-    } catch {
-      // Unreachable sandbox: fall through and just reset the status.
-    }
+  if (!session?.sandboxId) return;
+  // A confirmed replacement leaves the previous review-only patch authoritative
+  // until the user explicitly acts on it. Never overwrite it with fresh-clone state.
+  if (hasUnrestoredWorkspace(session.lastError)) return;
+  try {
+    const sandbox = await Sandbox.connect(session.sandboxId);
+    const { diff } = await readWorkspaceDiff(sandbox, session.workspacePath || WORKSPACE_PATH);
+    await prisma.projectSession.update({
+      where: { id: sessionId },
+      data: { lastDiff: diff, lastDiffAt: new Date() },
+    });
+  } catch {
+    // Unreachable sandbox: keep the last known diff and let the caller set state.
   }
+}
+
+export async function snapshotDiffAndIdle(sessionId: string): Promise<void> {
+  await snapshotWorkspaceDiff(sessionId);
   await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
 }
 

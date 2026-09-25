@@ -19,7 +19,13 @@ import {
   shellQuote,
 } from "../sanitize.js";
 import { probePort, runSandbox, waitForPort } from "../sandbox.js";
-import { listWorkspaceTree, readWorkspaceDiff } from "../workspace.js";
+import { activeTurns } from "../chat.js";
+import {
+  hasUnrestoredWorkspace,
+  listWorkspaceTree,
+  readWorkspaceDiff,
+  snapshotWorkspaceDiff,
+} from "../workspace.js";
 
 export function registerWorkspaceRoutes(app: Express): void {
   app.get(
@@ -30,9 +36,10 @@ export function registerWorkspaceRoutes(app: Express): void {
       if (!found.owner) return res.status(404).json({ error: "Session not found" });
       const persisted = found.owner.lastDiff || "";
       const persistedAt = found.owner.lastDiffAt || null;
+      const recoveryPending = hasUnrestoredWorkspace(found.owner.lastError) && Boolean(persisted);
       if (!found.owner.sandboxId) {
         if (persisted)
-          return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
+          return res.json({ diff: persisted, truncated: true, persisted: true, persistedAt });
         const reason = sandboxNotReadyReason(found.owner.sandboxStatus, found.owner.lastError);
         return res.status(409).json({ error: `Changes unavailable: ${reason}` });
       }
@@ -42,23 +49,37 @@ export function registerWorkspaceRoutes(app: Express): void {
           sandbox,
           found.owner.workspacePath || WORKSPACE_PATH,
         );
+        const recoveryPatch = recoveryPending ? { diff: persisted, capturedAt: persistedAt } : null;
         if (diff) {
-          void prisma.projectSession
-            .update({
-              where: { id: found.owner.id },
-              data: { lastDiff: diff, lastDiffAt: new Date() },
-            })
-            .catch(() => undefined);
-          return res.json({ diff, truncated, persisted: false });
+          if (!recoveryPending) {
+            void prisma.projectSession
+              .update({
+                where: { id: found.owner.id },
+                data: { lastDiff: diff, lastDiffAt: new Date() },
+              })
+              .catch(() => undefined);
+          }
+          return res.json({ diff, truncated, persisted: false, recoveryPatch });
         }
-        if (persisted)
-          return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
-        return res.json({ diff: "", truncated: false, persisted: false });
+        if (recoveryPending) {
+          return res.json({ diff: "", truncated: false, persisted: false, recoveryPatch });
+        }
+        if (persisted) {
+          return res.json({ diff: persisted, truncated: true, persisted: true, persistedAt });
+        }
+        return res.json({ diff: "", truncated: false, persisted: false, recoveryPatch: null });
       } catch (error) {
         console.error("Could not read workspace diff", error);
-        if (persisted)
-          return res.json({ diff: persisted, truncated: false, persisted: true, persistedAt });
         const message = error instanceof Error ? error.message : "unknown error";
+        if (recoveryPending) {
+          return res.status(503).json({
+            error: `Changes unavailable: ${message}`,
+            recoveryPatch: { diff: persisted, capturedAt: persistedAt },
+          });
+        }
+        if (persisted) {
+          return res.json({ diff: persisted, truncated: true, persisted: true, persistedAt });
+        }
         return res.status(503).json({ error: `Changes unavailable: ${message}` });
       }
     }),
@@ -173,14 +194,35 @@ export function registerWorkspaceRoutes(app: Express): void {
       if (!found.owner) return res.status(404).json({ error: "Session not found" });
       const rel = sanitizeRel(req.body.path ?? req.query.path);
       const content = typeof req.body.content === "string" ? req.body.content : null;
+      const expectedContent =
+        typeof req.body.expectedContent === "string" ? req.body.expectedContent : null;
       if (!rel) return res.status(400).json({ error: "path must be workspace-relative." });
       if (content === null) return res.status(400).json({ error: "content is required." });
+      if (expectedContent === null)
+        return res.status(400).json({ error: "expectedContent is required for safe file saves." });
       if (content.length > LIMITS.fileWriteChars)
         return res.status(413).json({ error: "Content too large: max 200,000 chars." });
       if (!found.owner.sandboxId) return res.status(409).json({ error: "Sandbox not ready." });
+      if (activeTurns.has(found.owner.id)) {
+        return res
+          .status(409)
+          .json({ error: "Stop the active agent turn before editing files manually." });
+      }
       try {
         const sandbox = await Sandbox.connect(found.owner.sandboxId);
         const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+        const current = await sandbox.files.read(`${cwd}/${rel}`);
+        const currentText = typeof current === "string" ? current : "";
+        if (currentText.length > LIMITS.fileReadChars) {
+          return res.status(413).json({
+            error: "File is too large to edit safely; reopen it as a read-only preview.",
+          });
+        }
+        if (currentText !== expectedContent) {
+          return res.status(409).json({
+            error: "File changed since it was opened. Reopen it before saving.",
+          });
+        }
         await sandbox.files.write(`${cwd}/${rel}`, content);
         return res.json({ ok: true, path: rel, chars: content.length });
       } catch (error) {
@@ -207,9 +249,9 @@ export function registerWorkspaceRoutes(app: Express): void {
         const checkout = await run(`git checkout -- ${shellQuote(rel)}`);
         const clean = await run(`git clean -f -- ${shellQuote(rel)}`);
         if (checkout.exitCode === 0 || clean.exitCode === 0) {
-          void prisma.projectSession
-            .update({ where: { id: found.owner.id }, data: { lastDiff: "", lastDiffAt: null } })
-            .catch(() => undefined);
+          // Refresh rather than clear: other changed files may still exist, and an
+          // empty lastDiff is also the reconnect policy's clean-workspace signal.
+          void snapshotWorkspaceDiff(found.owner.id).catch(() => undefined);
           return res.json({ ok: true, path: rel });
         }
         return res.status(409).json({
@@ -313,6 +355,51 @@ export function registerWorkspaceRoutes(app: Express): void {
     }),
   );
 
+  app.get(
+    "/api/sessions/:id/commit/preflight",
+    asyncRoute(async (req, res) => {
+      const found = await ownedSession(req, routeParam(req, "id"));
+      if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+      if (!found.owner) return res.status(404).json({ error: "Session not found" });
+      if (!found.owner.sandboxId) {
+        return res
+          .status(409)
+          .json({ error: "Commit unavailable: sandbox is still provisioning." });
+      }
+      try {
+        const sandbox = await Sandbox.connect(found.owner.sandboxId);
+        const cwd = found.owner.workspacePath || WORKSPACE_PATH;
+        const run = (command: string) => runSandbox(sandbox, command, cwd, 30_000);
+        const branch = await run("git branch --show-current");
+        const status = await run("git status --porcelain=v1 -uall");
+        if (branch.exitCode !== 0 || status.exitCode !== 0) {
+          return res
+            .status(409)
+            .json({ error: "Commit preflight failed: Git workspace is invalid." });
+        }
+        const sourceBranch =
+          sanitizeBranch(branch.stdout.trim()) || sanitizeBranch(found.owner.branch) || "HEAD";
+        const entries = (status.stdout || "").split("\n").filter(Boolean);
+        const untrackedFiles = entries
+          .filter((entry) => entry.startsWith("?? "))
+          .map((entry) => entry.slice(3).trim())
+          .filter(Boolean)
+          .slice(0, 20);
+        return res.json({
+          repo: found.owner.project.repo,
+          sourceBranch,
+          destinationBranch: `opendevin/session-${found.owner.id.slice(-8)}`,
+          changedFileCount: entries.length,
+          untrackedFiles,
+          untrackedCount: entries.filter((entry) => entry.startsWith("?? ")).length,
+        });
+      } catch (error) {
+        console.error("Commit preflight failed", error);
+        return res.status(503).json({ error: "Commit unavailable: sandbox is unreachable." });
+      }
+    }),
+  );
+
   app.post(
     "/api/sessions/:id/commit",
     asyncRoute(async (req, res) => {
@@ -320,6 +407,14 @@ export function registerWorkspaceRoutes(app: Express): void {
       if (!found.auth) return res.status(401).json({ error: "Sign in required" });
       if (!found.owner) return res.status(404).json({ error: "Session not found" });
       const owner = found.owner;
+      if (owner.archivedAt) {
+        return res.status(409).json({ error: "Archived sessions cannot be published." });
+      }
+      if (activeTurns.has(owner.id)) {
+        return res
+          .status(409)
+          .json({ error: "Stop the active agent turn before reviewing and pushing changes." });
+      }
       const repo = owner.project.repo?.trim() || "";
       const slug = parseGitHubRepo(repo);
       if (!slug)
@@ -334,6 +429,7 @@ export function registerWorkspaceRoutes(app: Express): void {
       }
       const message =
         typeof req.body.message === "string" ? req.body.message.trim().slice(0, 500) : "";
+      if (!message) return res.status(400).json({ error: "A commit message is required." });
       if (!owner.sandboxId) {
         return res
           .status(409)
@@ -343,31 +439,80 @@ export function registerWorkspaceRoutes(app: Express): void {
         const sandbox = await Sandbox.connect(owner.sandboxId);
         const cwd = owner.workspacePath || WORKSPACE_PATH;
         const run = (command: string) => runSandbox(sandbox, command, cwd, 120_000);
-        const sessionBranch = sanitizeBranch(owner.branch);
-        let branch = sessionBranch;
-        if (branch) {
-          await run(`git checkout -B ${shellQuote(branch)}`);
-        } else {
-          const current = await run("git rev-parse --abbrev-ref HEAD");
-          branch = sanitizeBranch((current.stdout || "").trim()) || "HEAD";
+        const current = await run("git branch --show-current");
+        if (current.exitCode !== 0) {
+          return res.status(409).json({ error: "Commit preflight failed: Git branch is invalid." });
         }
+        const sourceBranch =
+          sanitizeBranch(current.stdout.trim()) || sanitizeBranch(owner.branch) || "HEAD";
+        const destinationBranch = `opendevin/session-${owner.id.slice(-8)}`;
         const authedPushUrl = `https://oauth2:${token}@github.com/${slug.owner}/${slug.name}.git`;
         const status = await run("git status --porcelain=v1 -uall");
-        const treeDirty = !!status.stdout.trim();
+        if (status.exitCode !== 0) {
+          return res.status(409).json({ error: "Commit preflight failed: git status failed." });
+        }
+        const entries = (status.stdout || "").split("\n").filter(Boolean);
+        const treeDirty = entries.length > 0;
+        const untrackedFiles = entries
+          .filter((entry) => entry.startsWith("?? "))
+          .map((entry) => entry.slice(3).trim())
+          .filter(Boolean)
+          .slice(0, 20);
+        const untrackedCount = entries.filter((entry) => entry.startsWith("?? ")).length;
+        if (untrackedCount > 0 && req.body.confirmUntracked !== true) {
+          return res.status(409).json({
+            code: "untracked_files",
+            error:
+              "The commit would include untracked files. Review and confirm them before pushing.",
+            untrackedFiles,
+            untrackedCount,
+          });
+        }
         const headOut = await run("git rev-parse HEAD");
         const localSha = headOut.exitCode === 0 ? headOut.stdout.trim().split(/\s+/)[0] || "" : "";
         let remoteSha = "";
         if (localSha) {
           const ls = await run(
-            `git ls-remote ${shellQuote(authedPushUrl)} ${shellQuote(`refs/heads/${branch}`)}`,
+            `git ls-remote ${shellQuote(authedPushUrl)} ${shellQuote(`refs/heads/${destinationBranch}`)}`,
           );
           if (ls.exitCode === 0) remoteSha = ls.stdout.trim().split(/\s+/)[0] || "";
         }
-        const unpushed = !!localSha && localSha !== remoteSha;
+        const branchExists = await run(
+          `git show-ref --verify --quiet refs/heads/${shellQuote(destinationBranch)}`,
+        );
+        const localDestinationExists = branchExists.exitCode === 0;
+        const remoteDestinationExists = Boolean(remoteSha);
+        const unpushed =
+          !!localSha &&
+          ((remoteDestinationExists && localSha !== remoteSha) ||
+            (localDestinationExists && !remoteDestinationExists));
         if (!treeDirty && !unpushed) {
           return res
             .status(400)
             .json({ error: "Nothing to commit: the workspace has no changes." });
+        }
+        const checkout = await run(
+          localDestinationExists
+            ? `git checkout ${shellQuote(destinationBranch)}`
+            : `git checkout -b ${shellQuote(destinationBranch)}`,
+        );
+        if (checkout.exitCode !== 0) {
+          return res.status(409).json({
+            error: `Could not prepare destination branch ${destinationBranch}: ${(checkout.stderr || checkout.stdout).slice(0, 300)}`,
+          });
+        }
+        if (treeDirty) {
+          const finalStatus = await run("git status --porcelain=v1 -uall");
+          const finalEntries = (finalStatus.stdout || "").split("\n").filter(Boolean);
+          if (
+            finalStatus.exitCode !== 0 ||
+            JSON.stringify(finalEntries) !== JSON.stringify(entries)
+          ) {
+            return res.status(409).json({
+              code: "workspace_changed",
+              error: "The workspace changed after review. Refresh the publish preview and retry.",
+            });
+          }
         }
         const who = await currentUser(req);
         const gh = await githubIdentityForToken(token);
@@ -375,7 +520,6 @@ export function registerWorkspaceRoutes(app: Express): void {
         const email =
           gh?.email || who?.user.email || `${gh?.login || "opendevin"}@users.noreply.github.com`;
         if (treeDirty) {
-          if (!message) return res.status(400).json({ error: "A commit message is required." });
           const commit = await run(
             `git add -A && git -c ${shellQuote(`user.name=${name}`)} -c ${shellQuote(`user.email=${email}`)} commit -m ${shellQuote(message)}`,
           );
@@ -385,9 +529,14 @@ export function registerWorkspaceRoutes(app: Express): void {
             });
           }
         }
-        const push = await run(`git push ${shellQuote(authedPushUrl)} HEAD:${shellQuote(branch)}`);
+        const push = await run(
+          `git push ${shellQuote(authedPushUrl)} HEAD:${shellQuote(destinationBranch)}`,
+        );
         if (push.exitCode !== 0) {
           const detail = (push.stderr || push.stdout || "git push failed").slice(0, 500);
+          if (sourceBranch && sourceBranch !== "HEAD") {
+            await run(`git checkout ${shellQuote(sourceBranch)}`).catch(() => undefined);
+          }
           if (/403|permission[^.]*denied|denied[^.]*permission/i.test(detail)) {
             return res.status(403).json({
               error: `GitHub denied the push: ${detail.slice(0, 200)} The stored GitHub token lacks repository push access — sign out and sign in with GitHub again to grant it, then retry.`,
@@ -407,9 +556,22 @@ export function registerWorkspaceRoutes(app: Express): void {
           () => undefined,
         );
         await prisma.projectSession
-          .update({ where: { id: owner.id }, data: { lastDiff: "", lastDiffAt: null } })
+          .update({
+            where: { id: owner.id },
+            data: {
+              branch: destinationBranch,
+              lastDiff: hasUnrestoredWorkspace(owner.lastError) ? owner.lastDiff : "",
+              lastDiffAt: hasUnrestoredWorkspace(owner.lastError) ? owner.lastDiffAt : null,
+            },
+          })
           .catch(() => undefined);
-        return res.json({ branch });
+        return res.json({
+          branch: destinationBranch,
+          sourceBranch,
+          destinationBranch,
+          repo,
+          changedFileCount: entries.length,
+        });
       } catch (error) {
         console.error("Commit failed", error);
         return res

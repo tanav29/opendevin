@@ -7,7 +7,7 @@ import {
   useFileTreeSearch,
   useFileTreeSelection,
 } from "@pierre/trees/react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,19 +27,44 @@ export default function FilesTab({
   onReconnect: () => void;
 }) {
   const [paths, setPaths] = useState<string[]>([]);
-  const [truncated, setTruncated] = useState(false);
+  const [pathsTruncated, setPathsTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
-  const [openPath, setOpenPath] = useState("");
+  const [pathInput, setPathInput] = useState("");
+  const [loadedPath, setLoadedPath] = useState("");
   const [fileContent, setFileContent] = useState("");
+  const [savedContent, setSavedContent] = useState("");
+  const [contentTruncated, setContentTruncated] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState("");
-  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const dirty = Boolean(loadedPath) && fileContent !== savedContent;
+  const pathMismatch = Boolean(loadedPath) && pathInput !== loadedPath;
   const { model } = useFileTree({ paths: [], search: true });
   const search = useFileTreeSearch(model);
   const selection = useFileTreeSelection(model);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const warnBeforeNavigation = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target.closest("a") : null;
+      if (!target || target.origin !== window.location.origin || target.target === "_blank") return;
+      if (!window.confirm("Leave without saving file changes?")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    document.addEventListener("click", warnBeforeNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeUnload);
+      document.removeEventListener("click", warnBeforeNavigation, true);
+    };
+  }, [dirty]);
 
   useEffect(() => {
     model.resetPaths(paths);
@@ -47,15 +72,20 @@ export default function FilesTab({
 
   const readPaths = useCallback(async () => {
     setLoading(true);
-    setError("");
     try {
       const data = await api<{ paths?: string[]; truncated?: boolean }>(
         `/api/sessions/${sessionId}/files`,
+        undefined,
+        60_000,
       );
       setPaths(Array.isArray(data.paths) ? data.paths : []);
-      setTruncated(Boolean(data.truncated));
-    } catch {
-      toast.error("Could not list files: the server is unreachable.");
+      setPathsTruncated(Boolean(data.truncated));
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError
+          ? error.message
+          : "Could not list files: the server is unreachable.",
+      );
     } finally {
       setLoading(false);
     }
@@ -70,29 +100,48 @@ export default function FilesTab({
   const openFile = useCallback(
     async (path: string) => {
       if (!path || fileLoading) return;
-      setOpenPath(path);
+      if (dirty && !window.confirm("Discard unsaved file changes?")) return;
+      setPathInput(path);
+      setLoadedPath("");
+      setContentTruncated(false);
       setFileLoading(true);
       setFileError("");
-      setDirty(false);
       try {
         const data = await api<{
+          path?: string;
           content?: string;
-        }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`);
-        setFileContent(typeof data.content === "string" ? data.content : "");
-      } catch {
-        toast.error("Could not open file: server unreachable.");
+          truncated?: boolean;
+        }>(`/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`, undefined, 60_000);
+        const content = typeof data.content === "string" ? data.content : "";
+        const canonicalPath = data.path || path;
+        setPathInput(canonicalPath);
+        setLoadedPath(canonicalPath);
+        setFileContent(content);
+        setSavedContent(content);
+        setContentTruncated(Boolean(data.truncated));
+      } catch (error) {
+        const message =
+          error instanceof ApiError ? error.message : "Could not open file: server unreachable.";
+        setFileError(message);
+        toast.error(message);
         setFileContent("");
+        setSavedContent("");
       } finally {
         setFileLoading(false);
       }
     },
-    [sessionId, fileLoading],
+    [dirty, fileLoading, sessionId],
   );
 
   // Open the tree selection in the editor.
   useEffect(() => {
     const selected = selection[0];
-    if (selected && selected !== openPath && !selected.endsWith("/") && paths.includes(selected)) {
+    if (
+      selected &&
+      selected !== loadedPath &&
+      !selected.endsWith("/") &&
+      paths.includes(selected)
+    ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void openFile(selected);
     }
@@ -100,17 +149,27 @@ export default function FilesTab({
   }, [selection]);
 
   async function saveFile() {
-    if (!openPath || saving) return;
+    if (!loadedPath || pathMismatch || contentTruncated || saving || !dirty) return;
     setSaving(true);
     setFileError("");
     try {
-      await api(`/api/sessions/${sessionId}/file`, {
-        method: "PUT",
-        body: JSON.stringify({ path: openPath, content: fileContent }),
-      });
-      setDirty(false);
-    } catch {
-      toast.error("Could not save file: server unreachable.");
+      await api(
+        `/api/sessions/${sessionId}/file`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            path: loadedPath,
+            content: fileContent,
+            expectedContent: savedContent,
+          }),
+        },
+        60_000,
+      );
+      setSavedContent(fileContent);
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : "Could not save file: server unreachable.",
+      );
     } finally {
       setSaving(false);
     }
@@ -154,8 +213,8 @@ export default function FilesTab({
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
           <Input
-            value={openPath}
-            onChange={(e) => setOpenPath(e.target.value)}
+            value={pathInput}
+            onChange={(e) => setPathInput(e.target.value)}
             placeholder="path/to/file.ts"
             className="h-7 font-mono text-[11px]"
             spellCheck={false}
@@ -163,31 +222,46 @@ export default function FilesTab({
           <Button
             size="xs"
             variant="outline"
-            onClick={() => void openFile(openPath)}
-            disabled={!openPath || fileLoading}
+            onClick={() => void openFile(pathInput)}
+            disabled={!pathInput || fileLoading}
           >
             Open
           </Button>
           <Button
             size="xs"
             onClick={() => void saveFile()}
-            disabled={!openPath || !dirty || saving}
+            disabled={!loadedPath || pathMismatch || contentTruncated || !dirty || saving}
           >
             {saving ? "…" : "Save"}
           </Button>
+          <span className="ml-auto text-[11px] text-muted-foreground" aria-live="polite">
+            {saving ? "Saving…" : dirty ? "Unsaved changes" : loadedPath ? "Saved" : ""}
+          </span>
         </div>
         {fileError && (
           <p className="border-b border-border px-3 py-1.5 text-xs text-destructive">{fileError}</p>
         )}
+        {contentTruncated && (
+          <p className="border-b border-border bg-warning-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+            This file preview is truncated. It is read-only so omitted content cannot be
+            overwritten.
+          </p>
+        )}
+        {pathMismatch && (
+          <p className="border-b border-border bg-warning-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+            The path changed. Open it before editing or saving this file.
+          </p>
+        )}
         <div className="min-h-0 flex-1 overflow-auto">
           {fileLoading ? (
             <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading file…</p>
-          ) : openPath ? (
+          ) : loadedPath ? (
             <Textarea
               value={fileContent}
+              readOnly={contentTruncated || pathMismatch}
               onChange={(e) => {
+                if (contentTruncated || pathMismatch) return;
                 setFileContent(e.target.value);
-                setDirty(true);
               }}
               spellCheck={false}
               className="min-h-full rounded-none border-0 font-mono text-[12px] leading-5 focus-visible:ring-0"
@@ -200,7 +274,7 @@ export default function FilesTab({
           )}
         </div>
       </div>
-      {truncated && (
+      {pathsTruncated && (
         <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
           Showing first 5,000 files.
         </p>

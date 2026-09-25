@@ -5,7 +5,7 @@ import { IconPlayerPlay } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { emitPreview } from "./preview-signal";
 
 // Session header action: runs the project's saved dev command on the sandbox
@@ -38,6 +38,7 @@ export default function DevRunButton({
       const data = await api<{ url?: string; command?: string; port?: number }>(
         `/api/sessions/${sessionId}/devserver`,
         { method: "POST", body: JSON.stringify({}) },
+        90_000,
       );
       if (!data.url) {
         onError("Could not start dev server.");
@@ -45,8 +46,12 @@ export default function DevRunButton({
       }
       onOpened();
       emitPreview(sessionId, data.url, data.port ?? port);
-    } catch {
-      onError("Could not start dev server: the server is unreachable.");
+    } catch (error) {
+      onError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not start dev server: server unreachable.",
+      );
     } finally {
       setStarting(false);
     }

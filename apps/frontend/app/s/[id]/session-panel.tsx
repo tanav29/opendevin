@@ -18,6 +18,7 @@ export default function SessionPanel({
   prefs,
   onPrefs,
   onReconnect,
+  onCommitted,
   defaultPort,
 }: {
   sessionId: string;
@@ -27,6 +28,7 @@ export default function SessionPanel({
   prefs: PanelPrefs;
   onPrefs: (next: PanelPrefs) => void;
   onReconnect: () => void;
+  onCommitted?: () => void;
   defaultPort?: number;
 }) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -118,6 +120,7 @@ export default function SessionPanel({
               active={activeTab === "changes"}
               defaultTitle={defaultTitle}
               onReconnect={onReconnect}
+              onCommitted={onCommitted}
             />
           )}
           {activeTab === "preview" && (

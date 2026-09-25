@@ -2,8 +2,9 @@
 
 import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
+import { IconRefresh } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -12,6 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm";
 
 export default function ChangesTab({
   sessionId,
@@ -20,6 +23,7 @@ export default function ChangesTab({
   active,
   defaultTitle,
   onReconnect,
+  onCommitted,
 }: {
   sessionId: string;
   sandboxId: string;
@@ -27,10 +31,16 @@ export default function ChangesTab({
   active: boolean;
   defaultTitle: string;
   onReconnect: () => void;
+  onCommitted?: () => void;
 }) {
+  const confirm = useConfirm();
   const [diff, setDiff] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [persisted, setPersisted] = useState(false);
+  const [recoveryPatch, setRecoveryPatch] = useState<{
+    diff: string;
+    capturedAt: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [commitOpen, setCommitOpen] = useState(false);
@@ -39,13 +49,30 @@ export default function ChangesTab({
   const [commitError, setCommitError] = useState("");
   const [commitDone, setCommitDone] = useState("");
   const [reverting, setReverting] = useState("");
+  const [preflight, setPreflight] = useState<{
+    repo: string;
+    sourceBranch: string;
+    destinationBranch: string;
+    changedFileCount: number;
+    untrackedFiles: string[];
+    untrackedCount: number;
+  } | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflightError, setPreflightError] = useState("");
+  const [confirmUntracked, setConfirmUntracked] = useState(false);
 
-  type DiffPayload = { diff?: string; truncated?: boolean; persisted?: boolean; error?: string };
+  type DiffPayload = {
+    diff?: string;
+    truncated?: boolean;
+    persisted?: boolean;
+    error?: string;
+    recoveryPatch?: { diff: string; capturedAt: string | null } | null;
+  };
 
   const readDiff = useCallback(async (): Promise<{ ok: boolean; payload: DiffPayload }> => {
     if (!sessionId) return { ok: false, payload: { error: "" } };
     try {
-      const payload = await api<DiffPayload>(`/api/sessions/${sessionId}/diff`);
+      const payload = await api<DiffPayload>(`/api/sessions/${sessionId}/diff`, undefined, 60_000);
       return { ok: true, payload };
     } catch {
       return {
@@ -55,6 +82,41 @@ export default function ChangesTab({
     }
   }, [sessionId]);
 
+  const readPreflight = useCallback(async () => {
+    setPreflightLoading(true);
+    setPreflightError("");
+    try {
+      const data = await api<{
+        repo: string;
+        sourceBranch: string;
+        destinationBranch: string;
+        changedFileCount: number;
+        untrackedFiles?: string[];
+        untrackedCount?: number;
+      }>(`/api/sessions/${sessionId}/commit/preflight`, undefined, 60_000);
+      setPreflight({
+        repo: data.repo,
+        sourceBranch: data.sourceBranch,
+        destinationBranch: data.destinationBranch,
+        changedFileCount: data.changedFileCount,
+        untrackedFiles: data.untrackedFiles || [],
+        untrackedCount: data.untrackedCount || 0,
+      });
+      setConfirmUntracked(false);
+    } catch (error) {
+      setPreflight(null);
+      setPreflightError(
+        error instanceof Error ? error.message : "Could not check the publish target.",
+      );
+    } finally {
+      setPreflightLoading(false);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (commitOpen) void readPreflight();
+  }, [commitOpen, readPreflight]);
+
   const applyDiff = useCallback(({ ok, payload }: { ok: boolean; payload: DiffPayload }) => {
     if (!ok) {
       toast.error(payload.error || "Changes unavailable.");
@@ -63,6 +125,7 @@ export default function ChangesTab({
       setDiff(payload.diff ?? "");
       setTruncated(Boolean(payload.truncated));
       setPersisted(Boolean(payload.persisted));
+      setRecoveryPatch(payload.recoveryPatch ?? null);
       setError("");
     }
     setLoading(false);
@@ -117,13 +180,13 @@ export default function ChangesTab({
     }
   }, [diff, sessionId]);
 
-  async function downloadPatch() {
-    if (!diff) return;
-    const blob = new Blob([diff], { type: "text/x-patch" });
+  async function downloadPatch(content = diff, suffix = "") {
+    if (!content) return;
+    const blob = new Blob([content], { type: "text/x-patch" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `session-${sessionId.slice(-8)}.patch`;
+    anchor.download = `session-${sessionId.slice(-8)}${suffix}.patch`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -131,6 +194,14 @@ export default function ChangesTab({
   }
 
   async function revertFile(path: string) {
+    const confirmed = await confirm({
+      title: `Revert ${path}?`,
+      description:
+        "This discards tracked edits and removes the untracked file. The change cannot be recovered from the workspace.",
+      confirmLabel: "Revert file",
+      destructive: true,
+    });
+    if (!confirmed) return;
     setReverting(path);
     try {
       await api(`/api/sessions/${sessionId}/revert`, {
@@ -145,22 +216,53 @@ export default function ChangesTab({
     }
   }
 
+  const messageReady = Boolean(
+    commitMessage.trim() &&
+    preflight &&
+    !preflightLoading &&
+    (!preflight.untrackedCount || confirmUntracked),
+  );
+
   async function commit() {
-    if (committing) return;
+    if (committing || !messageReady) return;
     const message = commitMessage.trim();
     setCommitting(true);
     setCommitError("");
     try {
-      const data = await api<{ branch?: string }>(`/api/sessions/${sessionId}/commit`, {
-        method: "POST",
-        body: JSON.stringify({ message }),
-      });
-      setCommitDone(data.branch ? `Pushed to ${data.branch}` : "Pushed");
+      const data = await api<{
+        branch?: string;
+        sourceBranch?: string;
+        destinationBranch?: string;
+        repo?: string;
+        changedFileCount?: number;
+      }>(
+        `/api/sessions/${sessionId}/commit`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            message,
+            confirmUntracked: preflight?.untrackedCount ? confirmUntracked : true,
+          }),
+        },
+        180_000,
+      );
+      const target = data.destinationBranch || data.branch || "the generated session branch";
+      setCommitDone(
+        `Pushed ${data.changedFileCount ?? preflight?.changedFileCount ?? 0} files to ${target}`,
+      );
       setCommitOpen(false);
       setCommitMessage("");
       refresh();
+      onCommitted?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Commit failed.");
+      const message = err instanceof Error ? err.message : "Commit failed.";
+      setCommitError(message);
+      if (err instanceof ApiError && err.code === "untracked_files") {
+        setConfirmUntracked(false);
+        await readPreflight();
+      } else {
+        toast.error(message);
+      }
     } finally {
       setCommitting(false);
     }
@@ -214,7 +316,7 @@ export default function ChangesTab({
               setCommitDone("");
               setCommitOpen(true);
             }}
-            disabled={!diff}
+            disabled={!diff || !available}
             className="rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-40"
           >
             Commit
@@ -226,9 +328,29 @@ export default function ChangesTab({
           {commitDone}
         </p>
       )}
+      {recoveryPatch && (
+        <div className="flex items-center justify-between gap-3 border-b border-warning/40 bg-warning-muted/30 px-3 py-2 text-xs">
+          <span>
+            Recovery patch from the replaced workspace remains available
+            {recoveryPatch.capturedAt
+              ? ` (captured ${new Date(recoveryPatch.capturedAt).toLocaleString()})`
+              : ""}
+            . It is not applied to this sandbox.
+          </span>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => void downloadPatch(recoveryPatch.diff, "-recovery")}
+          >
+            Download
+          </Button>
+        </div>
+      )}
       {!available && diff && (
         <p className="border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
-          Showing the last saved diff — the sandbox is not running.{" "}
+          Showing the last saved diff — review/download only. The sandbox is not running and this
+          patch is not applied to a replacement.{" "}
           <button onClick={onReconnect} className="underline">
             Reconnect
           </button>
@@ -282,9 +404,61 @@ export default function ChangesTab({
           <DialogHeader>
             <DialogTitle>Commit changes</DialogTitle>
             <DialogDescription>
-              Commit workspace changes (if any) and push the session branch to the remote.
+              Review the exact remote target before committing and pushing.
             </DialogDescription>
           </DialogHeader>
+          {preflightLoading ? (
+            <p className="text-sm text-muted-foreground">Checking publish target…</p>
+          ) : preflightError ? (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-danger">{preflightError}</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void readPreflight()}
+              >
+                <IconRefresh className="size-3.5" /> Retry
+              </Button>
+            </div>
+          ) : preflight ? (
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-xs">
+              <p>
+                <span className="text-muted-foreground">Repository:</span> {preflight.repo}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Source branch:</span>{" "}
+                {preflight.sourceBranch}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Destination branch:</span>{" "}
+                {preflight.destinationBranch}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Changed files:</span>{" "}
+                {preflight.changedFileCount}
+              </p>
+              {preflight.untrackedCount > 0 && (
+                <label className="flex items-start gap-2 text-warning">
+                  <input
+                    type="checkbox"
+                    checked={confirmUntracked}
+                    onChange={(e) => setConfirmUntracked(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    `git add -A` includes {preflight.untrackedCount} untracked file(s). Review them
+                    before pushing.
+                    {preflight.untrackedFiles.length > 0 && (
+                      <span className="mt-1 block font-mono text-[11px] break-all">
+                        {preflight.untrackedFiles.join(", ")}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              )}
+            </div>
+          ) : null}
           <textarea
             value={commitMessage}
             onChange={(e) => setCommitMessage(e.target.value)}
@@ -304,7 +478,7 @@ export default function ChangesTab({
             </button>
             <button
               onClick={() => void commit()}
-              disabled={committing}
+              disabled={committing || !messageReady}
               className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-40"
             >
               {committing ? "Pushing…" : "Commit + push"}

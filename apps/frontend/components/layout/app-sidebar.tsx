@@ -28,15 +28,11 @@ import {
   SidebarMenuSkeleton,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { statusLabel, StatusDot } from "@/components/ui/status-dot";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { statusLabel } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import { CircleX, Code2, Loader, Loader2 } from "lucide-react";
+import { CircleX, Code2, Loader } from "lucide-react";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -53,42 +49,37 @@ type Session = {
 const EMPTY_PROJECTS: Project[] = [];
 const EMPTY_SESSIONS: Session[] = [];
 
-function sandboxTone(status: string) {
-  if (status === "ready") return "bg-emerald-500";
-  if (status === "error") return "bg-destructive";
-  if (["pending", "creating", "cloning"].includes(status)) return "bg-amber-400";
-  return "bg-muted-foreground/40";
-}
-
 function sandboxLabel(status: string) {
   if (status === "ready") return "Ready";
   if (status === "error") return "Failed";
-  if (["pending", "creating", "cloning"].includes(status)) return "Starting";
+  if (["pending", "creating", "cloning", "setting-up"].includes(status)) return "Starting";
   return status || "Unknown";
 }
 
 export function AppSidebar() {
   const pathname = usePathname();
   const [query, setQuery] = useState("");
-  const me = useSession();
+  const auth = useSession();
+  const me = auth.data;
 
   const projectsQuery = useQuery({
     queryKey: ["projects"],
     queryFn: () => api<Project[]>("/api/projects"),
+    enabled: auth.status === "signed-in",
     retry: false,
     refetchInterval: 15000,
   });
   const sessionsQuery = useQuery({
     queryKey: ["sessions"],
     queryFn: () => api<Session[]>("/api/sessions"),
+    enabled: auth.status === "signed-in",
     retry: false,
     refetchInterval: 15000,
   });
   const projects = projectsQuery.data ?? EMPTY_PROJECTS;
   const sessions = sessionsQuery.data ?? EMPTY_SESSIONS;
-  const projectsLoading = projectsQuery.isPending;
-  const sessionsLoading = sessionsQuery.isPending;
-  const signedIn = projectsQuery.isPending ? null : projectsQuery.isSuccess;
+  const projectsLoading = auth.status === "checking" || projectsQuery.isPending;
+  const sessionsLoading = auth.status === "checking" || sessionsQuery.isPending;
 
   const filteredProjects = useMemo(() => {
     if (!query.trim()) return projects.slice(0, 6);
@@ -110,10 +101,13 @@ export function AppSidebar() {
     return counts;
   }, [sessions]);
 
-  const runningCount = sessions.filter((s) => s.status === "running").length;
-  const displayName = me?.github.login || me?.user.name || (signedIn === false ? "Guest" : "…");
+  const runningCount = sessions.filter(
+    (s) => s.status === "running" || s.status === "queued",
+  ).length;
+  const displayName =
+    me?.github.login || me?.user.name || (auth.status === "signed-out" ? "Guest" : "…");
   const displaySub =
-    me?.user.email || (signedIn === false ? "Sign in to sync" : "Loading…");
+    me?.user.email || (auth.status === "signed-out" ? "Sign in to sync" : "Loading…");
 
   return (
     <>
@@ -121,24 +115,21 @@ export function AppSidebar() {
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton
-                tooltip="OpenDevin home"
-                render={<Link href="/" prefetch />}
-              ><Code2 className="size-4" />
+              <SidebarMenuButton tooltip="OpenDevin home" render={<Link href="/" prefetch />}>
+                <Code2 className="size-4" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
                   <span className="truncate font-semibold text-sm">OpenDevin</span>
                 </span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
-
         </SidebarHeader>
 
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                {signedIn === false && (
+                {auth.status === "signed-out" && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={pathname === "/login"}
@@ -154,8 +145,8 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {signedIn !== false && (
-          <div className="px-3 pt-1 group-data-[collapsible=icon]:hidden">
+          {auth.status === "signed-in" && (
+            <div className="px-3 pt-1 group-data-[collapsible=icon]:hidden">
               <div className="relative">
                 <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <SidebarInput
@@ -169,7 +160,7 @@ export function AppSidebar() {
             </div>
           )}
 
-          {signedIn === false ? (
+          {auth.status === "signed-out" ? (
             <SidebarGroup>
               <div className="rounded-xl border border-dashed bg-card p-3 group-data-[collapsible=icon]:hidden">
                 <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -184,6 +175,24 @@ export function AppSidebar() {
                 >
                   Continue with GitHub
                 </Link>
+              </div>
+            </SidebarGroup>
+          ) : auth.status === "unavailable" ? (
+            <SidebarGroup>
+              <div className="rounded-xl border border-dashed bg-card p-3 group-data-[collapsible=icon]:hidden">
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Connection unavailable
+                </p>
+                <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
+                  OpenDevin could not verify the session. Retry when the API is reachable.
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-md border px-3 py-2 text-sm font-medium"
+                  onClick={() => void auth.refetch()}
+                >
+                  Retry
+                </button>
               </div>
             </SidebarGroup>
           ) : (
@@ -222,11 +231,12 @@ export function AppSidebar() {
                                   render={<Link href={`/p/${p.id}`} prefetch />}
                                 >
                                   <IconFolder className="shrink-0 text-muted-foreground" />
-                                  <span className="min-w-0 flex-1 truncate">{p.repo.split("/")[p.repo.split("/").length - 2]}/{p.repo.split("/")[p.repo.split("/").length - 1]}</span>
+                                  <span className="min-w-0 flex-1 truncate">
+                                    {p.repo.split("/")[p.repo.split("/").length - 2]}/
+                                    {p.repo.split("/")[p.repo.split("/").length - 1]}
+                                  </span>
                                 </SidebarMenuButton>
-                                {count > 0 && (
-                                  <SidebarMenuBadge>{count}</SidebarMenuBadge>
-                                )}
+                                {count > 0 && <SidebarMenuBadge>{count}</SidebarMenuBadge>}
                               </SidebarMenuItem>
                             );
                           })
@@ -242,7 +252,7 @@ export function AppSidebar() {
                   <SidebarGroupLabel render={<CollapsibleTrigger />}>
                     Sessions
                     <span className="ml-auto flex items-center gap-1.5">
-                      {runningCount < 0 && (
+                      {runningCount > 0 && (
                         <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
                           <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
                           {runningCount}
@@ -275,15 +285,15 @@ export function AppSidebar() {
                                 <SidebarMenuButton
                                   size={"sm"}
                                   isActive={active}
-                                  tooltip={`${s.title} · Agent ${statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
+                                  tooltip={`${s.title} · Agent ${s.status === "queued" ? "waiting" : statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
                                   render={<Link href={`/s/${s.id}`} prefetch />}
                                 >
-                                  {
-                                    s.status == "running" && <Loader className="h-3 animate-spin text-muted-foreground" />
-                                  }
-                                  {
-                                    s.status == "failed" && <CircleX className="h-3 text-muted-foreground" />
-                                  }
+                                  {(s.status == "running" || s.status == "queued") && (
+                                    <Loader className="h-3 animate-spin text-muted-foreground" />
+                                  )}
+                                  {s.status == "failed" && (
+                                    <CircleX className="h-3 text-muted-foreground" />
+                                  )}
                                   {/*{
                                     s.status == "stopped" && < className="h-3 animate-spin text-muted-foreground" />
                                   }*/}
@@ -315,7 +325,9 @@ export function AppSidebar() {
               <SidebarMenuButton
                 size="lg"
                 tooltip={displayName}
-                render={<Link href={signedIn === false ? "/login" : "/settings"} prefetch />}
+                render={
+                  <Link href={auth.status === "signed-in" ? "/settings" : "/login"} prefetch />
+                }
               >
                 {me?.github.avatarUrl || me?.user.image ? (
                   // eslint-disable-next-line @next/next/no-img-element

@@ -30,7 +30,7 @@ export default function PreviewTab({
   });
   const [resolving, setResolving] = useState(false);
   const [starting, setStarting] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useState("");
   const [devInfo, setDevInfo] = useState("");
   const [copied, setCopied] = useState(false);
   // Request-scoped state (url/error) resets via the parent's key on session/sandbox change.
@@ -56,10 +56,14 @@ export default function PreviewTab({
         command?: string;
         port?: number;
         log?: string;
-      }>(`/api/sessions/${sessionId}/devserver`, {
-        method: "POST",
-        body: JSON.stringify({ port: Number(effectivePort) || 3000 }),
-      });
+      }>(
+        `/api/sessions/${sessionId}/devserver`,
+        {
+          method: "POST",
+          body: JSON.stringify({ port: Number(effectivePort) || 3000 }),
+        },
+        90_000,
+      );
       if (!data.url) {
         toast.error("Could not start dev server.");
         return;

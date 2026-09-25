@@ -3,8 +3,20 @@ import { prisma } from "./db/prisma.js";
 import { SANDBOX_TIMEOUT_MS, WORKSPACE_PATH } from "./config.js";
 import { githubTokenForUser } from "./github.js";
 import { isRepoUrl, projectEnvVars, shellQuote } from "./sanitize.js";
+import { canTransition } from "./lifecycle.js";
 
 export type SandboxResult = { exitCode: number; stdout: string; stderr: string };
+
+const activeProvisioning = new Set<string>();
+const canceledProvisioning = new Set<string>();
+
+export function cancelSandboxProvisioning(sessionId: string): void {
+  canceledProvisioning.add(sessionId);
+}
+
+function provisioningCanceled(sessionId: string): boolean {
+  return canceledProvisioning.has(sessionId);
+}
 
 // E2B's `commands.run` throws CommandExitError on any non-zero exit, but git
 // signals "differences found" via exit 1 — the normal case for a diff. The
@@ -135,16 +147,35 @@ export async function ensureRipgrep(sandbox: Sandbox): Promise<void> {
   }
 }
 
-export async function provisionSandbox(sessionId: string): Promise<void> {
+export async function provisionSandbox(sessionId: string): Promise<boolean> {
+  if (activeProvisioning.has(sessionId)) {
+    if (!canceledProvisioning.has(sessionId)) return false;
+    const deadline = Date.now() + 10_000;
+    while (activeProvisioning.has(sessionId) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (activeProvisioning.has(sessionId)) return false;
+  }
+  canceledProvisioning.delete(sessionId);
+  activeProvisioning.add(sessionId);
+  try {
+    return await provisionSandboxUnlocked(sessionId);
+  } finally {
+    activeProvisioning.delete(sessionId);
+  }
+}
+
+async function provisionSandboxUnlocked(sessionId: string): Promise<boolean> {
   const existing = await prisma.projectSession.findUnique({
     where: { id: sessionId },
     include: { project: true },
   });
-  if (!existing) return;
+  if (!existing) return false;
+  if (!canTransition("provisioning", existing.sandboxStatus, "creating")) return false;
 
   await prisma.projectSession.update({
     where: { id: sessionId },
-    data: { sandboxStatus: "creating", lastError: null },
+    data: { sandboxStatus: "creating", status: "queued", lastError: null },
   });
 
   try {
@@ -152,14 +183,23 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
       throw new Error("E2B_API_KEY is not configured");
     }
     const sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+    if (provisioningCanceled(sessionId)) {
+      await killSandbox(sandbox.sandboxId);
+      return false;
+    }
     await ensureRipgrep(sandbox);
     await prisma.projectSession.update({
       where: { id: sessionId },
       data: {
         sandboxId: sandbox.sandboxId,
-        sandboxStatus: existing.project.repo?.trim() ? "cloning" : "ready",
+        sandboxStatus: existing.project.repo?.trim() ? "cloning" : "setting-up",
+        status: "queued",
       },
     });
+    if (provisioningCanceled(sessionId)) {
+      await killSandbox(sandbox.sandboxId);
+      return false;
+    }
 
     const repo = existing.project.repo?.trim();
     if (isRepoUrl(repo)) {
@@ -173,16 +213,28 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
           token,
         );
       } catch (error) {
+        await killSandbox(sandbox.sandboxId);
         await prisma.projectSession.update({
           where: { id: sessionId },
           data: {
+            sandboxId: "",
             sandboxStatus: "error",
             status: "failed",
             lastError: error instanceof Error ? error.message : "Repository clone failed",
           },
         });
-        return;
+        return false;
       }
+    }
+    if (provisioningCanceled(sessionId)) {
+      await killSandbox(sandbox.sandboxId);
+      return false;
+    }
+    if (isRepoUrl(repo)) {
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: { sandboxStatus: "setting-up", status: "queued" },
+      });
     }
 
     // Project setup script (env install, e.g. `pnpm install`). Runs once after
@@ -199,36 +251,45 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
           envs,
         );
         if (out.exitCode !== 0) {
+          await killSandbox(sandbox.sandboxId);
           await prisma.projectSession.update({
             where: { id: sessionId },
             data: {
-              sandboxStatus: "ready",
-              status: "idle",
+              sandboxId: "",
+              sandboxStatus: "error",
+              status: "failed",
               lastError: `Setup script exited ${out.exitCode}: ${(out.stderr || out.stdout).slice(0, 500)}`,
             },
           });
-          return;
+          return false;
         }
       } catch (error) {
+        await killSandbox(sandbox.sandboxId);
         await prisma.projectSession.update({
           where: { id: sessionId },
           data: {
-            sandboxStatus: "ready",
-            status: "idle",
+            sandboxId: "",
+            sandboxStatus: "error",
+            status: "failed",
             lastError:
               error instanceof Error
                 ? `Setup failed: ${error.message}`.slice(0, 500)
                 : "Setup failed",
           },
         });
-        return;
+        return false;
       }
     }
 
+    if (provisioningCanceled(sessionId)) {
+      await killSandbox(sandbox.sandboxId);
+      return false;
+    }
     await prisma.projectSession.update({
       where: { id: sessionId },
-      data: { sandboxStatus: "ready", status: "idle", lastError: null },
+      data: { sandboxStatus: "ready", status: "queued", lastError: null },
     });
+    return true;
   } catch (error) {
     await prisma.projectSession.update({
       where: { id: sessionId },
@@ -238,6 +299,7 @@ export async function provisionSandbox(sessionId: string): Promise<void> {
         lastError: error instanceof Error ? error.message : "Sandbox creation failed",
       },
     });
+    return false;
   }
 }
 

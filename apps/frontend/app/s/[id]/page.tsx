@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ApiErrorState, asApiError, isNotFoundError } from "@/components/api-error-state";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -27,10 +28,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { usePanelPrefs } from "./panel-prefs";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
-import { SessionSummary } from "@/components/session-summary";
 const Message = dynamic(() => import("./message"), {
   ssr: false,
   loading: () => <span className="text-muted-foreground">Loading response…</span>,
@@ -49,6 +50,19 @@ import {
   type SessionStatus,
 } from "./lib";
 import { PaperclipIcon } from "lucide-react";
+
+type Attachment = { id: string; name: string; content: string };
+const MAX_ATTACHMENT_COUNT = 3;
+const MAX_MESSAGE_CHARS = 20_000;
+
+function serializeAttachments(attachments: Attachment[]) {
+  return attachments
+    .map(
+      (attachment) =>
+        `<attachment name="${attachment.name}">\n${attachment.content}\n</attachment>`,
+    )
+    .join("\n\n");
+}
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -97,15 +111,19 @@ function SessionInfoDialog({
   reconnecting: boolean;
   killing: boolean;
 }) {
-  const sandboxStatus = status?.sandboxStatus || detail?.sandboxStatus || "pending";
-  const agentStatus = status?.status || detail?.status || "idle";
+  const sandboxStatus =
+    status?.lifecycle?.provisioning || status?.sandboxStatus || detail?.sandboxStatus || "pending";
+  const agentStatus = status?.lifecycle?.agent || status?.status || detail?.status || "idle";
+  const verification = status?.lifecycle?.verification || "pending";
   const plan = status?.plan || [];
   const usage = status?.usage;
   const createdAt = detail?.createdAt || status?.createdAt;
   const [copied, setCopied] = useState("");
   const sandboxId = status?.sandboxId || detail?.sandboxId || "";
   const canReconnect =
-    sandboxStatus === "error" || (sandboxStatus === "ready" && !status?.sandboxAvailable);
+    sandboxStatus === "error" ||
+    sandboxStatus === "unavailable" ||
+    (status?.sandboxStatus === "ready" && !status?.sandboxAvailable);
 
   function copyValue(value: string) {
     void navigator.clipboard.writeText(value).then(() => {
@@ -144,6 +162,7 @@ function SessionInfoDialog({
               />
               <InfoRow label="Branch" value={status?.branch || detail?.branch || ""} />
               <InfoRow label="Agent status" value={agentStatus} />
+              <InfoRow label="Result" value={verification} />
               <InfoRow label="Model" value={status?.model || detail?.model || ""} />
             </dl>
           </section>
@@ -210,7 +229,7 @@ function SessionInfoDialog({
                 <IconRefresh /> {reconnecting ? "Reconnecting…" : "Reconnect"}
               </Button>
             )}
-            {sandboxId && sandboxStatus !== "error" && (
+            {sandboxId && sandboxStatus !== "error" && sandboxStatus !== "unavailable" && (
               <Button
                 type="button"
                 variant="destructive"
@@ -228,18 +247,107 @@ function SessionInfoDialog({
   );
 }
 
+type ReconnectConflict = {
+  message: string;
+  patchAvailable: boolean;
+  capturedAt: string | null;
+};
+
+function ReconnectConflictDialog({
+  conflict,
+  reconnecting,
+  onOpenChange,
+  onReview,
+  onDownload,
+  onConfirm,
+}: {
+  conflict: ReconnectConflict | null;
+  reconnecting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onReview: () => void;
+  onDownload: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={Boolean(conflict)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Replace the unavailable sandbox?</DialogTitle>
+          <DialogDescription>
+            This session may contain uncommitted work. A fresh clone does not restore the previous
+            workspace.
+          </DialogDescription>
+        </DialogHeader>
+        {conflict?.patchAvailable && (
+          <div className="rounded-lg border bg-muted/30 p-3 text-[13px] leading-5">
+            <p className="font-medium">A saved patch is available.</p>
+            <p className="mt-1 text-muted-foreground">
+              It is review/download only and will not be applied to the replacement sandbox.
+              {conflict.capturedAt
+                ? ` Captured ${new Date(conflict.capturedAt).toLocaleString()}.`
+                : ""}
+            </p>
+          </div>
+        )}
+        <p className="text-sm text-muted-foreground">{conflict?.message}</p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          {conflict?.patchAvailable && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="hidden md:inline-flex"
+                onClick={onReview}
+                disabled={reconnecting}
+              >
+                Review patch
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="md:hidden"
+                onClick={onDownload}
+                disabled={reconnecting}
+              >
+                Download patch
+              </Button>
+            </>
+          )}
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={onConfirm}
+            disabled={reconnecting}
+          >
+            {reconnecting ? "Creating fresh sandbox…" : "Create fresh sandbox"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const [sessionId, setSessionId] = useState("");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectConflict, setReconnectConflict] = useState<ReconnectConflict | null>(null);
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [degraded, setDegraded] = useState(false);
-  const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -247,7 +355,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [prefs, setPrefs] = usePanelPrefs();
 
   async function addFiles(files: FileList | File[]) {
-    const list = Array.from(files).slice(0, 3);
+    const all = Array.from(files);
+    const remaining = Math.max(0, MAX_ATTACHMENT_COUNT - attachments.length);
+    if (remaining === 0) {
+      toast.error(`Only ${MAX_ATTACHMENT_COUNT} attachments can be added.`);
+      return;
+    }
+    const list = all.slice(0, remaining);
+    if (all.length > list.length) {
+      toast.error(`Only ${MAX_ATTACHMENT_COUNT} attachments can be added.`);
+    }
+    let nextAttachments = [...attachments];
     for (const f of list) {
       if (f.size > 200_000) {
         toast.error(`Attachment ${f.name} too large (max 200KB).`);
@@ -255,28 +373,50 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       }
       try {
         const text = await f.text();
-        setAttachments((cur) =>
-          cur.length >= 3
-            ? cur
-            : [...cur, { name: f.name.slice(0, 100), content: text.slice(0, 50_000) }],
-        );
+        const next = [
+          ...nextAttachments,
+          { id: crypto.randomUUID(), name: f.name.slice(0, 100), content: text },
+        ];
+        if (serializeAttachments(next).length > MAX_MESSAGE_CHARS) {
+          toast.error(
+            `Attachments exceed the ${MAX_MESSAGE_CHARS.toLocaleString()}-character message limit.`,
+          );
+          continue;
+        }
+        nextAttachments = next;
+        setAttachments(nextAttachments);
       } catch {
         toast.error(`Could not read ${f.name}.`);
       }
     }
   }
-  const refresh = useCallback(async (id: string, includeMessages: boolean) => {
-    const [nextDetail, nextStatus, history] = await Promise.all([
-      api<SessionDetail>(`/api/sessions/${id}`).catch(() => null),
-      api<SessionStatus>(`/api/sessions/${id}/status`).catch(() => null),
-      includeMessages
-        ? api<ChatMessage[]>(`/api/sessions/${id}/messages`).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-    if (nextDetail) setDetail(nextDetail);
-    if (nextStatus) setStatus(nextStatus);
-    if (history) setMessages(history);
-    return nextDetail as SessionDetail | null;
+  const refresh = useCallback(async (id: string, includeMessages: boolean, showLoading = false) => {
+    if (showLoading) setLoading(true);
+    try {
+      const [detailResult, statusResult, messagesResult] = await Promise.allSettled([
+        api<SessionDetail>(`/api/sessions/${id}`),
+        api<SessionStatus>(`/api/sessions/${id}/status`),
+        includeMessages ? api<ChatMessage[]>(`/api/sessions/${id}/messages`) : Promise.resolve([]),
+      ]);
+
+      if (detailResult.status === "fulfilled") setDetail(detailResult.value);
+      if (statusResult.status === "fulfilled") setStatus(statusResult.value);
+      if (messagesResult.status === "fulfilled" && includeMessages) {
+        setMessages(messagesResult.value);
+      }
+
+      const failure = [detailResult, statusResult, messagesResult].find(
+        (result) => result.status === "rejected",
+      );
+      if (failure && failure.status === "rejected") {
+        setLoadError(asApiError(failure.reason));
+      } else {
+        setLoadError(null);
+      }
+      return detailResult.status === "fulfilled" ? detailResult.value : null;
+    } finally {
+      if (showLoading) setLoading(false);
+    }
   }, []);
 
   // Keep the latest turn visible while streaming or after history loads.
@@ -297,13 +437,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       try {
         window.localStorage.setItem("opendevin:selected-session", id);
       } catch {}
-      void refresh(id, true);
+      void refresh(id, true, true);
     });
   }, [params, refresh]);
 
   const sandboxStatus = status?.sandboxStatus ?? detail?.sandboxStatus ?? "pending";
-  const agentStatus = status?.status ?? detail?.status ?? "idle";
-  const busy = isWorking(agentStatus, sandboxStatus) || sending;
+  const lifecycle = status?.lifecycle;
+  const provisioningPhase =
+    lifecycle?.provisioning ??
+    (sandboxStatus === "ready" && status?.sandboxAvailable === false
+      ? "unavailable"
+      : sandboxStatus);
+  const agentStatus = lifecycle?.agent ?? status?.status ?? detail?.status ?? "idle";
+  const verification = lifecycle?.verification ?? "pending";
+  const activeAgent = agentStatus === "running" || lifecycle?.activeTurn === true;
+  const agentQueued = agentStatus === "queued";
+  const agentBusy = activeAgent || agentQueued;
+  const busy = isWorking(agentStatus, sandboxStatus, lifecycle?.agent) || sending;
 
   useEffect(() => {
     if (!sessionId || !busy) return;
@@ -311,31 +461,88 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     return () => clearInterval(timer);
   }, [sessionId, busy, sending, refresh]);
 
-  async function reconnect() {
+  async function reconnect(confirmReplace = false) {
     if (!sessionId || reconnecting) return;
     setReconnecting(true);
     try {
-      await api(`/api/sessions/${sessionId}/reconnect`, {
-        method: "POST",
-      });
+      const result = await api<{
+        replaced?: boolean;
+        reattached?: boolean;
+        continuity?: "fresh-clone" | "existing-sandbox";
+      }>(
+        `/api/sessions/${sessionId}/reconnect`,
+        {
+          method: "POST",
+          body: JSON.stringify({ confirmReplace }),
+        },
+        60_000,
+      );
+      setReconnectConflict(null);
+      if (result.replaced) {
+        toast.info("Fresh sandbox created. The previous workspace was not restored.");
+      } else if (result.reattached) {
+        toast.success("Reconnected to the existing sandbox.");
+      }
       await refresh(sessionId, false);
-    } catch {
-      toast.error("Could not reconnect sandbox: the server is unreachable.");
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.code === "sandbox_reconnect_dirty"
+      ) {
+        const details = error.details as
+          | { patch?: { available?: boolean; capturedAt?: string | null } }
+          | undefined;
+        setReconnectConflict({
+          message: error.message,
+          patchAvailable: Boolean(details?.patch?.available),
+          capturedAt: details?.patch?.capturedAt ?? null,
+        });
+      } else if (error instanceof ApiError) {
+        toast.error(error.message);
+      } else {
+        toast.error("Could not reconnect sandbox: the server is unreachable.");
+      }
     } finally {
       setReconnecting(false);
     }
   }
 
+  async function downloadRecoveryPatch() {
+    try {
+      const result = await api<{ diff?: string }>(
+        `/api/sessions/${sessionId}/diff`,
+        undefined,
+        60_000,
+      );
+      if (!result.diff) {
+        toast.info("No recovery patch is available for this session.");
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([result.diff], { type: "text/x-patch" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `session-${sessionId.slice(-8)}-recovery.patch`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : "Could not download the recovery patch.",
+      );
+    }
+  }
+
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || !sessionId || sending || !ready) return;
-    let full = trimmed;
-    if (attachments.length > 0) {
-      const blocks = attachments
-        .map((a) => `<attachment name="${a.name}">\n${a.content}\n</attachment>`)
-        .join("\n\n");
-      full = trimmed ? `${trimmed}\n\n${blocks}` : blocks;
-      full = full.slice(0, 60_000);
+    if ((!trimmed && attachments.length === 0) || !sessionId || sending || agentBusy || !ready)
+      return;
+    const blocks = serializeAttachments(attachments);
+    const full = trimmed ? (blocks ? `${trimmed}\n\n${blocks}` : trimmed) : blocks;
+    if (full.length > MAX_MESSAGE_CHARS) {
+      toast.error(`Message exceeds the ${MAX_MESSAGE_CHARS.toLocaleString()}-character limit.`);
+      return;
     }
     setInput("");
     setAttachments([]);
@@ -356,7 +563,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
-        toast.error("The agent couldn't respond. Please try again.");
+        let message = "The agent couldn't respond. Please try again.";
+        try {
+          const body = (await response.json()) as { error?: string };
+          if (body.error) message = body.error;
+        } catch {}
+        toast.error(message);
         // Server is the source of truth: drop the optimistic local messages
         // (the server may have persisted nothing, e.g. 409 already-running)
         // and re-sync from the DB instead of leaving ghosts behind.
@@ -392,7 +604,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        toast.info("Stopped. Partial reply kept — the server finishes in the background.");
+        toast.info("Stopped. The server run was cancelled.");
       } else {
         toast.error("Couldn't reach the agent. Check your connection and try again.");
         setMessages((current) => current.filter((message) => message.id !== "streaming"));
@@ -418,7 +630,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   function retry() {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    if (lastUser && !sending) void sendMessage(lastUser.content);
+    if (lastUser && !sending && !activeAgent) void sendMessage(lastUser.content);
   }
 
   async function kill() {
@@ -463,307 +675,418 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     await sendMessage(input);
   }
 
-  const provisioning = PROVISIONING_SANDBOX.has(sandboxStatus);
-  const failed = sandboxStatus === "error";
-  const ready = sandboxStatus === "ready" && (status?.sandboxAvailable ?? false);
-  const chatDisabled = !ready || sending;
+  const provisioning = PROVISIONING_SANDBOX.has(provisioningPhase);
+  const workspaceUnavailable =
+    provisioningPhase === "error" ||
+    provisioningPhase === "unavailable" ||
+    (sandboxStatus === "ready" && status?.sandboxAvailable === false);
+  const agentFailed = agentStatus === "failed" || agentStatus === "interrupted";
+  const ready = provisioningPhase === "ready" && (status?.sandboxAvailable ?? false);
+  const chatDisabled = !ready || sending || agentBusy;
+  const sessionNotFound = isNotFoundError(loadError);
+
+  if (loading && !detail && !status) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="absolute left-3 top-3">
+          <SidebarTrigger className="md:hidden" />
+        </div>
+        <p className="text-sm text-muted-foreground">Loading session…</p>
+      </main>
+    );
+  }
+
+  if (loadError && !detail) {
+    return (
+      <main className="relative flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="absolute left-3 top-3">
+          <SidebarTrigger className="md:hidden" />
+        </div>
+        <div className="w-full max-w-md space-y-4">
+          <ApiErrorState
+            error={loadError}
+            title={sessionNotFound ? "Session not found" : "Session unavailable"}
+            description={
+              sessionNotFound
+                ? "It may have been deleted or you may not have access."
+                : "We couldn't load this session. Retry when the API is reachable."
+            }
+            onRetry={
+              sessionNotFound
+                ? undefined
+                : () => {
+                    void refresh(sessionId, true, true);
+                  }
+            }
+          />
+          <Button variant="ghost" size="sm" onClick={() => (window.location.href = "/")}>
+            <IconArrowLeft /> Back to dashboard
+          </Button>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="flex h-screen flex-col bg-background">
-      <header className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger render={<span className="inline-flex" />}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Back to project"
-                onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
-              >
-                <IconArrowLeft />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Back to project</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger render={<div className="min-w-0 cursor-default" />}>
-              <div className="flex min-w-0 items-center gap-2">
-                <h1 className="max-w-[min(42vw,24rem)] truncate text-[13px] font-medium tracking-[-0.01em]">
-                  {detail?.title || "Loading session…"}
-                </h1>
-                {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              {detail?.workspacePath || "Session workspace"}
-              {detail?.branch ? ` · branch ${detail.branch}` : ""}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-          <DevRunButton
-            sessionId={sessionId}
-            sandboxReady={ready}
-            devCommand={status?.devCommand}
-            devPort={status?.devPort}
-            onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
-            onError={(message) => toast.error(message)}
-          />
-          <SessionInfoDialog
-            sessionId={sessionId}
-            detail={detail}
-            status={status}
-            onReconnect={() => void reconnect()}
-            onKill={() => void kill()}
-            reconnecting={reconnecting}
-            killing={killing}
-          />
-          <Tooltip>
-            <TooltipTrigger render={<span className="inline-flex" />}>
-              <Button
-                variant="secondary"
-                size="icon-sm"
-                aria-label="Delete session"
-                onClick={() => void removeSession()}
-                disabled={deleting}
-              >
-                <IconTrash />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Delete this session and its history</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger render={<span className="inline-flex" />}>
-              <Button
-                variant={prefs.open ? "outline" : "secondary"}
-                size="icon-sm"
-                aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
-                onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
-                disabled={!ready}
-                title={!ready ? "Workspace panel needs a running sandbox" : undefined}
-              >
-                <IconLayoutSidebarRight />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        <section className="flex min-w-0 flex-1 flex-col bg-background">
-          <div className="chat-scroll mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-4 pt-8 sm:px-8">
-            {provisioning && (
-              <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-sm text-muted-foreground">
-                <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                Spinning up sandbox and cloning repo… the agent gets full workspace access once
-                ready.
-              </div>
-            )}
-            {degraded && !failed && (
-              <div className="mb-5 rounded-lg border border-warning/40 bg-warning-muted/40 px-3 py-2.5 text-sm">
-                Sandbox unreachable — this answer is from general knowledge. Reconnect for workspace
-                tools.
-              </div>
-            )}
-            {failed && (
-              <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">Workspace couldn’t start</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Reconnect the sandbox to continue.</p>
+    <>
+      <ReconnectConflictDialog
+        conflict={reconnectConflict}
+        reconnecting={reconnecting}
+        onOpenChange={(open) => {
+          if (!open) setReconnectConflict(null);
+        }}
+        onReview={() => {
+          setReconnectConflict(null);
+          setPrefs({ ...prefs, open: true, tab: "changes" });
+        }}
+        onDownload={() => {
+          setReconnectConflict(null);
+          void downloadRecoveryPatch();
+        }}
+        onConfirm={() => void reconnect(true)}
+      />
+      <main className="flex h-screen flex-col bg-background">
+        <header className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <SidebarTrigger className="md:hidden" />
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" />}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Back to project"
+                  onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
+                >
+                  <IconArrowLeft />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Back to project</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger render={<div className="min-w-0 cursor-default" />}>
+                <div className="flex min-w-0 items-center gap-2">
+                  <h1 className="max-w-[min(42vw,24rem)] truncate text-[13px] font-medium tracking-[-0.01em]">
+                    {detail?.title || "Loading session…"}
+                  </h1>
+                  {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
                 </div>
-                <Button size="sm" variant="outline" onClick={() => void reconnect()} disabled={reconnecting}>
-                  <IconRefresh className="size-4" /> {reconnecting ? "Reconnecting…" : "Reconnect"}
+              </TooltipTrigger>
+              <TooltipContent>
+                {detail?.workspacePath || "Session workspace"}
+                {detail?.branch ? ` · branch ${detail.branch}` : ""}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <div className="hidden items-center gap-1.5 lg:flex" aria-live="polite">
+            <Badge variant="outline">Sandbox: {provisioningPhase.replace("-", " ")}</Badge>
+            <Badge variant="outline">Agent: {agentStatus}</Badge>
+            <Badge variant="outline">Result: {verification}</Badge>
+          </div>
+          <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+            <DevRunButton
+              sessionId={sessionId}
+              sandboxReady={ready}
+              devCommand={status?.devCommand}
+              devPort={status?.devPort}
+              onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
+              onError={(message) => toast.error(message)}
+            />
+            <SessionInfoDialog
+              sessionId={sessionId}
+              detail={detail}
+              status={status}
+              onReconnect={() => void reconnect()}
+              onKill={() => void kill()}
+              reconnecting={reconnecting}
+              killing={killing}
+            />
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" />}>
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  aria-label="Delete session"
+                  onClick={() => void removeSession()}
+                  disabled={deleting}
+                >
+                  <IconTrash />
                 </Button>
-              </div>
-            )}
-            {agentStatus === "failed" && !sending && (
-              <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-                <p className="text-sm font-medium">The agent couldn’t finish that task.</p>
-                <Button size="sm" variant="outline" onClick={retry}>
-                  <IconRefresh className="size-4" /> Try again
+              </TooltipTrigger>
+              <TooltipContent>Delete this session and its history</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" />}>
+                <Button
+                  variant={prefs.open ? "outline" : "secondary"}
+                  size="icon-sm"
+                  aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+                  onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
+                  disabled={!ready}
+                  title={!ready ? "Workspace panel needs a running sandbox" : undefined}
+                >
+                  <IconLayoutSidebarRight />
                 </Button>
-              </div>
-            )}
+              </TooltipTrigger>
+              <TooltipContent>
+                {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </header>
 
-            <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-7 pb-4">
-              {messages.length === 0 && (
-                <div className="flex min-h-[38vh] flex-col items-center justify-center text-center">
-                  <div className="mb-4 flex size-10 items-center justify-center rounded-xl border bg-card shadow-sm">
-                    <IconTerminal className="size-[18px] text-muted-foreground" />
-                  </div>
-                  <h2 className="text-lg font-medium tracking-tight">What should we work on?</h2>
-                  <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                    Ask the agent to explore this workspace, make a change, or run a command.
-                  </p>
+        <div className="flex min-h-0 flex-1">
+          <section className="flex min-w-0 flex-1 flex-col bg-background">
+            <div className="chat-scroll mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-4 pt-8 sm:px-8">
+              {Boolean(loadError) && detail && (
+                <ApiErrorState
+                  error={loadError}
+                  title="Some session data could not be refreshed"
+                  description="The last known state is shown. Retry to check the API again."
+                  onRetry={() => void refresh(sessionId, true, true)}
+                  compact
+                  className="mb-5"
+                />
+              )}
+              {provisioning && (
+                <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-sm text-muted-foreground">
+                  <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                  {provisioningPhase === "setting-up"
+                    ? "Setting up the workspace… the agent starts when setup completes."
+                    : "Spinning up sandbox and cloning repo… the agent gets full workspace access once ready."}
                 </div>
               )}
-              {messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={message.role === "user" ? "group flex justify-end" : "group flex gap-3"}
-                >
-                  {message.role === "user" ? (
-                    <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-4 py-3 text-[14px] leading-6 text-foreground sm:max-w-[78%]">
-                      {message.content}
+              {degraded && !workspaceUnavailable && (
+                <div className="mb-5 rounded-lg border border-warning/40 bg-warning-muted/40 px-3 py-2.5 text-sm">
+                  Sandbox unreachable — this answer is from general knowledge. Reconnect for
+                  workspace tools.
+                </div>
+              )}
+              {workspaceUnavailable && (
+                <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {provisioningPhase === "error"
+                        ? "Workspace setup failed"
+                        : "Workspace unavailable"}
                     </p>
-                  ) : message.content ? (
-                    <>
-                      <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
-                        A
-                      </div>
-                      <div className="min-w-0 max-w-[94%] flex-1 py-1 text-[14px] leading-6">
-                        <div className="mb-1 text-xs font-medium text-muted-foreground">Agent</div>
-                        <Message
-                          content={message.content}
-                          onAnswer={(text) => void sendMessage(text)}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-3 py-1" aria-label="Thinking">
-                      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
-                        A
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span>Working</span>
-                        <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground" />
-                        <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:150ms]" />
-                        <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:300ms]" />
-                      </div>
-                    </div>
-                  )}
-                </article>
-              ))}
-            </div>
-            <div ref={bottomRef} />
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {status?.lastError || "Reconnect the sandbox to continue."}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void reconnect()}
+                    disabled={reconnecting}
+                  >
+                    <IconRefresh className="size-4" />{" "}
+                    {reconnecting ? "Reconnecting…" : "Reconnect"}
+                  </Button>
+                </div>
+              )}
+              {agentFailed && !sending && (
+                <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">The agent couldn’t finish that task.</p>
+                    {status?.lastError && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">{status.lastError}</p>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={retry}>
+                    <IconRefresh className="size-4" /> Try again
+                  </Button>
+                </div>
+              )}
 
-            <form
-              onSubmit={(e) => void send(e)}
-              className={`sticky bottom-0 mx-auto mt-3 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-[0_8px_30px_rgba(0,0,0,0.07)] transition-shadow focus-within:border-ring focus-within:shadow-[0_10px_36px_rgba(0,0,0,0.11)] ${!ready ? "opacity-60" : ""}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (ready && e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
-              }}
-            >
-              <div className="">
-                {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-                    {attachments.map((a) => (
-                      <span
-                        key={a.name}
-                        className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
-                      >
-                        {a.name} · {(a.content.length / 1024).toFixed(1)}KB
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setAttachments((cur) => cur.filter((x) => x.name !== a.name))
-                          }
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+              <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-7 pb-4">
+                {messages.length === 0 && (
+                  <div className="flex min-h-[38vh] flex-col items-center justify-center text-center">
+                    <div className="mb-4 flex size-10 items-center justify-center rounded-xl border bg-card shadow-sm">
+                      <IconTerminal className="size-[18px] text-muted-foreground" />
+                    </div>
+                    <h2 className="text-lg font-medium tracking-tight">What should we work on?</h2>
+                    <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+                      Ask the agent to explore this workspace, make a change, or run a command.
+                    </p>
                   </div>
                 )}
-                <textarea
-                  value={input}
-                  disabled={chatDisabled}
-                  onChange={(e) => setInput(e.target.value)}
-                  onPaste={(e) => {
-                    if (e.clipboardData.files.length > 0) void addFiles(e.clipboardData.files);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      if (sending) stop();
-                      else void send(e as unknown as FormEvent);
+                {messages.map((message) => (
+                  <article
+                    key={message.id}
+                    className={
+                      message.role === "user" ? "group flex justify-end" : "group flex gap-3"
                     }
-                  }}
-                  rows={1}
-                  ref={textareaRef}
-                  placeholder="Tell the agent what to do…"
-                  className="min-h-14 w-full resize-none rounded-2xl border-0 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
-                />
-                <div className="flex items-center justify-between gap-2 px-2 pb-2">
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      disabled={chatDisabled}
-                      onChange={(e) => {
-                        if (e.target.files) void addFiles(e.target.files);
-                        e.target.value = "";
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => fileRef.current?.click()}
-                      disabled={chatDisabled}
-                      className="px-2 text-[12px]"
-                    >
-                      <PaperclipIcon />
-                    </Button>
-                    <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
-                      {status?.plan && status.plan.length > 0
-                        ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
-                        : ""}
-                      {status?.usage?.totalTokens
-                        ? ` · ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
-                        : ""}
-                    </p>
-                  </div>
-                  {sending ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={stop}
-                      className="gap-1.5"
-                    >
-                      <IconPlayerStop className="size-4" /> Stop
-                    </Button>
-                  ) : (
-                    <Button
-                      type="submit"
-                      size="sm"
-                      variant="default"
-                      disabled={chatDisabled || (!input.trim() && attachments.length === 0)}
-                      className="gap-1.5 rounded-xl px-3"
-                      aria-label="Send message"
-                    >
-                      <IconArrowUp className="size-4" />
-                      <span className="hidden sm:inline">Send</span>
-                    </Button>
-                  )}
-                </div>
+                  >
+                    {message.role === "user" ? (
+                      <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-4 py-3 text-[14px] leading-6 text-foreground sm:max-w-[78%]">
+                        {message.content}
+                      </p>
+                    ) : message.content ? (
+                      <>
+                        <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
+                          A
+                        </div>
+                        <div className="min-w-0 max-w-[94%] flex-1 py-1 text-[14px] leading-6">
+                          <div className="mb-1 text-xs font-medium text-muted-foreground">
+                            Agent
+                          </div>
+                          <Message
+                            content={message.content}
+                            onAnswer={(text) => void sendMessage(text)}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-3 py-1" aria-label="Thinking">
+                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
+                          A
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span>Working</span>
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground" />
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:150ms]" />
+                          <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:300ms]" />
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                ))}
               </div>
-            </form>
-          </div>
-        </section>
+              <div ref={bottomRef} />
 
-        {prefs.open && (
-          <SessionPanel
-            sessionId={sessionId}
-            sandboxId={status?.sandboxId || detail?.sandboxId || ""}
-            sandboxReady={ready}
-            defaultTitle={detail?.title || ""}
-            prefs={prefs}
-            onPrefs={setPrefs}
-            onReconnect={() => void reconnect()}
-            defaultPort={status?.devPort}
-          />
-        )}
-      </div>
-    </main>
+              <form
+                onSubmit={(e) => void send(e)}
+                className={`sticky bottom-0 mx-auto mt-3 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-[0_8px_30px_rgba(0,0,0,0.07)] transition-shadow focus-within:border-ring focus-within:shadow-[0_10px_36px_rgba(0,0,0,0.11)] ${!ready ? "opacity-60" : ""}`}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (ready && e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
+                }}
+              >
+                <div className="">
+                  {attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+                      {attachments.map((a) => (
+                        <span
+                          key={a.id}
+                          className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+                        >
+                          {a.name} · {(a.content.length / 1024).toFixed(1)}KB
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAttachments((cur) => cur.filter((x) => x.id !== a.id))
+                            }
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(activeAgent || agentQueued) && !sending && (
+                    <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
+                      {agentQueued
+                        ? "The agent is preparing this task. It will be ready for a new message shortly."
+                        : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
+                    </p>
+                  )}
+                  <textarea
+                    value={input}
+                    disabled={chatDisabled}
+                    onChange={(e) => setInput(e.target.value)}
+                    onPaste={(e) => {
+                      if (e.clipboardData.files.length > 0) void addFiles(e.clipboardData.files);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (sending || activeAgent) stop();
+                        else if (!agentQueued) void send(e as unknown as FormEvent);
+                      }
+                    }}
+                    rows={1}
+                    ref={textareaRef}
+                    placeholder="Tell the agent what to do…"
+                    className="min-h-14 w-full resize-none rounded-2xl border-0 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+                  />
+                  <div className="flex items-center justify-between gap-2 px-2 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        multiple
+                        className="hidden"
+                        disabled={chatDisabled}
+                        onChange={(e) => {
+                          if (e.target.files) void addFiles(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => fileRef.current?.click()}
+                        disabled={chatDisabled}
+                        className="px-2 text-[12px]"
+                      >
+                        <PaperclipIcon />
+                      </Button>
+                      <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
+                        {status?.plan && status.plan.length > 0
+                          ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
+                          : ""}
+                        {status?.usage?.totalTokens
+                          ? ` · ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
+                          : ""}
+                      </p>
+                    </div>
+                    {sending || activeAgent ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={stop}
+                        className="gap-1.5"
+                      >
+                        <IconPlayerStop className="size-4" /> Stop
+                      </Button>
+                    ) : (
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="default"
+                        disabled={chatDisabled || (!input.trim() && attachments.length === 0)}
+                        className="gap-1.5 rounded-xl px-3"
+                        aria-label="Send message"
+                      >
+                        <IconArrowUp className="size-4" />
+                        <span className="hidden sm:inline">Send</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          {prefs.open && (
+            <SessionPanel
+              sessionId={sessionId}
+              sandboxId={status?.sandboxId || detail?.sandboxId || ""}
+              sandboxReady={ready}
+              defaultTitle={detail?.title || ""}
+              prefs={prefs}
+              onPrefs={setPrefs}
+              onReconnect={() => void reconnect()}
+              onCommitted={() => void refresh(sessionId, false)}
+              defaultPort={status?.devPort}
+            />
+          )}
+        </div>
+      </main>
+    </>
   );
 }

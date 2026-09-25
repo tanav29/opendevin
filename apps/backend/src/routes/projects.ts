@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import type { Express } from "express";
 import { prisma } from "../db/prisma.js";
 import { runInitialTurn } from "../chat.js";
-import { WORKSPACE_PATH } from "../config.js";
+import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "../config.js";
 import { githubHeaders, githubTokenForUser } from "../github.js";
 import { asyncRoute, currentUser, ownedProject, routeParam } from "../http.js";
 import { dropPty } from "../pty.js";
@@ -218,7 +218,11 @@ export function registerProjectRoutes(app: Express): void {
           .replace(/Bearer [^\s]+/g, "Bearer [redacted]")
           .slice(0, 300);
         console.error("List branches failed", safe);
-        return res.json({ branches: [], defaultBranch: "" });
+        return res.status(502).json({
+          error: `Could not list repository branches: ${safe}`,
+          branches: [],
+          defaultBranch: "",
+        });
       }
     }),
   );
@@ -271,17 +275,24 @@ export function registerProjectRoutes(app: Express): void {
       const project = found.project;
       const message = typeof req.body.message === "string" ? req.body.message.trim() : "";
       if (!message) return res.status(400).json({ error: "A first message is required" });
+      if (message.length > LIMITS.messageChars) {
+        return res.status(413).json({
+          error: `Message is too long: max ${LIMITS.messageChars.toLocaleString()} characters.`,
+        });
+      }
       const branch = sanitizeBranch(req.body.branch);
+      if (!branch) return res.status(400).json({ error: "A source branch is required." });
 
       const created = await prisma.projectSession.create({
         data: {
           projectId: project.id,
           title: message.slice(0, 60),
-          status: "running",
+          status: "queued",
           sandboxId: "",
           sandboxStatus: "creating",
           workspacePath: WORKSPACE_PATH,
           branch,
+          model: resolveChatModel().modelId,
           toolLog: JSON.stringify([{ role: "user", content: message }]),
           messages: { create: { role: "user", content: message } },
         },
@@ -289,7 +300,7 @@ export function registerProjectRoutes(app: Express): void {
       });
 
       void provisionSandbox(created.id)
-        .then(() => runInitialTurn(created.id))
+        .then((ready) => (ready ? runInitialTurn(created.id) : undefined))
         .catch((error) => console.error("Sandbox provisioning failed", error));
       return res.status(201).json(created);
     }),

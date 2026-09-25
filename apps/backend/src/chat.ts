@@ -5,11 +5,25 @@ import { AGENT_STOP, buildSystemPrompt, loadToolLog, saveToolLog, trimToolLog } 
 import { resolveChatModel, WORKSPACE_PATH } from "./config.js";
 import { LIMITS } from "./config.js";
 import { connectSandboxTools } from "./tools.js";
-import { snapshotDiffAndIdle } from "./workspace.js";
+import {
+  hasUnrestoredWorkspace,
+  snapshotDiffAndIdle,
+  snapshotWorkspaceDiff,
+  withContinuityWarning,
+} from "./workspace.js";
+import type { TurnKind } from "./lifecycle.js";
 
 // In-flight agent turns by session. Lets POST /stop abort the model stream
 // server-side instead of only dropping the client's fetch.
-export const activeTurns = new Map<string, AbortController>();
+export type ActiveTurn = { controller: AbortController; kind: TurnKind };
+export const activeTurns = new Map<string, ActiveTurn>();
+
+export function claimAgentTurn(sessionId: string, kind: TurnKind): AbortController | null {
+  if (activeTurns.has(sessionId)) return null;
+  const controller = new AbortController();
+  activeTurns.set(sessionId, { controller, kind });
+  return controller;
+}
 
 export type AgentUsage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 
@@ -108,7 +122,13 @@ export async function drainAgentStream(
   },
   sink: (chunk: string) => void,
   onPlan?: (tasksJson: string) => void,
-): Promise<{ messages: ModelMessage[]; text: string; usage: AgentUsage | undefined }> {
+): Promise<{
+  messages: ModelMessage[];
+  text: string;
+  visibleText: string;
+  usage: AgentUsage | undefined;
+}> {
+  let visibleText = "";
   for await (const part of result.fullStream) {
     const p = part as {
       type?: unknown;
@@ -119,9 +139,14 @@ export async function drainAgentStream(
       error?: unknown;
     };
     if (p.type === "text-delta") {
-      sink(typeof p.text === "string" ? p.text : "");
+      const text = typeof p.text === "string" ? p.text : "";
+      visibleText += text;
+      sink(text);
     } else if (p.type === "tool-call") {
-      sink(toolCallMarker(typeof p.toolName === "string" ? p.toolName : "tool", p.input));
+      const name = typeof p.toolName === "string" ? p.toolName : "tool";
+      const marker = toolCallMarker(name, p.input);
+      if (name === "ask_user" || name === "update_plan") visibleText += marker;
+      sink(marker);
     } else if (p.type === "tool-result" || p.type === "tool-error") {
       const name = typeof p.toolName === "string" ? p.toolName : "";
       sink(toolDoneMarker(name, p.type, p.output));
@@ -143,7 +168,12 @@ export async function drainAgentStream(
     result.text,
     result.usage?.catch(() => undefined),
   ]);
-  return { messages: (response.messages ?? []) as ModelMessage[], text, usage };
+  return {
+    messages: (response.messages ?? []) as ModelMessage[],
+    text,
+    visibleText,
+    usage,
+  };
 }
 
 async function persistTurnExtras(
@@ -190,13 +220,8 @@ export type TurnPersistence = {
 // snapshot, and finally reset the session status so it is not left "running".
 async function persistFinishedTurn(sessionId: string, turn: TurnPersistence): Promise<void> {
   const content = turn.replyText.trim() ? turn.replyText.slice(0, LIMITS.replyChars) : "";
-  if (content) {
-    try {
-      await prisma.message.create({ data: { sessionId, role: "assistant", content } });
-    } catch (error) {
-      console.error("Could not persist assistant reply", error);
-    }
-  }
+  if (!content) throw new Error("The agent finished without an assistant response.");
+  await prisma.message.create({ data: { sessionId, role: "assistant", content } });
   try {
     await saveToolLog(sessionId, trimToolLog([...turn.modelHistory, ...turn.toolMessages]));
   } catch (error) {
@@ -218,9 +243,15 @@ export function startAgentTurn(
     modelHistory: ModelMessage[];
     tools: Awaited<ReturnType<typeof connectSandboxTools>>["tools"];
   },
+  reservation?: { controller: AbortController; kind: TurnKind },
 ) {
-  const controller = new AbortController();
-  activeTurns.set(sessionId, controller);
+  const controller = reservation?.controller ?? new AbortController();
+  const kind = reservation?.kind ?? "chat";
+  const current = activeTurns.get(sessionId);
+  if (current && current.controller !== controller) {
+    throw new Error("An agent turn is already running for this session.");
+  }
+  activeTurns.set(sessionId, { controller, kind });
   const result = streamText({
     model: createOpenRouter({ apiKey: opts.apiKey })(opts.modelId),
     system: buildSystemPrompt(opts.workspacePath, opts.repo, opts.branch, opts.sandboxNote),
@@ -232,20 +263,20 @@ export function startAgentTurn(
 }
 
 export function stopAgentTurn(sessionId: string): boolean {
-  const controller = activeTurns.get(sessionId);
-  if (controller) {
-    controller.abort();
-    activeTurns.delete(sessionId);
-    return true;
-  }
-  return false;
+  const active = activeTurns.get(sessionId);
+  if (!active) return false;
+  // Keep the reservation until the owning turn unwinds in its finally block.
+  // Releasing it here would allow a new turn to start while the aborted turn can
+  // still write a stale terminal status.
+  active.controller.abort();
+  return true;
 }
 
 function takeController(sessionId: string, controller: AbortController): boolean {
-  return activeTurns.get(sessionId) === controller;
+  return activeTurns.get(sessionId)?.controller === controller;
 }
 
-function releaseController(sessionId: string, controller: AbortController): void {
+export function releaseAgentTurn(sessionId: string, controller: AbortController): void {
   if (takeController(sessionId, controller)) activeTurns.delete(sessionId);
 }
 
@@ -254,26 +285,60 @@ function releaseController(sessionId: string, controller: AbortController): void
 // turn headless. Skips when the sandbox failed to provision or an assistant
 // reply already exists (e.g. user sent a second message first).
 export async function runInitialTurn(sessionId: string): Promise<void> {
+  let controller: AbortController | null = null;
+  let previousError: string | null = null;
   try {
     const session = await prisma.projectSession.findUnique({
       where: { id: sessionId },
       include: { project: true, messages: { orderBy: { createdAt: "asc" } } },
     });
     if (!session || session.sandboxStatus !== "ready") return;
+    previousError = session.lastError;
     if (session.messages.some((m) => m.role === "assistant")) return;
-    const { modelId, apiKey } = resolveChatModel();
-    if (!apiKey) {
-      await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
+
+    const configured = resolveChatModel();
+    const modelId = session.model || configured.modelId;
+    if (!configured.apiKey) {
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: {
+          model: modelId,
+          status: "failed",
+          lastError: "The agent could not start because OPENROUTER_API_KEY is not configured.",
+        },
+      });
       return;
     }
+    if (!session.model) {
+      await prisma.projectSession.update({ where: { id: sessionId }, data: { model: modelId } });
+    }
+
     const modelHistory = await loadToolLog(sessionId);
-    if (!modelHistory.some((m) => m.role === "user")) return;
+    if (!modelHistory.some((m) => m.role === "user")) {
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: { status: "failed", lastError: "The opening prompt is missing; start a new task." },
+      });
+      return;
+    }
+
+    controller = claimAgentTurn(sessionId, "initial");
+    if (!controller) return;
+    if (controller.signal.aborted) {
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: { status: "stopped", lastError: "The initial agent run was stopped." },
+      });
+      releaseAgentTurn(sessionId, controller);
+      return;
+    }
 
     const { tools, sandboxNote } = await connectSandboxTools(
       session.sandboxId,
       session.workspacePath || WORKSPACE_PATH,
     );
     if (!tools && session.sandboxId) {
+      await snapshotWorkspaceDiff(sessionId);
       await prisma.projectSession.update({
         where: { id: sessionId },
         data: {
@@ -282,23 +347,44 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
           lastError: "Workspace sandbox is unavailable. Reconnect the sandbox, then retry.",
         },
       });
+      releaseAgentTurn(sessionId, controller);
       return;
     }
-    await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "running" } });
-    const { result, controller } = startAgentTurn(sessionId, {
-      modelId,
-      apiKey,
-      workspacePath: session.workspacePath || WORKSPACE_PATH,
-      repo: session.project.repo,
-      branch: session.branch,
-      sandboxNote,
-      modelHistory,
-      tools,
+    if (controller.signal.aborted) {
+      await prisma.projectSession.update({
+        where: { id: sessionId },
+        data: { status: "stopped", lastError: "The initial agent run was stopped." },
+      });
+      releaseAgentTurn(sessionId, controller);
+      return;
+    }
+    await prisma.projectSession.update({
+      where: { id: sessionId },
+      data: {
+        status: "running",
+        lastError: hasUnrestoredWorkspace(session.lastError) ? session.lastError : null,
+      },
     });
+
+    const { result, controller: turnController } = startAgentTurn(
+      sessionId,
+      {
+        modelId,
+        apiKey: configured.apiKey,
+        workspacePath: session.workspacePath || WORKSPACE_PATH,
+        repo: session.project.repo,
+        branch: session.branch,
+        sandboxNote,
+        modelHistory,
+        tools,
+      },
+      { controller, kind: "initial" },
+    );
+    controller = turnController;
     let streamed = "";
     try {
       let latestPlan: string | null = null;
-      const { messages, text, usage } = await drainAgentStream(
+      const { messages, text, visibleText, usage } = await drainAgentStream(
         result,
         (chunk) => {
           streamed += chunk;
@@ -307,6 +393,9 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
           latestPlan = planJson;
         },
       );
+      if (!visibleText.trim()) {
+        throw new Error("The agent finished without an assistant response. Retry the task.");
+      }
       const content = streamed.trim()
         ? streamed.slice(0, LIMITS.replyChars)
         : text.slice(0, LIMITS.replyChars);
@@ -318,13 +407,59 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
         usage,
       });
     } catch (error) {
+      const stopped = turnController.signal.aborted;
+      const message = stopped
+        ? "The agent run was stopped."
+        : error instanceof Error
+          ? error.message.slice(0, 500)
+          : "The agent run failed. Retry the task.";
       console.error("Initial agent turn failed", error);
-      await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "failed" } });
+      await snapshotWorkspaceDiff(sessionId);
+      await prisma.projectSession
+        .update({
+          where: { id: sessionId },
+          data: {
+            status: stopped ? "stopped" : "failed",
+            lastError: withContinuityWarning(session.lastError, message),
+          },
+        })
+        .catch(() => undefined);
     } finally {
-      releaseController(sessionId, controller);
+      releaseAgentTurn(sessionId, turnController);
     }
   } catch (error) {
     console.error("runInitialTurn failed", error);
+    if (controller) {
+      await snapshotWorkspaceDiff(sessionId).catch(() => undefined);
+      await prisma.projectSession
+        .update({
+          where: { id: sessionId },
+          data: {
+            status: controller.signal.aborted ? "stopped" : "failed",
+            lastError: withContinuityWarning(
+              previousError,
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : "The initial agent run failed.",
+            ),
+          },
+        })
+        .catch(() => undefined);
+      releaseAgentTurn(sessionId, controller);
+    } else {
+      await prisma.projectSession
+        .update({
+          where: { id: sessionId },
+          data: {
+            status: "failed",
+            lastError:
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : "The initial agent run failed.",
+          },
+        })
+        .catch(() => undefined);
+    }
   }
 }
 

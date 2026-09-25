@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconGitBranch, IconClock } from "@tabler/icons-react";
 
@@ -8,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { repoName, timeAgo, timestamp } from "@/lib/format";
 import { Archive, Box, CircleDashed, Loader } from "lucide-react";
 import { Button } from "./ui/button";
+import { useConfirm } from "./ui/confirm";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -27,12 +29,14 @@ const SANDBOX_TONE: Record<string, string> = {
   pending: "text-warning",
   creating: "text-warning",
   cloning: "text-warning",
+  "setting-up": "text-warning",
 };
 
 function isWorking(session: SessionSummaryData) {
   return (
     session.status === "running" ||
-    ["pending", "creating", "cloning"].includes(session.sandboxStatus || "")
+    session.status === "queued" ||
+    ["pending", "creating", "cloning", "setting-up"].includes(session.sandboxStatus || "")
   );
 }
 
@@ -46,16 +50,16 @@ function SummaryContent({ session, showRepo }: { session: SessionSummaryData; sh
         className="text-muted-foreground"
         aria-label={working ? "Agent is running" : `Agent is ${session.status || "idle"}`}
       >
-        {working ? <Loader className="animate-spin size-3 " /> : <CircleDashed className="size-3" />}
+        {working ? (
+          <Loader className="animate-spin size-3 " />
+        ) : (
+          <CircleDashed className="size-3" />
+        )}
       </div>
       <div className="min-w-0 flex-1 -my-1">
         <p className="truncate text-sm font-medium">{session.title || "Untitled session"}</p>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-          <div
-            className={cn(
-              SANDBOX_TONE[sandboxStatus] || "text-muted-foreground",
-            )}
-          >
+          <div className={cn(SANDBOX_TONE[sandboxStatus] || "text-muted-foreground")}>
             <Box className="size-3" />
           </div>
           {showRepo && session.repo && <span className="truncate">{repoName(session.repo)}</span>}
@@ -73,7 +77,6 @@ function SummaryContent({ session, showRepo }: { session: SessionSummaryData; sh
           )}
         </div>
       </div>
-
     </>
   );
 }
@@ -90,6 +93,8 @@ export function SessionSummary({
   className?: string;
 }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
   const archiveMutation = useMutation({
     mutationFn: () => api(`/api/sessions/${session.id}/archive`, { method: "POST" }),
     onSuccess: async () => {
@@ -97,8 +102,24 @@ export function SessionSummary({
       await queryClient.invalidateQueries({ queryKey: ["project-sessions"] });
       toast.success("Session archived");
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Could not archive session"),
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Could not archive session"),
   });
+  async function confirmArchive() {
+    if (!session.id || archiveMutation.isPending || confirmingArchive) return;
+    setConfirmingArchive(true);
+    try {
+      const ok = await confirm({
+        title: "Archive this session?",
+        description: `“${session.title || "Untitled session"}” will be hidden from the workspace and its sandbox will stop. Chat history and the last recovery patch remain stored.`,
+        confirmLabel: "Archive session",
+        destructive: true,
+      });
+      if (ok) archiveMutation.mutate();
+    } finally {
+      setConfirmingArchive(false);
+    }
+  }
   const classes = cn(
     "flex min-w-0 items-start gap-3 px-4 py-3 transition-colors",
     href && "hover:bg-muted/50",
@@ -121,9 +142,9 @@ export function SessionSummary({
         variant="outline"
         size="icon-xs"
         aria-label="Archive session"
-        title="Archive session"
-        disabled={!session.id || archiveMutation.isPending}
-        onClick={() => archiveMutation.mutate()}
+        title="Archive session and stop sandbox"
+        disabled={!session.id || archiveMutation.isPending || confirmingArchive}
+        onClick={() => void confirmArchive()}
       >
         <Archive />
       </Button>
