@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { prisma } from "../db/prisma.js";
-import { resolveChatModel } from "../config.js";
+import { BOT_PROJECT_REPO, resolveChatModel } from "../config.js";
 import { asyncRoute, currentUser, ownedSession, routeParam } from "../http.js";
 import { dropPty } from "../pty.js";
 import {
@@ -22,7 +22,10 @@ export function registerSessionRoutes(app: Express): void {
       const session = await currentUser(req);
       if (!session) return res.status(401).json({ error: "Sign in required" });
       const sessions = await prisma.projectSession.findMany({
-        where: { project: { userId: session.user.id }, archivedAt: null },
+        where: {
+          project: { userId: session.user.id, repo: { not: BOT_PROJECT_REPO } },
+          archivedAt: null,
+        },
         include: { project: { select: { id: true, repo: true } } },
         omit: { toolLog: true, lastDiff: true },
         orderBy: { updatedAt: "desc" },
@@ -88,7 +91,7 @@ export function registerSessionRoutes(app: Express): void {
         .count({
           where: { sessionId: found.owner.id, role: "assistant" },
         })
-        .then((count) => count > 0);
+        .then((count: number) => count > 0);
       const activeTurn = activeTurns.get(found.owner.id);
       const staleQueued =
         !activeTurn &&

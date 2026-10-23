@@ -122,6 +122,7 @@ export async function drainAgentStream(
   },
   sink: (chunk: string) => void,
   onPlan?: (tasksJson: string) => void,
+  includeToolMarkers = true,
 ): Promise<{
   messages: ModelMessage[];
   text: string;
@@ -145,11 +146,13 @@ export async function drainAgentStream(
     } else if (p.type === "tool-call") {
       const name = typeof p.toolName === "string" ? p.toolName : "tool";
       const marker = toolCallMarker(name, p.input);
-      if (name === "ask_user" || name === "update_plan") visibleText += marker;
-      sink(marker);
+      if (includeToolMarkers) {
+        if (name === "ask_user" || name === "update_plan") visibleText += marker;
+        sink(marker);
+      }
     } else if (p.type === "tool-result" || p.type === "tool-error") {
       const name = typeof p.toolName === "string" ? p.toolName : "";
-      sink(toolDoneMarker(name, p.type, p.output));
+      if (includeToolMarkers) sink(toolDoneMarker(name, p.type, p.output));
       if (
         name === "update_plan" &&
         typeof p.output === "string" &&
@@ -218,7 +221,7 @@ export type TurnPersistence = {
 // Persist a finished agent turn: the assistant text to the timeline, the full
 // (text + tool) transcript to toolLog for the next turn, a best-effort diff
 // snapshot, and finally reset the session status so it is not left "running".
-async function persistFinishedTurn(sessionId: string, turn: TurnPersistence): Promise<void> {
+export async function persistFinishedTurn(sessionId: string, turn: TurnPersistence): Promise<void> {
   const content = turn.replyText.trim() ? turn.replyText.slice(0, LIMITS.replyChars) : "";
   if (!content) throw new Error("The agent finished without an assistant response.");
   await prisma.message.create({ data: { sessionId, role: "assistant", content } });
@@ -242,6 +245,7 @@ export function startAgentTurn(
     sandboxNote: string;
     modelHistory: ModelMessage[];
     tools: Awaited<ReturnType<typeof connectSandboxTools>>["tools"];
+    systemPrompt?: string;
   },
   reservation?: { controller: AbortController; kind: TurnKind },
 ) {
@@ -254,7 +258,9 @@ export function startAgentTurn(
   activeTurns.set(sessionId, { controller, kind });
   const result = streamText({
     model: createOpenRouter({ apiKey: opts.apiKey })(opts.modelId),
-    system: buildSystemPrompt(opts.workspacePath, opts.repo, opts.branch, opts.sandboxNote),
+    system:
+      opts.systemPrompt ??
+      buildSystemPrompt(opts.workspacePath, opts.repo, opts.branch, opts.sandboxNote),
     messages: opts.modelHistory,
     ...(opts.tools ? { tools: opts.tools, stopWhen: AGENT_STOP } : {}),
     abortSignal: controller.signal,
@@ -294,7 +300,7 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
     });
     if (!session || session.sandboxStatus !== "ready") return;
     previousError = session.lastError;
-    if (session.messages.some((m) => m.role === "assistant")) return;
+    if (session.messages.some((m: { role: string }) => m.role === "assistant")) return;
 
     const configured = resolveChatModel();
     const modelId = session.model || configured.modelId;
@@ -463,4 +469,4 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
   }
 }
 
-export { persistFinishedTurn, persistTurnExtras };
+export { persistTurnExtras };

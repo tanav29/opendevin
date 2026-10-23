@@ -1,4 +1,6 @@
 export const WORKSPACE_PATH = "/home/user/workspace";
+export const BOT_PROJECT_REPO = "main-bot";
+export const BOT_MODEL = "openai/gpt-4o-mini";
 export const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 
 export const TOOL_LOG_MAX_MESSAGES = 60;
@@ -21,6 +23,12 @@ export const LIMITS = {
 
 export function resolveChatModel(): { modelId: string; apiKey: string | undefined } {
   const raw = process.env.MODEL?.trim() || "openai/gpt-4o-mini";
+  const modelId = raw.includes("/") ? raw : `openai/${raw}`;
+  return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
+}
+
+export function resolveBotModel(): { modelId: string; apiKey: string | undefined } {
+  const raw = process.env.BOT_MODEL?.trim() || BOT_MODEL;
   const modelId = raw.includes("/") ? raw : `openai/${raw}`;
   return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }

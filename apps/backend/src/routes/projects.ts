@@ -9,6 +9,7 @@ import { asyncRoute, currentUser, ownedProject, routeParam } from "../http.js";
 import { dropPty } from "../pty.js";
 import { isRepoUrl, parseGitHubRepo, sanitizeBranch } from "../sanitize.js";
 import { killSandbox, provisionSandbox } from "../sandbox.js";
+import { BOT_PROJECT_REPO } from "../config.js";
 
 export function registerProjectRoutes(app: Express): void {
   app.get(
@@ -17,7 +18,7 @@ export function registerProjectRoutes(app: Express): void {
       const session = await currentUser(req);
       if (!session) return res.status(401).json({ error: "Sign in required" });
       const projects = await prisma.project.findMany({
-        where: { userId: session.user.id },
+        where: { userId: session.user.id, repo: { not: BOT_PROJECT_REPO } },
         orderBy: { updatedAt: "desc" },
       });
       return res.json(projects);

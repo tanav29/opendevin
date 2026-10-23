@@ -1,8 +1,8 @@
 
-[x] change grep to use ripgrep, auto install them on sandbox setup
-[ ] fix the app sidebar as it is bit to lasrge and not looks great when collapdse, use a browser control to fix that nigga and specifically whole app ui like app shell thing
-[x] refactor backend like a senoir dev has written it
-
+[x] bot chat has its own empty sandbox, reset/delete-history flow, concise text-only system prompt, and WhatsApp-style UI
+[x] give bot read-only tools to search sessions and report status/results
+[x] bot reuses the agent pipeline and existing sandbox tools
+[x] bot is in the top navbar as Bot with a MessageCircle icon
 
 [future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
 [future] 15 integrations: linear/jira/figma/sentry, MCP servers, web-search/docs-fetch tool

@@ -32,7 +32,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { statusLabel } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import { CircleX, Code2, Loader } from "lucide-react";
+import { CircleX, Code2, Loader, MessageCircle } from "lucide-react";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -146,18 +146,36 @@ export function AppSidebar() {
           </SidebarGroup>
 
           {auth.status === "signed-in" && (
-            <div className="px-3 pt-1 group-data-[collapsible=icon]:hidden">
-              <div className="relative">
-                <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <SidebarInput
-                  aria-label="Filter projects and sessions"
-                  placeholder="Search…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  className="h-8 pl-8 text-[13px]"
-                />
+            <>
+              <SidebarGroup className="pb-0">
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={pathname === "/bot"}
+                        tooltip="Bot"
+                        render={<Link href="/bot" prefetch />}
+                      >
+                        <MessageCircle />
+                        <span>Bot</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+              <div className="px-3 pt-1 group-data-[collapsible=icon]:hidden">
+                <div className="relative">
+                  <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <SidebarInput
+                    aria-label="Filter projects and sessions"
+                    placeholder="Search…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="h-8 pl-8 text-[13px]"
+                  />
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {auth.status === "signed-out" ? (
