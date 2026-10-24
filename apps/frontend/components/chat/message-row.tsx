@@ -6,12 +6,14 @@ export default function ChatMessageRow({
   role,
   content,
   onAnswer,
+  workDuration,
   workingLabel = "Working",
   presentation = "chat",
 }: {
   role: "user" | "assistant";
   content: string;
   onAnswer?: (text: string) => void;
+  workDuration?: number;
   workingLabel?: string;
   presentation?: "chat" | "bot" | "session";
 }) {
@@ -28,7 +30,13 @@ export default function ChatMessageRow({
     return (
       <article className="min-w-0 py-1 text-[14px] leading-6">
         {content ? (
-          <Message content={content} onAnswer={onAnswer} collapseActivity bubble={false} />
+          <Message
+            content={content}
+            onAnswer={onAnswer}
+            collapseActivity
+            workDuration={workDuration}
+            bubble={false}
+          />
         ) : (
           <div
             className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"

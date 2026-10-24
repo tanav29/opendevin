@@ -54,7 +54,12 @@ export type SessionStatus = {
   devPort?: number;
 };
 
-export type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
 
 export type SidebarSession = {
   id: string;

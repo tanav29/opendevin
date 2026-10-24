@@ -169,18 +169,11 @@ export default function BotPage() {
   const chatDisabled = sending;
 
   return (
-    <main className="flex h-full min-h-0 flex-col">
-      <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-4 py-2 backdrop-blur">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
-            <HugeiconsIcon icon={Robot02Icon} size={16} strokeWidth={1.8} />
-          </span>
-          <div className="min-w-0">
-            <h1 className="truncate text-[13px] font-medium tracking-[-0.01em]">Bot</h1>
-            <p className="truncate text-[11px] text-muted-foreground">
-              Your personal OpenDevin assistant
-            </p>
-          </div>
+    <main className="h-screen bg-background w-full overflow-clip">
+      <header className="absolute top-0 left-0 right-0 z-10 flex shrink-0 items-center justify-between gap-3 bg-sidebar border-b px-3 py-2">
+        <div className="flex items-center justify-center gap-2">
+          <HugeiconsIcon icon={Robot02Icon} className="h-5" />
+          <h1 className="text-md font-medium">Bot</h1>
         </div>
         <ChatStatusBadges sandbox={sandboxStatus} agent={bot?.status ?? "idle"} />
         <div className="flex shrink-0 items-center gap-1">
@@ -197,31 +190,14 @@ export default function BotPage() {
         </div>
       </header>
 
-      <div className="chat-scroll mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-4 pt-8 sm:px-8">
-        {failed && bot?.lastError && (
+{/*move it to toast {failed && bot?.lastError && (
           <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
             <p className="text-sm font-medium">Bot couldn&apos;t finish that task.</p>
             <p className="mt-0.5 text-xs text-muted-foreground">{bot.lastError}</p>
           </div>
-        )}
+        )}*/}
 
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-7 pb-4">
-          {bot?.messages.length === 0 && (
-            <div className="flex min-h-[38vh] flex-col items-center justify-center text-center">
-              <div className="mb-4 flex size-10 items-center justify-center rounded-xl border bg-card shadow-sm">
-                <HugeiconsIcon
-                  icon={Robot02Icon}
-                  size={18}
-                  strokeWidth={1.8}
-                  className="text-muted-foreground"
-                />
-              </div>
-              <h2 className="text-lg font-medium tracking-tight">What can I help with?</h2>
-              <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                Ask about your sessions or give me a quick task to run in my own workspace.
-              </p>
-            </div>
-          )}
+        <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
           {bot?.messages.map((message) => (
             <ChatMessageRow
               key={message.id}
@@ -232,10 +208,10 @@ export default function BotPage() {
               onAnswer={(text) => void send(text)}
             />
           ))}
-        </div>
         <div ref={bottomRef} />
-      </div>
-      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 pb-3 pt-3 backdrop-blur sm:px-8">
+      </section>
+
+      <div className="absolute bottom-0 left-0 right-0 shrink-0 max-w-5xl sm:mx-8 mx-4 pb-4">
         <ChatComposer
           value={input}
           onValueChange={setInput}

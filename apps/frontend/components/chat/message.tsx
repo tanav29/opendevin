@@ -3,7 +3,7 @@
 import { memo, useState } from "react";
 import Markdown from "react-markdown";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon, ArrowRight01Icon, Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 
 function ToolCallCard({
@@ -385,12 +385,14 @@ function Message({
   onAnswer,
   textOnly = false,
   collapseActivity = false,
+  workDuration,
   bubble = true,
 }: {
   content: string;
   onAnswer?: (text: string) => void;
   textOnly?: boolean;
   collapseActivity?: boolean;
+  workDuration?: number;
   bubble?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
@@ -413,6 +415,60 @@ function Message({
     : [];
   return (
     <div className="space-y-2">
+      {collapseActivity && activity.length > 0 && (
+        <details className="group text-xs text-muted-foreground">
+          <summary className="flex w-full cursor-pointer select-none items-center gap-2 py-2 hover:text-foreground">
+            <HugeiconsIcon className="transition-transform group-open:rotate-90 w-4" icon={ArrowRight01Icon} />
+            <span>
+              {workDuration === undefined ? "Show work" : `Worked for ${workDuration}s`}
+            </span>
+          </summary>
+          <div className="space-y-3 border-t border-border/60 py-3">
+            {activity.map((block, index) => (
+              <div key={`activity-${index}`} className="min-w-0">
+                {block.kind === "md" && (
+                  <div className="typeset typeset-docs text-sm">
+                    <Markdown>{block.text}</Markdown>
+                  </div>
+                )}
+                {block.kind === "tool" && (
+                  <ToolCallCard
+                    id={`activity-${index}`}
+                    name={block.name}
+                    argument={block.argument}
+                    status={block.running ? "working" : block.failed ? "failed" : "done"}
+                  />
+                )}
+                {block.kind === "question" && (
+                  <QuestionCard
+                    id={`activity-${index}`}
+                    question={block.question}
+                    options={block.options}
+                    onAnswer={onAnswer}
+                  />
+                )}
+                {block.kind === "plan" && (
+                  <PlanCard id={`activity-${index}`} tasks={block.tasks} />
+                )}
+                {block.kind === "file" && (
+                  <FileCard
+                    id={`activity-${index}`}
+                    name={block.name}
+                    url={block.url}
+                    size={block.size}
+                  />
+                )}
+                {block.kind === "error" && (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+                    <p className="font-medium">{block.name}</p>
+                    {block.body && <p className="mt-1 whitespace-pre-wrap">{block.body}</p>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
       {blocks.map((b, k) => {
         if (collapseActivity && b.kind !== "md" && b.kind !== "file") return null;
         if (b.kind === "md") {
@@ -463,61 +519,6 @@ function Message({
           </div>
         );
       })}
-      {collapseActivity && activity.length > 0 && (
-        <details className="group rounded-lg border border-border/60 bg-muted/30 text-xs text-muted-foreground">
-          <summary className="flex w-fit cursor-pointer select-none items-center gap-2 px-3 py-2 hover:text-foreground">
-            <span className="transition-transform group-open:rotate-90" aria-hidden="true">
-              ›
-            </span>
-            <span>Show work</span>
-            <span className="text-muted-foreground/70">{activity.length}</span>
-          </summary>
-          <div className="space-y-3 border-t border-border/60 px-3 py-3">
-            {activity.map((block, index) => (
-              <div key={`activity-${index}`} className="min-w-0">
-                {block.kind === "md" && (
-                  <div className="typeset typeset-docs text-sm">
-                    <Markdown>{block.text}</Markdown>
-                  </div>
-                )}
-                {block.kind === "tool" && (
-                  <ToolCallCard
-                    id={`activity-${index}`}
-                    name={block.name}
-                    argument={block.argument}
-                    status={block.running ? "working" : block.failed ? "failed" : "done"}
-                  />
-                )}
-                {block.kind === "question" && (
-                  <QuestionCard
-                    id={`activity-${index}`}
-                    question={block.question}
-                    options={block.options}
-                    onAnswer={onAnswer}
-                  />
-                )}
-                {block.kind === "plan" && (
-                  <PlanCard id={`activity-${index}`} tasks={block.tasks} />
-                )}
-                {block.kind === "file" && (
-                  <FileCard
-                    id={`activity-${index}`}
-                    name={block.name}
-                    url={block.url}
-                    size={block.size}
-                  />
-                )}
-                {block.kind === "error" && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-                    <p className="font-medium">{block.name}</p>
-                    {block.body && <p className="mt-1 whitespace-pre-wrap">{block.body}</p>}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
     </div>
   );
 }

@@ -761,16 +761,29 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </header>
 
           <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
-              {messages.map((message) => (
+              {messages.map((message, index) => {
+                const startedAt = messages
+                  .slice(0, index)
+                  .reverse()
+                  .find((previous) => previous.role === "user")?.createdAt;
+                const elapsedMs = startedAt
+                  ? Date.parse(message.createdAt) - Date.parse(startedAt)
+                  : NaN;
+                const workDuration = Number.isFinite(elapsedMs)
+                  ? Math.max(1, Math.round(elapsedMs / 1000))
+                  : undefined;
+                return (
                   <ChatMessageRow
                     key={message.id}
                     role={message.role === "user" ? "user" : "assistant"}
                     content={message.content}
+                    workDuration={message.role === "assistant" ? workDuration : undefined}
                     presentation="session"
                     workingLabel="Working"
                     onAnswer={(text) => void sendMessage(text)}
                   />
-                ))}
+                );
+              })}
               {/*Why chat messages and live messages are diff component fuck you ai*/}
                 {liveMessages.map((message) => (
                   <ChatMessageRow
@@ -788,7 +801,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               <div ref={bottomRef} />
           </section>
 
-            <div className="absolute bottom-0 left-0 right-0 shrink-0 bg-background/95 backdrop-blur max-w-5xl sm:mx-8 mx-4 pb-4">
+            <div className="absolute bottom-0 left-0 right-0 shrink-0 max-w-5xl sm:mx-8 mx-4 pb-4">
               <ChatComposer
                 value={input}
                 onValueChange={setInput}
