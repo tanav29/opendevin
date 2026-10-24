@@ -129,10 +129,11 @@ export function AppSidebar() {
         </SidebarHeader>
 
         <SidebarContent>
+
+        {auth.status === "signed-out" || auth.status === "unavailable" && (
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                {auth.status === "signed-out" && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={pathname === "/login"}
@@ -143,30 +144,14 @@ export function AppSidebar() {
                       <span>Sign in</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+        )}
 
           {auth.status === "signed-in" && (
             <>
-              <SidebarGroup className="pb-0">
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        isActive={pathname === "/bot"}
-                        tooltip="Bot"
-                        render={<Link href="/bot" prefetch />}
-                      >
-                        <HugeiconsIcon icon={Robot02Icon} size={18} strokeWidth={1.8} />
-                        <span>Bot</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-              <div className="px-3 pt-1 group-data-[collapsible=icon]:hidden">
+              <div className="px-2 pt-1 group-data-[collapsible=icon]:hidden">
                 <div className="relative">
                   <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <SidebarInput
@@ -178,47 +163,122 @@ export function AppSidebar() {
                   />
                 </div>
               </div>
-            </>
-          )}
+              <SidebarGroup className="pb-0">
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={pathname === "/bot"}
+                        tooltip="Bot"
+                        render={<Link href="/bot" prefetch />}
+                      >
+                        <HugeiconsIcon icon={Robot02Icon} />
+                        <span>Bot</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
 
-          {auth.status === "signed-out" ? (
-            <SidebarGroup>
-              <div className="rounded-xl border border-dashed bg-card p-3 group-data-[collapsible=icon]:hidden">
-                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                  Sign in
-                </p>
-                <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
-                  Connect GitHub to browse repos and start a workspace.
-                </p>
-                <Link
-                  href="/login"
-                  className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground"
-                >
-                  Continue with GitHub
-                </Link>
-              </div>
-            </SidebarGroup>
-          ) : auth.status === "unavailable" ? (
-            <SidebarGroup>
-              <div className="rounded-xl border border-dashed bg-card p-3 group-data-[collapsible=icon]:hidden">
-                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                  Connection unavailable
-                </p>
-                <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
-                  OpenDevin could not verify the session. Retry when the API is reachable.
-                </p>
-                <button
-                  type="button"
-                  className="mt-3 inline-flex w-full items-center justify-center rounded-md border px-3 py-2 text-sm font-medium"
-                  onClick={() => void auth.refetch()}
-                >
-                  Retry
-                </button>
-              </div>
-            </SidebarGroup>
-          ) : (
-            <>
+
+
+
               <Collapsible defaultOpen className="group/collapsible">
+                <SidebarGroup>
+                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
+                    Running tasks
+                    <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
+                  </SidebarGroupLabel>
+                  <CollapsibleContent>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {runningSessions.length === 0 ? (
+                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                            No running tasks.
+                          </p>
+                        ) : (
+                          runningSessions.map((s) => (
+                            <SidebarMenuItem key={s.id}>
+                              <SidebarMenuButton
+                                size="sm"
+                                isActive={pathname === `/s/${s.id}`}
+                                tooltip={s.title}
+                                render={<Link href={`/s/${s.id}`} prefetch />}
+                              >
+                                <Loader className="h-3 text-muted-foreground" />
+                                <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          ))
+                        )}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </CollapsibleContent>
+                </SidebarGroup>
+              </Collapsible>
+
+              <Collapsible defaultOpen className="group/collapsible">
+                <SidebarGroup>
+                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
+                    Sessions
+                    <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
+                  </SidebarGroupLabel>
+                  <CollapsibleContent>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {sessionsLoading ? (
+                          <>
+                            {[0, 1, 2, 3].map((i) => (
+                              <SidebarMenuItem key={i}>
+                                <SidebarMenuSkeleton />
+                              </SidebarMenuItem>
+                            ))}
+                          </>
+                        ) : filteredSessions.length === 0 ? (
+                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                            No sessions.
+                          </p>
+                        ) : (
+                          filteredSessions.map((s) => {
+                            const active =
+                              pathname === `/s/${s.id}` || pathname === `/sessions/${s.id}`;
+                            return (
+                              <SidebarMenuItem key={s.id}>
+                                <SidebarMenuButton
+                                  size={"sm"}
+                                  isActive={active}
+                                  tooltip={`${s.title} · Agent ${s.status === "queued" ? "waiting" : statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
+                                  render={<Link href={`/s/${s.id}`} prefetch />}
+                                >
+                                  {(s.status == "running" || s.status == "queued") && (
+                                    <Loader className="h-3 text-muted-foreground" />
+                                  )}
+                                  {s.status == "failed" && (
+                                    <CircleX className="h-3 text-muted-foreground" />
+                                  )}
+                                  {/*{
+                                    s.status == "stopped" && < className="h-3 animate-spin text-muted-foreground" />
+                                  }*/}
+
+                                  <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                                  {/*<span
+                                    role="img"
+                                    aria-label={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
+                                    title={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
+                                    className={`size-1.5 shrink-0 rounded-full ${sandboxTone(s.sandboxStatus)}`}
+                                  />*/}
+                                </SidebarMenuButton>
+                              </SidebarMenuItem>
+                            );
+                          })
+                        )}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </CollapsibleContent>
+                </SidebarGroup>
+                  </Collapsible>
+
+                  <Collapsible defaultOpen className="group/collapsible">
                 <SidebarGroup>
                   <SidebarGroupLabel render={<CollapsibleTrigger />}>
                     Projects
@@ -268,118 +328,8 @@ export function AppSidebar() {
                 </SidebarGroup>
               </Collapsible>
 
-              <Collapsible defaultOpen className="group/collapsible">
-                <SidebarGroup>
-                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
-                    Running tasks
-                    <span className="ml-auto flex items-center gap-1.5">
-                      {runningCount > 0 && (
-                        <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                          <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-                          {runningCount}
-                        </span>
-                      )}
-                      <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
-                    </span>
-                  </SidebarGroupLabel>
-                  <CollapsibleContent>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {runningSessions.length === 0 ? (
-                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
-                            No running tasks.
-                          </p>
-                        ) : (
-                          runningSessions.map((s) => (
-                            <SidebarMenuItem key={s.id}>
-                              <SidebarMenuButton
-                                size="sm"
-                                isActive={pathname === `/s/${s.id}`}
-                                tooltip={s.title}
-                                render={<Link href={`/s/${s.id}`} prefetch />}
-                              >
-                                <Loader className="h-3 animate-spin text-muted-foreground" />
-                                <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                              </SidebarMenuButton>
-                            </SidebarMenuItem>
-                          ))
-                        )}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </CollapsibleContent>
-                </SidebarGroup>
-              </Collapsible>
-
-              <Collapsible defaultOpen className="group/collapsible">
-                <SidebarGroup>
-                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
-                    Sessions
-                    <span className="ml-auto flex items-center gap-1.5">
-                      {runningCount > 0 && (
-                        <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                          <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-                          {runningCount}
-                        </span>
-                      )}
-                      <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
-                    </span>
-                  </SidebarGroupLabel>
-                  <CollapsibleContent>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {sessionsLoading ? (
-                          <>
-                            {[0, 1, 2, 3].map((i) => (
-                              <SidebarMenuItem key={i}>
-                                <SidebarMenuSkeleton />
-                              </SidebarMenuItem>
-                            ))}
-                          </>
-                        ) : filteredSessions.length === 0 ? (
-                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
-                            No sessions.
-                          </p>
-                        ) : (
-                          filteredSessions.map((s) => {
-                            const active =
-                              pathname === `/s/${s.id}` || pathname === `/sessions/${s.id}`;
-                            return (
-                              <SidebarMenuItem key={s.id}>
-                                <SidebarMenuButton
-                                  size={"sm"}
-                                  isActive={active}
-                                  tooltip={`${s.title} · Agent ${s.status === "queued" ? "waiting" : statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
-                                  render={<Link href={`/s/${s.id}`} prefetch />}
-                                >
-                                  {(s.status == "running" || s.status == "queued") && (
-                                    <Loader className="h-3 animate-spin text-muted-foreground" />
-                                  )}
-                                  {s.status == "failed" && (
-                                    <CircleX className="h-3 text-muted-foreground" />
-                                  )}
-                                  {/*{
-                                    s.status == "stopped" && < className="h-3 animate-spin text-muted-foreground" />
-                                  }*/}
-
-                                  <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                                  {/*<span
-                                    role="img"
-                                    aria-label={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
-                                    title={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
-                                    className={`size-1.5 shrink-0 rounded-full ${sandboxTone(s.sandboxStatus)}`}
-                                  />*/}
-                                </SidebarMenuButton>
-                              </SidebarMenuItem>
-                            );
-                          })
-                        )}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </CollapsibleContent>
-                </SidebarGroup>
-              </Collapsible>
-            </>
-          )}
+              </>
+            )}
         </SidebarContent>
 
         <SidebarFooter>
@@ -406,7 +356,6 @@ export function AppSidebar() {
                 )}
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
                   <span className="truncate text-[13px] font-medium">{displayName}</span>
-                  <span className="truncate text-xs text-muted-foreground">{displaySub}</span>
                 </span>
                 <IconSettings className="ml-auto shrink-0 text-muted-foreground" />
               </SidebarMenuButton>
