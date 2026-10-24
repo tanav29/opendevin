@@ -380,16 +380,41 @@ function stripSharedLinks(blocks: Block[]): Block[] {
     .filter((block) => block.kind !== "md" || block.text.length > 0);
 }
 
-function Message({ content, onAnswer }: { content: string; onAnswer?: (text: string) => void }) {
-  const blocks = stripSharedLinks(splitBlocks(content));
+function Message({
+  content,
+  onAnswer,
+  textOnly = false,
+  collapseActivity = false,
+  bubble = true,
+}: {
+  content: string;
+  onAnswer?: (text: string) => void;
+  textOnly?: boolean;
+  collapseActivity?: boolean;
+  bubble?: boolean;
+}) {
+  const parsedBlocks = stripSharedLinks(splitBlocks(content));
+  const lastTextIndex = parsedBlocks.reduce(
+    (last, block, index) => (block.kind === "md" ? index : last),
+    -1,
+  );
+  const blocks = textOnly
+    ? parsedBlocks.filter((block) => block.kind === "md" || block.kind === "file")
+    : collapseActivity
+      ? parsedBlocks.filter((block, index) => index === lastTextIndex || block.kind === "file")
+      : parsedBlocks;
+  const activity = collapseActivity
+    ? parsedBlocks.filter((block, index) => index !== lastTextIndex && block.kind !== "file")
+    : [];
   return (
     <div className="space-y-2">
       {blocks.map((b, k) => {
+        if (collapseActivity && b.kind !== "md" && b.kind !== "file") return null;
         if (b.kind === "md") {
           return (
             <div
               key={`b-${k}`}
-              className="typeset typeset-docs rounded-2xl rounded-tl-md bg-muted px-4 py-2.5 text-sm"
+              className={`typeset typeset-docs text-sm ${textOnly ? "" : bubble ? "rounded-2xl rounded-tl-md bg-muted px-4 py-2.5" : "py-1"}`}
             >
               <Markdown>{b.text}</Markdown>
             </div>
@@ -433,6 +458,49 @@ function Message({ content, onAnswer }: { content: string; onAnswer?: (text: str
           </div>
         );
       })}
+      {collapseActivity && activity.length > 0 && (
+        <details className="border-l-2 border-border pl-3 text-xs text-muted-foreground">
+          <summary className="w-fit cursor-pointer select-none py-1 hover:text-foreground">
+            {activity.length} agent {activity.length === 1 ? "update" : "updates"}
+          </summary>
+          <div className="space-y-2 py-2">
+            {activity.map((block, index) => (
+              <div key={`activity-${index}`}>
+                {block.kind === "md" && (
+                  <div className="typeset typeset-docs text-sm">
+                    <Markdown>{block.text}</Markdown>
+                  </div>
+                )}
+                {block.kind === "tool" && (
+                  <ToolCallCard
+                    id={`activity-${index}`}
+                    name={block.name}
+                    argument={block.argument}
+                    status={block.running ? "working" : block.failed ? "failed" : "done"}
+                  />
+                )}
+                {block.kind === "question" && (
+                  <QuestionCard
+                    id={`activity-${index}`}
+                    question={block.question}
+                    options={block.options}
+                    onAnswer={onAnswer}
+                  />
+                )}
+                {block.kind === "plan" && (
+                  <PlanCard id={`activity-${index}`} tasks={block.tasks} />
+                )}
+                {block.kind === "error" && (
+                  <p className="text-destructive">
+                    {block.name}
+                    {block.body ? `: ${block.body}` : ""}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

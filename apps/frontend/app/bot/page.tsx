@@ -227,7 +227,8 @@ export default function BotPage() {
               key={message.id}
               role={message.role}
               content={message.content}
-              workingLabel="On it"
+              presentation="bot"
+              workingLabel=""
               onAnswer={(text) => void send(text)}
             />
           ))}

@@ -1,6 +1,6 @@
 
 [future] ui has lot of work left
-[ ] /bot and /s/[id] should have different sytling
+[x] /bot and /s/[id] should have different styling
     /bot - should be like a human is mesage so show only text part and each bubbles,
     /s/[id] - should be a full agent that shows reasoning, tools everythings, but sollapases also at last and show only last text part and other collapse in one,also not bubble ui for this and agent can write long too but not too much, use markdown here fully
 

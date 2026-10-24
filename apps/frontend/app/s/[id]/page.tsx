@@ -860,6 +860,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     key={message.id}
                     role={message.role}
                     content={message.content}
+                    presentation="session"
                     workingLabel="Working"
                     onAnswer={(text) => void sendMessage(text)}
                   />
