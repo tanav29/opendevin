@@ -92,25 +92,23 @@ export default function ChatComposer({
       <div className="flex items-center justify-between gap-2 px-2 pb-2">
         <div className="flex items-center gap-1.5">{actions}</div>
         {busy ? (
-          <Button
+          <button
             type="button"
-            variant="outline"
-            size="icon-sm"
             onClick={onStop}
+            className="bg-red-700 rounded-[99rem] squircle w-7 h-7 flex items-center justify-center hover:scale-105 cursor-pointer transition-transform active:scale-95"
             aria-label="Stop agent"
           >
             <HugeiconsIcon icon={StopIcon} size={16} strokeWidth={1.8} />
-          </Button>
+          </button>
         ) : (
-          <Button
+          <button
             type="submit"
-            size="icon-sm"
-            variant="default"
             disabled={disabled || !canSend}
-            aria-label="Send message"
+              aria-label="Send message"
+              className="bg-blue-700 rounded-[99rem] squircle w-7 h-7 flex items-center justify-center hover:scale-105 cursor-pointer transition-transform active:scale-95"
           >
             <HugeiconsIcon icon={ArrowUp01Icon} size={16} strokeWidth={1.8} />
-          </Button>
+          </button>
         )}
       </div>
     </form>

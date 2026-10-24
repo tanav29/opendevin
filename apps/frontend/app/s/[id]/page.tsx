@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import dynamic from "next/dynamic";
 import {
   IconArrowLeft,
@@ -342,7 +344,70 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [deleting, setDeleting] = useState(false);
   const [degraded, setDegraded] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
-  const abortRef = useRef<AbortController | null>(null);
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const chatTransport = useRef<ChatTransport<UIMessage>>({
+    async sendMessages({ messages, abortSignal }) {
+      const lastMessage = messages.at(-1);
+      const message = lastMessage?.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("");
+      const response = await fetch(`${API}/api/sessions/${sessionIdRef.current}/chat`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+        signal: abortSignal,
+      });
+      if (!response.ok || !response.body) {
+        let error = "The agent couldn't respond. Please try again.";
+        try {
+          error = ((await response.json()) as { error?: string }).error || error;
+        } catch {}
+        throw new Error(error);
+      }
+
+      setDegraded(response.headers.get("x-sandbox-degraded") === "1");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const id = crypto.randomUUID();
+      let started = false;
+      return new ReadableStream<UIMessageChunk>({
+        async pull(controller) {
+          if (!started) {
+            controller.enqueue({ type: "text-start", id });
+            started = true;
+          }
+          const { done, value } = await reader.read();
+          const delta = decoder.decode(value, { stream: !done });
+          if (delta) controller.enqueue({ type: "text-delta", id, delta });
+          if (done) {
+            controller.enqueue({ type: "text-end", id });
+            controller.close();
+            reader.releaseLock();
+          }
+        },
+        cancel() {
+          void reader.cancel();
+        },
+      });
+    },
+    async reconnectToStream() {
+      return null;
+    },
+  });
+  const {
+    messages: liveMessages,
+    sendMessage: streamMessage,
+    stop: stopStreaming,
+    setMessages: setLiveMessages,
+  } = useChat({ id: sessionId, transport: chatTransport.current });
+  const latestLiveText = liveMessages
+    .at(-1)
+    ?.parts.filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
@@ -379,7 +444,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   // Keep the latest turn visible while streaming or after history loads.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, sending]);
+  }, [messages.length, sending, liveMessages.length, latestLiveText]);
 
   useEffect(() => {
     void params.then(({ id }) => {
@@ -497,77 +562,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setInput("");
     resetAttachments();
     setSending(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setMessages((current) => [
-      ...current,
-      { id: `local-${Date.now()}`, role: "user", content: full },
-      { id: "streaming", role: "assistant", content: "" },
-    ]);
     try {
-      const response = await fetch(`${API}/api/sessions/${sessionId}/chat`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: full }),
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) {
-        let message = "The agent couldn't respond. Please try again.";
-        try {
-          const body = (await response.json()) as { error?: string };
-          if (body.error) message = body.error;
-        } catch {}
-        toast.error(message);
-        // Server is the source of truth: drop the optimistic local messages
-        // (the server may have persisted nothing, e.g. 409 already-running)
-        // and re-sync from the DB instead of leaving ghosts behind.
-        setMessages((current) =>
-          current.filter(
-            (message) => message.id !== "streaming" && !message.id.startsWith("local-"),
-          ),
-        );
-        await refresh(sessionId, true);
-        return;
-      }
-      setDegraded(response.headers.get("x-sandbox-degraded") === "1");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === "streaming" ? { ...message, content: message.content + chunk } : message,
-          ),
-        );
-      }
-      // Flush any remaining bytes
-      const tail = decoder.decode();
-      if (tail) {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === "streaming" ? { ...message, content: message.content + tail } : message,
-          ),
-        );
-      }
+      await streamMessage({ text: full });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         toast.info("Stopped. The server run was cancelled.");
       } else {
-        toast.error("Couldn't reach the agent. Check your connection and try again.");
-        setMessages((current) => current.filter((message) => message.id !== "streaming"));
+        toast.error(err instanceof Error ? err.message : "Couldn't reach the agent. Try again.");
       }
     } finally {
-      abortRef.current = null;
       setSending(false);
       await refresh(sessionId, true);
+      setLiveMessages([]);
     }
   }
 
   function stop() {
-    abortRef.current?.abort();
+    stopStreaming();
     // Server-side abort: actually stops the model turn, not just the stream.
     if (sessionId) {
       void api(`/api/sessions/${sessionId}/stop`, {
@@ -677,57 +688,27 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   return (
-    <>
-      <ReconnectConflictDialog
-        conflict={reconnectConflict}
-        reconnecting={reconnecting}
-        onOpenChange={(open) => {
-          if (!open) setReconnectConflict(null);
-        }}
-        onReview={() => {
-          setReconnectConflict(null);
-          setPrefs({ ...prefs, open: true, tab: "changes" });
-        }}
-        onDownload={() => {
-          setReconnectConflict(null);
-          void downloadRecoveryPatch();
-        }}
-        onConfirm={() => void reconnect(true)}
-      />
-      <main className="flex h-screen flex-col bg-background">
-        <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-3 py-2 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-2">
+      <main className="h-screen bg-background w-full overflow-clip">
+        <header className="absolute top-0 left-0 right-0 z-10 flex shrink-0 items-center justify-between gap-3 bg-sidebar border-b px-3 py-2">
+          <div className="flex items-center gap-2 justify-center">
             <SidebarTrigger className="md:hidden" />
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Back to project"
-                  onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
-                >
-                  <IconArrowLeft />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Back to project</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger render={<div className="min-w-0 cursor-default" />}>
-                <div className="flex min-w-0 items-center gap-2">
-                  <h1 className="max-w-[min(42vw,24rem)] truncate text-[13px] font-medium tracking-[-0.01em]">
-                    {detail?.title || "Loading session…"}
-                  </h1>
-                  {detail?.branch && <Badge variant="outline">{detail.branch}</Badge>}
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                {detail?.workspacePath || "Session workspace"}
-                {detail?.branch ? ` · branch ${detail.branch}` : ""}
-              </TooltipContent>
-            </Tooltip>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Back to project"
+              onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
+            >
+              <IconArrowLeft />
+            </Button>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate">
+                {detail?.title || "Loading session…"}
+              </h1>
+              {detail?.branch && <p>repoName/{detail.branch}</p>}
+            </div>
           </div>
           <ChatStatusBadges sandbox={provisioningPhase} agent={agentStatus} result={verification} />
-          <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+          <div className="flex shrink-0 items-center gap-1">
             <DevRunButton
               sessionId={sessionId}
               sandboxReady={ready}
@@ -779,96 +760,35 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1">
-          <section className="flex min-w-0 flex-1 flex-col bg-background">
-            <div className="chat-scroll mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-4 pt-8 sm:px-8">
-              {Boolean(loadError) && detail && (
-                <ApiErrorState
-                  error={loadError}
-                  title="Some session data could not be refreshed"
-                  description="The last known state is shown. Retry to check the API again."
-                  onRetry={() => void refresh(sessionId, true, true)}
-                  compact
-                  className="mb-5"
-                />
-              )}
-              {provisioning && (
-                <div className="mb-5 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-sm text-muted-foreground">
-                  <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                  {provisioningPhase === "setting-up"
-                    ? "Setting up the workspace… the agent starts when setup completes."
-                    : "Spinning up sandbox and cloning repo… the agent gets full workspace access once ready."}
-                </div>
-              )}
-              {degraded && !workspaceUnavailable && (
-                <div className="mb-5 rounded-lg border border-warning/40 bg-warning-muted/40 px-3 py-2.5 text-sm">
-                  Sandbox unreachable — this answer is from general knowledge. Reconnect for
-                  workspace tools.
-                </div>
-              )}
-              {workspaceUnavailable && (
-                <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">
-                      {provisioningPhase === "error"
-                        ? "Workspace setup failed"
-                        : "Workspace unavailable"}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {status?.lastError || "Reconnect the sandbox to continue."}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void reconnect()}
-                    disabled={reconnecting}
-                  >
-                    <IconRefresh className="size-4" />{" "}
-                    {reconnecting ? "Reconnecting…" : "Reconnect"}
-                  </Button>
-                </div>
-              )}
-              {agentFailed && !sending && (
-                <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">The agent couldn’t finish that task.</p>
-                    {status?.lastError && (
-                      <p className="mt-0.5 text-xs text-muted-foreground">{status.lastError}</p>
-                    )}
-                  </div>
-                  <Button size="sm" variant="outline" onClick={retry}>
-                    <IconRefresh className="size-4" /> Try again
-                  </Button>
-                </div>
-              )}
-
-              <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-7 pb-4">
-                {messages.length === 0 && (
-                  <div className="flex min-h-[38vh] flex-col items-center justify-center text-center">
-                    <div className="mb-4 flex size-10 items-center justify-center rounded-xl border bg-card shadow-sm">
-                      <IconTerminal className="size-[18px] text-muted-foreground" />
-                    </div>
-                    <h2 className="text-lg font-medium tracking-tight">What should we work on?</h2>
-                    <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                      Ask the agent to explore this workspace, make a change, or run a command.
-                    </p>
-                  </div>
-                )}
-                {messages.map((message) => (
+          <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
+              {messages.map((message) => (
                   <ChatMessageRow
                     key={message.id}
-                    role={message.role}
+                    role={message.role === "user" ? "user" : "assistant"}
                     content={message.content}
                     presentation="session"
                     workingLabel="Working"
                     onAnswer={(text) => void sendMessage(text)}
                   />
                 ))}
-              </div>
+              {/*Why chat messages and live messages are diff component fuck you ai*/}
+                {liveMessages.map((message) => (
+                  <ChatMessageRow
+                    key={message.id}
+                    role={message.role}
+                    content={message.parts
+                      .filter((part) => part.type === "text")
+                      .map((part) => part.text)
+                      .join("")}
+                    presentation="session"
+                    workingLabel="Working"
+                    onAnswer={(text) => void sendMessage(text)}
+                  />
+                ))}
               <div ref={bottomRef} />
-            </div>
-            <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 pb-3 pt-3 backdrop-blur sm:px-8">
+          </section>
+
+            <div className="absolute bottom-0 left-0 right-0 shrink-0 bg-background/95 backdrop-blur max-w-5xl sm:mx-8 mx-4 pb-4">
               <ChatComposer
                 value={input}
                 onValueChange={setInput}
@@ -878,7 +798,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 disabled={chatDisabled}
                 canSend={Boolean(input.trim()) || attachments.length > 0}
                 placeholder="Tell the agent what to do…"
-                className="sticky bottom-0 mt-3"
                 onPasteFiles={(files) => void addFiles(files)}
                 onDropFiles={(files) => void addFiles(files)}
                 attachments={
@@ -948,7 +867,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 }
               />
             </div>
-          </section>
 
           {prefs.open && (
             <SessionPanel
@@ -963,8 +881,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               defaultPort={status?.devPort}
             />
           )}
-        </div>
       </main>
-    </>
   );
 }

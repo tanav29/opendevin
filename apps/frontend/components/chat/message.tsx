@@ -394,17 +394,22 @@ function Message({
   bubble?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
-  const lastTextIndex = parsedBlocks.reduce(
-    (last, block, index) => (block.kind === "md" ? index : last),
-    -1,
-  );
+  // Keep the final response visible when activity is collapsed. Earlier text
+  // remains with the tool activity inside the expandable section.
+  let lastTextIndex = -1;
+  for (let index = parsedBlocks.length - 1; index >= 0; index--) {
+    if (parsedBlocks[index].kind === "md") {
+      lastTextIndex = index;
+      break;
+    }
+  }
   const blocks = textOnly
     ? parsedBlocks.filter((block) => block.kind === "md" || block.kind === "file")
     : collapseActivity
-      ? parsedBlocks.filter((block, index) => index === lastTextIndex || block.kind === "file")
+      ? parsedBlocks.filter((_, index) => index === lastTextIndex)
       : parsedBlocks;
   const activity = collapseActivity
-    ? parsedBlocks.filter((block, index) => index !== lastTextIndex && block.kind !== "file")
+    ? parsedBlocks.filter((_, index) => index !== lastTextIndex)
     : [];
   return (
     <div className="space-y-2">
@@ -414,7 +419,7 @@ function Message({
           return (
             <div
               key={`b-${k}`}
-              className={`typeset typeset-docs text-sm ${textOnly ? "" : bubble ? "rounded-2xl rounded-tl-md bg-muted px-4 py-2.5" : "py-1"}`}
+              className={`typeset typeset-docs text-md ${textOnly ? "" : bubble ? "squircle rounded-2xl rounded-tl-md bg-muted px-4 py-2.5" : "py-1"}`}
             >
               <Markdown>{b.text}</Markdown>
             </div>
@@ -459,13 +464,17 @@ function Message({
         );
       })}
       {collapseActivity && activity.length > 0 && (
-        <details className="border-l-2 border-border pl-3 text-xs text-muted-foreground">
-          <summary className="w-fit cursor-pointer select-none py-1 hover:text-foreground">
-            {activity.length} agent {activity.length === 1 ? "update" : "updates"}
+        <details className="group rounded-lg border border-border/60 bg-muted/30 text-xs text-muted-foreground">
+          <summary className="flex w-fit cursor-pointer select-none items-center gap-2 px-3 py-2 hover:text-foreground">
+            <span className="transition-transform group-open:rotate-90" aria-hidden="true">
+              ›
+            </span>
+            <span>Show work</span>
+            <span className="text-muted-foreground/70">{activity.length}</span>
           </summary>
-          <div className="space-y-2 py-2">
+          <div className="space-y-3 border-t border-border/60 px-3 py-3">
             {activity.map((block, index) => (
-              <div key={`activity-${index}`}>
+              <div key={`activity-${index}`} className="min-w-0">
                 {block.kind === "md" && (
                   <div className="typeset typeset-docs text-sm">
                     <Markdown>{block.text}</Markdown>
@@ -490,11 +499,19 @@ function Message({
                 {block.kind === "plan" && (
                   <PlanCard id={`activity-${index}`} tasks={block.tasks} />
                 )}
+                {block.kind === "file" && (
+                  <FileCard
+                    id={`activity-${index}`}
+                    name={block.name}
+                    url={block.url}
+                    size={block.size}
+                  />
+                )}
                 {block.kind === "error" && (
-                  <p className="text-destructive">
-                    {block.name}
-                    {block.body ? `: ${block.body}` : ""}
-                  </p>
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+                    <p className="font-medium">{block.name}</p>
+                    {block.body && <p className="mt-1 whitespace-pre-wrap">{block.body}</p>}
+                  </div>
                 )}
               </div>
             ))}

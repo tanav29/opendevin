@@ -44,7 +44,7 @@ function QuestionCard({
   id: string;
 }) {
   return (
-    <div key={id} className="rounded-xl border border-warning/40 bg-warning-muted/40 p-3.5">
+    <div key={id} className="rounded-xl border p-3.5">
       <p className="text-[13px] font-medium leading-5">{question}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {options.map((opt) => (
@@ -82,7 +82,7 @@ function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; i
                 t.status === "done"
                   ? "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-success text-[10px] text-white"
                   : t.status === "in_progress"
-                    ? "mt-0.5 size-4 shrink-0 animate-pulse rounded-full border-2 border-warning border-t-transparent"
+                    ? "mt-0.5 size-4 shrink-0 animate-pulse rounded-full border-2 border-t-transparent"
                     : "mt-0.5 size-4 shrink-0 rounded-full border border-border"
               }
             >
@@ -238,7 +238,7 @@ function Message({ content, onAnswer }: { content: string; onAnswer?: (text: str
       {blocks.map((b, k) => {
         if (b.kind === "md") {
           return (
-            <div key={`b-${k}`} className="typeset typeset-docs text-sm py-2">
+            <div key={`b-${k}`} className="typeset typeset-docs text-sm">
               <Markdown>{b.text}</Markdown>
             </div>
           );

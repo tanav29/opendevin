@@ -18,8 +18,10 @@ export default function ChatMessageRow({
   if (presentation === "session") {
     if (role === "user") {
       return (
-        <article className="whitespace-pre-wrap py-1 text-[14px] leading-6 text-foreground">
-          {content}
+        <article className="group flex justify-end py-1">
+          <p className="max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-muted px-4 py-3 text-[14px] leading-6 text-foreground sm:max-w-[78%]">
+            {content}
+          </p>
         </article>
       );
     }

@@ -67,6 +67,7 @@ export default function DevRunButton({
         <Button
           size="sm"
           onClick={() => void run()}
+          variant={"secondary"}
           disabled={!sandboxReady || starting || !sessionId}
           aria-label={starting ? "Starting dev server…" : label}
         >

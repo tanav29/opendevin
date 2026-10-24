@@ -12,7 +12,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Robot02Icon } from "@hugeicons/core-free-icons";
+import { Chat, HugeiconsFreeIcons, Robot02Icon } from "@hugeicons/core-free-icons";
 
 import {
   Sidebar,
@@ -256,9 +256,9 @@ export function AppSidebar() {
                                   {s.status == "failed" && (
                                     <CircleX className="h-3 text-muted-foreground" />
                                   )}
-                                  {/*{
-                                    s.status == "stopped" && < className="h-3 animate-spin text-muted-foreground" />
-                                  }*/}
+                                  {
+                                    s.status == "stopped" && <HugeiconsIcon icon={Chat} className="text-muted-foreground" />
+                                  }
 
                                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
                                   {/*<span
