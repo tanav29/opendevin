@@ -4,7 +4,7 @@ import { prisma } from "./db/prisma.js";
 import { AGENT_STOP, buildSystemPrompt, loadToolLog, saveToolLog, trimToolLog } from "./agent.js";
 import { resolveChatModel, WORKSPACE_PATH } from "./config.js";
 import { LIMITS } from "./config.js";
-import { connectSandboxTools } from "./tools.js";
+import { connectSandboxTools, SHARED_FILE_PREFIX } from "./tools.js";
 import {
   hasUnrestoredWorkspace,
   snapshotDiffAndIdle,
@@ -84,6 +84,7 @@ function toolArgument(name: string, input: unknown): string {
     delete_file: "path",
     search: "pattern",
     ask_user: "question",
+    share_file: "path",
   };
   const preferred = record[preferredKey[name]];
   const fallback = Object.values(record).find((value) => typeof value === "string");
@@ -96,8 +97,14 @@ function toolArgument(name: string, input: unknown): string {
 export function toolCallMarker(name: string, input: unknown): string {
   if (name === "ask_user") return `\n\n<div data-question='${questionPayload(input)}'>\n\n`;
   if (name === "update_plan") return `\n\n<div data-plan='${planPayload(input)}'>\n\n`;
+  if (name === "share_file") return "";
   const argument = escapeMarkerAttribute(toolArgument(name, input));
   return `\n\n<details data-tool="call" data-arg="${argument}"><summary>${name}</summary>\n\n`;
+}
+
+// A shared file renders as a download card in both Bot and session chats.
+export function fileMarker(payloadJson: string): string {
+  return `\n\n<div data-file='${payloadJson.replace(/'/g, "&#39;")}'>\n\n</div>\n\n`;
 }
 
 export function toolDoneMarker(name: string, partType: string, output: unknown): string {
@@ -145,14 +152,26 @@ export async function drainAgentStream(
       sink(text);
     } else if (p.type === "tool-call") {
       const name = typeof p.toolName === "string" ? p.toolName : "tool";
-      const marker = toolCallMarker(name, p.input);
-      if (includeToolMarkers) {
+      if (includeToolMarkers && name !== "share_file") {
+        const marker = toolCallMarker(name, p.input);
         if (name === "ask_user" || name === "update_plan") visibleText += marker;
         sink(marker);
       }
     } else if (p.type === "tool-result" || p.type === "tool-error") {
       const name = typeof p.toolName === "string" ? p.toolName : "";
-      if (includeToolMarkers) sink(toolDoneMarker(name, p.type, p.output));
+      if (
+        p.type === "tool-result" &&
+        name === "share_file" &&
+        typeof p.output === "string" &&
+        p.output.startsWith(SHARED_FILE_PREFIX)
+      ) {
+        const marker = fileMarker(p.output.slice(SHARED_FILE_PREFIX.length));
+        visibleText += marker;
+        sink(marker);
+      }
+      if (includeToolMarkers && name !== "share_file") {
+        sink(toolDoneMarker(name, p.type, p.output));
+      }
       if (
         name === "update_plan" &&
         typeof p.output === "string" &&

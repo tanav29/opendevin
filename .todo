@@ -1,7 +1,7 @@
 
-[ ] consistent ui of bot and sessions chat (sandbox status, inputs, ...)
-[ ] More better messge typeing from bot like every text section has there own msg bubble, include a text on starting that on it or got it working, if bot have done resoning, make that in system rpompt and return only concise text like person chating
-[ ] add tool for bot to share a file on sandbox via link and show that in chat as a file icon and name and download button. by returning a presigned url here (https://docs.e2b.dev/filesystem/download#download-with-pre-signed-url)
+[x] add a new running tasks group in sidebar
+[x] the bot top bar is not on top alway and ht input box i not on bottom always it moves with scroll and add auto scroll to bottom
+[x] migrate all icons to huge icons free react, and icon for bot will be Robot02Icon
 
 [future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
 [future] 15 integrations: linear/jira/figma/sentry, MCP servers, web-search/docs-fetch tool

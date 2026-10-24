@@ -43,3 +43,30 @@ test("keeps model text as visible assistant output", async () => {
   );
   assert.equal(result.visibleText, "Done.");
 });
+
+test("streams a download card for shared files without exposing tool markers", async () => {
+  let streamed = "";
+  const result = await drainAgentStream(
+    stream([
+      { type: "tool-call", toolName: "share_file", input: { path: "report.txt" } },
+      {
+        type: "tool-result",
+        toolName: "share_file",
+        output: `__FILE__${JSON.stringify({
+          name: "report.txt",
+          path: "report.txt",
+          url: "https://example.com/report.txt",
+          size: 12,
+        })}`,
+      },
+    ]),
+    (chunk) => {
+      streamed += chunk;
+    },
+    undefined,
+    false,
+  );
+  assert.match(result.visibleText, /data-file=/);
+  assert.match(streamed, /data-file=/);
+  assert.doesNotMatch(streamed, /data-tool/);
+});

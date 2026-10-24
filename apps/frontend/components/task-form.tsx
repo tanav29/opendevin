@@ -222,13 +222,13 @@ export default function TaskForm({
           placeholder={placeholder}
           rows={4}
           autoFocus={autoFocus}
-          className={`rounded-2xl min-h-32 resize-none p-4 pb-14`}
+          className={`min-h-32 resize-none p-4 pb-14 squircle rounded-[2rem]`}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void runTask(e);
           }}
         />
       </div>
-      <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pb-3">
+      <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pr-4 pb-3">
         <div className="flex min-w-0 flex-1 items-center">
           {!isLockedToProject && (
             <Select

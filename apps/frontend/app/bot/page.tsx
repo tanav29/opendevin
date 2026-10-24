@@ -1,18 +1,28 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import { MessageCircle, Square, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Attachment01Icon, Robot02Icon } from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
 import { api, ApiError, API } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
+import ChatComposer from "@/components/chat/composer";
+import ChatMessageRow from "@/components/chat/message-row";
+import ChatStatusBadges from "@/components/chat/status-badges";
+import {
+  MAX_MESSAGE_CHARS,
+  serializeAttachments,
+  useAttachments,
+} from "@/components/chat/use-attachments";
 
 type BotMessage = { id: string; role: "user" | "assistant"; content: string };
 type BotState = {
   id: string;
   status: string;
   sandboxStatus: string;
+  sandboxId: string;
   lastError: string | null;
   messages: BotMessage[];
 };
@@ -21,8 +31,10 @@ export default function BotPage() {
   const [bot, setBot] = useState<BotState | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const confirm = useConfirm();
 
   async function refresh() {
@@ -41,11 +53,17 @@ export default function BotPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [bot?.messages.length, sending]);
 
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    const message = input.trim();
-    if (!message || sending) return;
+  async function send(text = input) {
+    const message = text.trim();
+    const blocks = serializeAttachments(attachments);
+    const full = message ? (blocks ? `${message}\n\n${blocks}` : message) : blocks;
+    if (!full || sending) return;
+    if (full.length > MAX_MESSAGE_CHARS) {
+      toast.error(`Message exceeds the ${MAX_MESSAGE_CHARS.toLocaleString()}-character limit.`);
+      return;
+    }
     setInput("");
+    resetAttachments();
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -53,9 +71,11 @@ export default function BotPage() {
       current
         ? {
             ...current,
+            status: "running",
+            lastError: null,
             messages: [
               ...current.messages,
-              { id: `local-${Date.now()}`, role: "user", content: message },
+              { id: `local-${Date.now()}`, role: "user", content: full },
               { id: "streaming", role: "assistant", content: "" },
             ],
           }
@@ -66,7 +86,7 @@ export default function BotPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: full }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -103,7 +123,6 @@ export default function BotPage() {
             : current,
         );
       }
-      await refresh();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         toast.info("Bot stopped.");
@@ -118,6 +137,7 @@ export default function BotPage() {
     } finally {
       abortRef.current = null;
       setSending(false);
+      await refresh();
     }
   }
 
@@ -144,92 +164,139 @@ export default function BotPage() {
     }
   }
 
+  const sandboxStatus = bot?.sandboxStatus ?? "pending";
+  const failed = bot?.status === "failed" || sandboxStatus === "error";
+  const chatDisabled = sending;
+
   return (
     <main className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="flex size-8 items-center justify-center rounded-full bg-muted">
-            <MessageCircle className="size-4" />
+      <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-4 py-2 backdrop-blur">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+            <HugeiconsIcon icon={Robot02Icon} size={16} strokeWidth={1.8} />
           </span>
-          <div>
-            <h1 className="text-sm font-semibold">Bot</h1>
-            <p className="text-[11px] text-muted-foreground">Your personal OpenDevin assistant</p>
+          <div className="min-w-0">
+            <h1 className="truncate text-[13px] font-medium tracking-[-0.01em]">Bot</h1>
+            <p className="truncate text-[11px] text-muted-foreground">
+              Your personal OpenDevin assistant
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          {sending && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Stop Bot"
-              onClick={() => void stop()}
-            >
-              <Square className="size-4" />
-            </Button>
-          )}
+        <ChatStatusBadges sandbox={sandboxStatus} agent={bot?.status ?? "idle"} />
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             type="button"
-            variant="ghost"
+            variant="secondary"
             size="icon-sm"
             aria-label="Delete Bot history"
             onClick={() => void clearHistory()}
+            disabled={sending}
           >
             <Trash2 className="size-4" />
           </Button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3">
-          {bot?.messages.map((message) => (
-            <div
-              key={message.id}
-              className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
-            >
-              <div
-                className={
-                  message.role === "user"
-                    ? "max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground"
-                    : "max-w-[85%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm leading-6"
-                }
-              >
-                {message.role === "assistant" ? (
-                  message.content ? (
-                    <Markdown>{message.content}</Markdown>
-                  ) : (
-                    <span className="text-muted-foreground">Working…</span>
-                  )
-                ) : (
-                  <span className="whitespace-pre-wrap">{message.content}</span>
-                )}
+
+      <div className="chat-scroll mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-4 pt-8 sm:px-8">
+        {failed && bot?.lastError && (
+          <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+            <p className="text-sm font-medium">Bot couldn&apos;t finish that task.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{bot.lastError}</p>
+          </div>
+        )}
+
+        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-7 pb-4">
+          {bot?.messages.length === 0 && (
+            <div className="flex min-h-[38vh] flex-col items-center justify-center text-center">
+              <div className="mb-4 flex size-10 items-center justify-center rounded-xl border bg-card shadow-sm">
+                <HugeiconsIcon
+                  icon={Robot02Icon}
+                  size={18}
+                  strokeWidth={1.8}
+                  className="text-muted-foreground"
+                />
               </div>
+              <h2 className="text-lg font-medium tracking-tight">What can I help with?</h2>
+              <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+                Ask about your sessions or give me a quick task to run in my own workspace.
+              </p>
             </div>
+          )}
+          {bot?.messages.map((message) => (
+            <ChatMessageRow
+              key={message.id}
+              role={message.role}
+              content={message.content}
+              workingLabel="On it"
+              onAnswer={(text) => void send(text)}
+            />
           ))}
-          <div ref={bottomRef} />
         </div>
+        <div ref={bottomRef} />
       </div>
-      <form
-        onSubmit={(event) => void send(event)}
-        className="mx-auto mb-4 flex w-[calc(100%-2rem)] max-w-2xl items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm"
-      >
-        <textarea
+      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 pb-3 pt-3 backdrop-blur sm:px-8">
+        <ChatComposer
           value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          rows={1}
-          placeholder="Message Bot"
-          aria-label="Message Bot"
-          className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
+          onValueChange={setInput}
+          onSubmit={() => void send()}
+          onStop={() => void stop()}
+          busy={sending}
+          disabled={chatDisabled}
+          canSend={Boolean(input.trim()) || attachments.length > 0}
+          placeholder="Message Bot…"
+          className="sticky bottom-0 mt-3"
+          onPasteFiles={(files) => void addFiles(files)}
+          onDropFiles={(files) => void addFiles(files)}
+          attachments={
+            attachments.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+                {attachments.map((a) => (
+                  <span
+                    key={a.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+                  >
+                    {a.name} · {(a.content.length / 1024).toFixed(1)}KB
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label={`Remove ${a.name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : undefined
+          }
+          actions={
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                className="hidden"
+                disabled={chatDisabled}
+                onChange={(e) => {
+                  if (e.target.files) void addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileRef.current?.click()}
+                disabled={chatDisabled}
+                className="px-2 text-[12px]"
+                aria-label="Attach files"
+              >
+                <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
+              </Button>
+            </>
+          }
         />
-        <Button type="submit" size="sm" disabled={sending || !input.trim()}>
-          Send
-        </Button>
-      </form>
+      </div>
     </main>
   );
 }

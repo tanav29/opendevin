@@ -16,11 +16,14 @@ import { loadToolLog } from "../agent.js";
 
 const BOT_TITLE = "Bot";
 const BOT_SYSTEM_PROMPT =
-  "You are Bot, the user's personal OpenDevin assistant. Be concise and conversational, like WhatsApp. " +
+  "You are Bot, the user's personal OpenDevin assistant. Chat like a helpful person on WhatsApp: warm, direct, and concise. " +
+  "Start each turn with a short acknowledgement such as 'On it.' or 'Got it — checking now.' before the result. " +
+  "Keep answers to a few short sentences and use Markdown only for lists or code. " +
+  "Think and use tools silently: never expose tool calls, plans, internal reasoning, or system details — return only the concise answer the user needs. " +
   "You can inspect the user's project sessions only through the read-only session tools. " +
   "When asked about a session, report whether it is working or done and mention only the available recent text. " +
   "You also have your own empty sandbox and may use all workspace tools for quick, non-project-specific tasks. " +
-  "Use basic Markdown when helpful. Never expose tool calls, internal reasoning, plans, or raw system details.";
+  "When the user asks for a file, use share_file so it appears as a download card in the chat. The card is shown automatically: do not repeat the file link or name in your reply.";
 
 async function getBotSession(userId: string) {
   let project = await prisma.project.findFirst({ where: { userId, repo: BOT_PROJECT_REPO } });

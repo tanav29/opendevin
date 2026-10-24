@@ -1,10 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   IconArrowLeft,
-  IconArrowUp,
   IconCopy,
   IconInfoCircle,
   IconPlayerStop,
@@ -32,7 +31,14 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { usePanelPrefs } from "./panel-prefs";
 import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
-const Message = dynamic(() => import("./message"), {
+import ChatComposer from "@/components/chat/composer";
+import ChatStatusBadges from "@/components/chat/status-badges";
+import {
+  MAX_MESSAGE_CHARS,
+  serializeAttachments,
+  useAttachments,
+} from "@/components/chat/use-attachments";
+const ChatMessageRow = dynamic(() => import("@/components/chat/message-row"), {
   ssr: false,
   loading: () => <span className="text-muted-foreground">Loading response…</span>,
 });
@@ -49,20 +55,8 @@ import {
   type SessionDetail,
   type SessionStatus,
 } from "./lib";
-import { PaperclipIcon } from "lucide-react";
-
-type Attachment = { id: string; name: string; content: string };
-const MAX_ATTACHMENT_COUNT = 3;
-const MAX_MESSAGE_CHARS = 20_000;
-
-function serializeAttachments(attachments: Attachment[]) {
-  return attachments
-    .map(
-      (attachment) =>
-        `<attachment name="${attachment.name}">\n${attachment.content}\n</attachment>`,
-    )
-    .join("\n\n");
-}
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Attachment01Icon } from "@hugeicons/core-free-icons";
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -347,49 +341,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [degraded, setDegraded] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
 
-  async function addFiles(files: FileList | File[]) {
-    const all = Array.from(files);
-    const remaining = Math.max(0, MAX_ATTACHMENT_COUNT - attachments.length);
-    if (remaining === 0) {
-      toast.error(`Only ${MAX_ATTACHMENT_COUNT} attachments can be added.`);
-      return;
-    }
-    const list = all.slice(0, remaining);
-    if (all.length > list.length) {
-      toast.error(`Only ${MAX_ATTACHMENT_COUNT} attachments can be added.`);
-    }
-    let nextAttachments = [...attachments];
-    for (const f of list) {
-      if (f.size > 200_000) {
-        toast.error(`Attachment ${f.name} too large (max 200KB).`);
-        continue;
-      }
-      try {
-        const text = await f.text();
-        const next = [
-          ...nextAttachments,
-          { id: crypto.randomUUID(), name: f.name.slice(0, 100), content: text },
-        ];
-        if (serializeAttachments(next).length > MAX_MESSAGE_CHARS) {
-          toast.error(
-            `Attachments exceed the ${MAX_MESSAGE_CHARS.toLocaleString()}-character message limit.`,
-          );
-          continue;
-        }
-        nextAttachments = next;
-        setAttachments(nextAttachments);
-      } catch {
-        toast.error(`Could not read ${f.name}.`);
-      }
-    }
-  }
   const refresh = useCallback(async (id: string, includeMessages: boolean, showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
@@ -424,13 +381,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, sending]);
 
-  // Autogrow the composer instead of a fixed 3-row box.
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }, [input]);
   useEffect(() => {
     void params.then(({ id }) => {
       setSessionId(id);
@@ -545,7 +495,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       return;
     }
     setInput("");
-    setAttachments([]);
+    resetAttachments();
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -670,9 +620,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }
 
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    await sendMessage(input);
+  function send() {
+    void sendMessage(input);
   }
 
   const provisioning = PROVISIONING_SANDBOX.has(provisioningPhase);
@@ -746,7 +695,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         onConfirm={() => void reconnect(true)}
       />
       <main className="flex h-screen flex-col bg-background">
-        <header className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-3 py-2">
+        <header className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background/95 px-3 py-2 backdrop-blur">
           <div className="flex min-w-0 items-center gap-2">
             <SidebarTrigger className="md:hidden" />
             <Tooltip>
@@ -777,11 +726,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </TooltipContent>
             </Tooltip>
           </div>
-          <div className="hidden items-center gap-1.5 lg:flex" aria-live="polite">
-            <Badge variant="outline">Sandbox: {provisioningPhase.replace("-", " ")}</Badge>
-            <Badge variant="outline">Agent: {agentStatus}</Badge>
-            <Badge variant="outline">Result: {verification}</Badge>
-          </div>
+          <ChatStatusBadges sandbox={provisioningPhase} agent={agentStatus} result={verification} />
           <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
             <DevRunButton
               sessionId={sessionId}
@@ -911,60 +856,32 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   </div>
                 )}
                 {messages.map((message) => (
-                  <article
+                  <ChatMessageRow
                     key={message.id}
-                    className={
-                      message.role === "user" ? "group flex justify-end" : "group flex gap-3"
-                    }
-                  >
-                    {message.role === "user" ? (
-                      <p className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-4 py-3 text-[14px] leading-6 text-foreground sm:max-w-[78%]">
-                        {message.content}
-                      </p>
-                    ) : message.content ? (
-                      <>
-                        <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
-                          A
-                        </div>
-                        <div className="min-w-0 max-w-[94%] flex-1 py-1 text-[14px] leading-6">
-                          <div className="mb-1 text-xs font-medium text-muted-foreground">
-                            Agent
-                          </div>
-                          <Message
-                            content={message.content}
-                            onAnswer={(text) => void sendMessage(text)}
-                          />
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-3 py-1" aria-label="Thinking">
-                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-card text-[11px] font-semibold shadow-sm">
-                          A
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <span>Working</span>
-                          <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground" />
-                          <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:150ms]" />
-                          <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground [animation-delay:300ms]" />
-                        </div>
-                      </div>
-                    )}
-                  </article>
+                    role={message.role}
+                    content={message.content}
+                    workingLabel="Working"
+                    onAnswer={(text) => void sendMessage(text)}
+                  />
                 ))}
               </div>
               <div ref={bottomRef} />
-
-              <form
-                onSubmit={(e) => void send(e)}
-                className={`sticky bottom-0 mx-auto mt-3 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-[0_8px_30px_rgba(0,0,0,0.07)] transition-shadow focus-within:border-ring focus-within:shadow-[0_10px_36px_rgba(0,0,0,0.11)] ${!ready ? "opacity-60" : ""}`}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (ready && e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
-                }}
-              >
-                <div className="">
-                  {attachments.length > 0 && (
+            </div>
+            <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 pb-3 pt-3 backdrop-blur sm:px-8">
+              <ChatComposer
+                value={input}
+                onValueChange={setInput}
+                onSubmit={send}
+                onStop={stop}
+                busy={sending || activeAgent}
+                disabled={chatDisabled}
+                canSend={Boolean(input.trim()) || attachments.length > 0}
+                placeholder="Tell the agent what to do…"
+                className="sticky bottom-0 mt-3"
+                onPasteFiles={(files) => void addFiles(files)}
+                onDropFiles={(files) => void addFiles(files)}
+                attachments={
+                  attachments.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5 px-3 pt-2">
                       {attachments.map((a) => (
                         <span
@@ -974,101 +891,61 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                           {a.name} · {(a.content.length / 1024).toFixed(1)}KB
                           <button
                             type="button"
-                            onClick={() =>
-                              setAttachments((cur) => cur.filter((x) => x.id !== a.id))
-                            }
+                            onClick={() => removeAttachment(a.id)}
                             className="text-muted-foreground hover:text-foreground"
+                            aria-label={`Remove ${a.name}`}
                           >
                             ×
                           </button>
                         </span>
                       ))}
                     </div>
-                  )}
-                  {(activeAgent || agentQueued) && !sending && (
+                  ) : undefined
+                }
+                notice={
+                  (activeAgent || agentQueued) && !sending ? (
                     <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
                       {agentQueued
                         ? "The agent is preparing this task. It will be ready for a new message shortly."
                         : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
                     </p>
-                  )}
-                  <textarea
-                    value={input}
-                    disabled={chatDisabled}
-                    onChange={(e) => setInput(e.target.value)}
-                    onPaste={(e) => {
-                      if (e.clipboardData.files.length > 0) void addFiles(e.clipboardData.files);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (sending || activeAgent) stop();
-                        else if (!agentQueued) void send(e as unknown as FormEvent);
-                      }
-                    }}
-                    rows={1}
-                    ref={textareaRef}
-                    placeholder="Tell the agent what to do…"
-                    className="min-h-14 w-full resize-none rounded-2xl border-0 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
-                  />
-                  <div className="flex items-center justify-between gap-2 px-2 pb-2">
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        ref={fileRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        disabled={chatDisabled}
-                        onChange={(e) => {
-                          if (e.target.files) void addFiles(e.target.files);
-                          e.target.value = "";
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => fileRef.current?.click()}
-                        disabled={chatDisabled}
-                        className="px-2 text-[12px]"
-                      >
-                        <PaperclipIcon />
-                      </Button>
-                      <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
-                        {status?.plan && status.plan.length > 0
-                          ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
-                          : ""}
-                        {status?.usage?.totalTokens
-                          ? ` · ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
-                          : ""}
-                      </p>
-                    </div>
-                    {sending || activeAgent ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={stop}
-                        className="gap-1.5"
-                      >
-                        <IconPlayerStop className="size-4" /> Stop
-                      </Button>
-                    ) : (
-                      <Button
-                        type="submit"
-                        size="sm"
-                        variant="default"
-                        disabled={chatDisabled || (!input.trim() && attachments.length === 0)}
-                        className="gap-1.5 rounded-xl px-3"
-                        aria-label="Send message"
-                      >
-                        <IconArrowUp className="size-4" />
-                        <span className="hidden sm:inline">Send</span>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </form>
+                  ) : undefined
+                }
+                actions={
+                  <>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      disabled={chatDisabled}
+                      onChange={(e) => {
+                        if (e.target.files) void addFiles(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={chatDisabled}
+                      className="px-2 text-[12px]"
+                      aria-label="Attach files"
+                    >
+                      <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
+                    </Button>
+                    <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
+                      {status?.plan && status.plan.length > 0
+                        ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
+                        : ""}
+                      {status?.usage?.totalTokens
+                        ? `Context: ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
+                        : ""}
+                    </p>
+                  </>
+                }
+              />
             </div>
           </section>
 

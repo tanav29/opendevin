@@ -9,6 +9,11 @@ import { BOT_PROJECT_REPO } from "./config.js";
 
 export type SandboxToolset = ReturnType<typeof sandboxTools>;
 
+// Tool results prefixed with this sentinel become a download card in the chat
+// stream instead of a plain tool marker.
+export const SHARED_FILE_PREFIX = "__FILE__";
+export const SHARED_FILE_URL_TTL_SECONDS = 3600;
+
 // Attach sandbox tools when the workspace sandbox is reachable, otherwise
 // return a note so the agent answers from general knowledge.
 export async function connectSandboxTools(
@@ -175,6 +180,34 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         );
         const text = (out.stdout || "").slice(0, 12000);
         return text ? `matches:\n${text}` : "No matches.";
+      },
+    }),
+    share_file: tool({
+      description:
+        "Share a file from the workspace with the user as a download card in the chat; the card is rendered automatically, so never repeat the file link or name in your reply. Use it when the user asks for a file you created or an existing workspace file. Path is relative to the workspace root.",
+      inputSchema: z.object({
+        path: z.string().describe("Relative file path, e.g. 'report.pdf'"),
+      }),
+      execute: async ({ path }: { path: string }) => {
+        const rel = sanitizeRel(path);
+        if (rel === null || rel === "")
+          return "Invalid path: must be a workspace-relative file, without '..'.";
+        try {
+          const full = `${cwd}/${rel}`;
+          const info = await sandbox.files.getInfo(full);
+          if (info.type === "dir") return "Cannot share a directory; share a file instead.";
+          const url = await sandbox.downloadUrl(full, {
+            useSignatureExpiration: SHARED_FILE_URL_TTL_SECONDS,
+          });
+          return `${SHARED_FILE_PREFIX}${JSON.stringify({
+            name: rel.split("/").pop() || rel,
+            path: rel,
+            url,
+            size: info.size,
+          })}`;
+        } catch {
+          return `Could not share ${rel}: the file was not found in the workspace.`;
+        }
       },
     }),
     update_plan: tool({

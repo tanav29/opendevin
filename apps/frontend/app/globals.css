@@ -413,3 +413,7 @@
     background-clip: padding-box;
   }
 }
+
+.squircle {
+    corner-shape: squircle;
+}

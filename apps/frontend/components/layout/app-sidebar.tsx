@@ -11,6 +11,8 @@ import {
   IconSettings,
   IconSparkles,
 } from "@tabler/icons-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Robot02Icon } from "@hugeicons/core-free-icons";
 
 import {
   Sidebar,
@@ -32,7 +34,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { statusLabel } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import { CircleX, Code2, Loader, MessageCircle } from "lucide-react";
+import { CircleX, Code2, Loader } from "lucide-react";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -104,6 +106,7 @@ export function AppSidebar() {
   const runningCount = sessions.filter(
     (s) => s.status === "running" || s.status === "queued",
   ).length;
+  const runningSessions = sessions.filter((s) => s.status === "running" || s.status === "queued");
   const displayName =
     me?.github.login || me?.user.name || (auth.status === "signed-out" ? "Guest" : "…");
   const displaySub =
@@ -156,7 +159,7 @@ export function AppSidebar() {
                         tooltip="Bot"
                         render={<Link href="/bot" prefetch />}
                       >
-                        <MessageCircle />
+                        <HugeiconsIcon icon={Robot02Icon} size={18} strokeWidth={1.8} />
                         <span>Bot</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -258,6 +261,48 @@ export function AppSidebar() {
                               </SidebarMenuItem>
                             );
                           })
+                        )}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </CollapsibleContent>
+                </SidebarGroup>
+              </Collapsible>
+
+              <Collapsible defaultOpen className="group/collapsible">
+                <SidebarGroup>
+                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
+                    Running tasks
+                    <span className="ml-auto flex items-center gap-1.5">
+                      {runningCount > 0 && (
+                        <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                          <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+                          {runningCount}
+                        </span>
+                      )}
+                      <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
+                    </span>
+                  </SidebarGroupLabel>
+                  <CollapsibleContent>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {runningSessions.length === 0 ? (
+                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                            No running tasks.
+                          </p>
+                        ) : (
+                          runningSessions.map((s) => (
+                            <SidebarMenuItem key={s.id}>
+                              <SidebarMenuButton
+                                size="sm"
+                                isActive={pathname === `/s/${s.id}`}
+                                tooltip={s.title}
+                                render={<Link href={`/s/${s.id}`} prefetch />}
+                              >
+                                <Loader className="h-3 animate-spin text-muted-foreground" />
+                                <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          ))
                         )}
                       </SidebarMenu>
                     </SidebarGroupContent>
