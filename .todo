@@ -1,8 +1,4 @@
 
-[x] add a new running tasks group in sidebar
-[x] the bot top bar is not on top alway and ht input box i not on bottom always it moves with scroll and add auto scroll to bottom
-[x] migrate all icons to huge icons free react, and icon for bot will be Robot02Icon
-
 [future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
 [future] 15 integrations: linear/jira/figma/sentry, MCP servers, web-search/docs-fetch tool
 [future] add a coauthor to commits that is opendevin
