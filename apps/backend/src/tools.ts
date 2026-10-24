@@ -19,22 +19,36 @@ export const SHARED_FILE_URL_TTL_SECONDS = 3600;
 export async function connectSandboxTools(
   sandboxId: string,
   workspacePath: string,
-): Promise<{ tools: SandboxToolset | undefined; sandboxNote: string }> {
+): Promise<{
+  tools: SandboxToolset | undefined;
+  sandboxNote: string;
+  projectInstructions: string;
+}> {
   if (!sandboxId) {
     return {
       tools: undefined,
       sandboxNote:
         "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.",
+      projectInstructions: "",
     };
   }
   try {
     const sandbox = await Sandbox.connect(sandboxId);
-    return { tools: sandboxTools(sandbox, workspacePath || WORKSPACE_PATH), sandboxNote: "" };
+    const cwd = workspacePath || WORKSPACE_PATH;
+    let projectInstructions = "";
+    try {
+      const contents = await sandbox.files.read(`${cwd}/AGENTS.md`);
+      projectInstructions = typeof contents === "string" ? contents.slice(0, 20_000) : "";
+    } catch {
+      // Repositories without a root AGENTS.md use the default agent instructions.
+    }
+    return { tools: sandboxTools(sandbox, cwd), sandboxNote: "", projectInstructions };
   } catch {
     return {
       tools: undefined,
       sandboxNote:
         "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.",
+      projectInstructions: "",
     };
   }
 }
@@ -154,7 +168,14 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         const rel = sanitizeRel(path);
         if (rel === null || rel === "")
           return "Invalid path: must be a workspace-relative file, without '..'.";
-        const out = await runSandbox(sandbox, `rm -rf ${shellQuote(rel)}`, cwd);
+        // Do not recursively remove directory contents: only delete files or
+        // empty directories so a mistaken tool call cannot wipe a workspace tree.
+        const quoted = shellQuote(rel);
+        const out = await runSandbox(
+          sandbox,
+          `if [ -d ${quoted} ]; then rmdir -- ${quoted}; else rm -f -- ${quoted}; fi`,
+          cwd,
+        );
         return out.exitCode === 0
           ? `Deleted ${rel}`
           : `Delete failed: ${(out.stderr || out.stdout).slice(0, 500)}`;

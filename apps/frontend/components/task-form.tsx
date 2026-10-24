@@ -40,11 +40,10 @@ type Props = {
 };
 
 function matchProject(projects: TaskFormProject[], repo: GithubRepo) {
-  return (
-    projects.find(
-      (p) => p.repo === repo.htmlUrl || p.repo === repo.cloneUrl || p.repo.includes(repo.fullName),
-    ) ?? null
-  );
+  const normalize = (value: string) =>
+    value.trim().replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
+  const repoUrls = new Set([repo.htmlUrl, repo.cloneUrl].map(normalize));
+  return projects.find((project) => repoUrls.has(normalize(project.repo))) ?? null;
 }
 
 export default function TaskForm({
@@ -66,6 +65,7 @@ export default function TaskForm({
   const [issue, setIssue] = useState<GithubIssue | null>(null);
   const [creating, setCreating] = useState(false);
   const submittedRef = useRef(false);
+  const repoSelectionRef = useRef(0);
 
   const isLockedToProject = Boolean(initialProjectId);
   const activeProjectId = initialProjectId || resolvedProjectId;
@@ -91,10 +91,12 @@ export default function TaskForm({
   }, [repos, repoSearch]);
 
   async function handleRepoSelect(repo: GithubRepo) {
+    const selectionId = ++repoSelectionRef.current;
     setSelectedRepo(repo);
     setRepoSearch("");
     setBranch("");
     setIssue(null);
+    setResolving(false);
     const existing = matchProject(projects, repo);
     if (existing) {
       setResolvedProjectId(existing.id);
@@ -108,12 +110,15 @@ export default function TaskForm({
         method: "POST",
         body: JSON.stringify({ repo: repo.htmlUrl }),
       });
+      if (selectionId !== repoSelectionRef.current) return;
       setResolvedProjectId(created.id);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not create workspace");
+      if (selectionId === repoSelectionRef.current) {
+        toast.error(e instanceof Error ? e.message : "Could not create workspace");
+      }
     } finally {
-      setResolving(false);
+      if (selectionId === repoSelectionRef.current) setResolving(false);
     }
   }
 

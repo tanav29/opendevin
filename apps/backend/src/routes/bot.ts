@@ -117,6 +117,9 @@ export function registerBotRoutes(app: Express): void {
         const modelHistory = await loadToolLog(session.id);
         modelHistory.push({ role: "user", content: prompt });
         const tools = { ...connected.tools, ...botSessionTools(user.user.id) };
+        const instructions = connected.projectInstructions
+          ? `\n\nRepository instructions from AGENTS.md:\n${connected.projectInstructions}`
+          : "";
         const { result } = startAgentTurn(
           session.id,
           {
@@ -128,7 +131,7 @@ export function registerBotRoutes(app: Express): void {
             sandboxNote: "",
             modelHistory,
             tools,
-            systemPrompt: `${BOT_SYSTEM_PROMPT} The signed-in user is ${user.user.name} (${user.user.email}).`,
+            systemPrompt: `${BOT_SYSTEM_PROMPT} The signed-in user is ${user.user.name} (${user.user.email}).${instructions}`,
           },
           { controller, kind: "chat" },
         );

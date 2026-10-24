@@ -4,6 +4,7 @@
     /bot - should be like a human is mesage so show only text part and each bubbles,
     /s/[id] - should be a full agent that shows reasoning, tools everythings, but sollapases also at last and show only last text part and other collapse in one,also not bubble ui for this and agent can write long too but not too much, use markdown here fully
 
-[future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
-[future] 15 integrations: linear/jira/figma/sentry, MCP servers, web-search/docs-fetch tool
-[future] add a coauthor to commits that is opendevin
+[feature] Durable background tasks: resume after disconnect, request approvals, send completion notifications
+[feature partial] Create draft PRs after pushing; sync CI/reviews and agent follow-up remain
+[feature] Project memory and reusable skills; add MCP and web/docs tools
+[feature] Browser verification with screenshots and console/network errors

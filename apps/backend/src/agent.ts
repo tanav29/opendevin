@@ -49,8 +49,12 @@ export function buildSystemPrompt(
   repo: string | null,
   branch: string,
   sandboxNote: string,
+  projectInstructions = "",
 ): string {
   const repoLine = repo ? `Project repo: ${repo}. ` : "";
   const branchLine = branch ? `Active git branch: ${branch}. ` : "";
-  return `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${workspacePath}. ${repoLine}${branchLine}${sandboxNote} Workflow: for non-trivial tasks first call update_plan with 2-8 steps, then work the plan (search/read before edit, edit_file for patches, run_command to verify tests/build). Prefer inspecting real files with list_files/read_file/search before answering. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.`;
+  const instructions = projectInstructions
+    ? `\n\nRepository instructions from AGENTS.md:\n${projectInstructions}`
+    : "";
+  return `You are OpenDevin, a concise cloud coding agent working inside an E2B sandbox at ${workspacePath}. ${repoLine}${branchLine}${sandboxNote} Workflow: for non-trivial tasks first call update_plan with 2-8 steps, then work the plan (search/read before edit, edit_file for patches, run_command to verify tests/build). Prefer inspecting real files with list_files/read_file/search before answering. When requirements are ambiguous, call ask_user with 2-4 short options instead of guessing. Keep replies short.${instructions}`;
 }

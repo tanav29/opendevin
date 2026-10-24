@@ -89,7 +89,7 @@ export function registerChatRoutes(app: Express): void {
           },
         });
 
-        const { tools, sandboxNote } = await connectSandboxTools(
+        const { tools, sandboxNote, projectInstructions } = await connectSandboxTools(
           owner.sandboxId,
           owner.workspacePath || WORKSPACE_PATH,
         );
@@ -125,6 +125,7 @@ export function registerChatRoutes(app: Express): void {
             sandboxNote,
             modelHistory,
             tools,
+            projectInstructions,
           },
           { controller, kind: "chat" },
         );

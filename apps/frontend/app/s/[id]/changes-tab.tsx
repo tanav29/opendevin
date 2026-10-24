@@ -48,6 +48,11 @@ export default function ChangesTab({
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState("");
   const [commitDone, setCommitDone] = useState("");
+  const [committedBase, setCommittedBase] = useState("");
+  const [committedTitle, setCommittedTitle] = useState("");
+  const [pullRequest, setPullRequest] = useState<{ url: string; number?: number } | null>(null);
+  const [creatingPullRequest, setCreatingPullRequest] = useState(false);
+  const [pullRequestError, setPullRequestError] = useState("");
   const [reverting, setReverting] = useState("");
   const [preflight, setPreflight] = useState<{
     repo: string;
@@ -250,6 +255,10 @@ export default function ChangesTab({
       setCommitDone(
         `Pushed ${data.changedFileCount ?? preflight?.changedFileCount ?? 0} files to ${target}`,
       );
+      setCommittedBase(data.sourceBranch || preflight?.sourceBranch || "");
+      setCommittedTitle(message);
+      setPullRequest(null);
+      setPullRequestError("");
       setCommitOpen(false);
       setCommitMessage("");
       refresh();
@@ -265,6 +274,27 @@ export default function ChangesTab({
       }
     } finally {
       setCommitting(false);
+    }
+  }
+
+  async function createPullRequest() {
+    if (creatingPullRequest || !committedBase || !committedTitle) return;
+    setCreatingPullRequest(true);
+    setPullRequestError("");
+    try {
+      const result = await api<{ url: string; number?: number }>(
+        `/api/sessions/${sessionId}/pull-request`,
+        {
+          method: "POST",
+          body: JSON.stringify({ base: committedBase, title: committedTitle }),
+        },
+        60_000,
+      );
+      setPullRequest(result);
+    } catch (error) {
+      setPullRequestError(error instanceof Error ? error.message : "Could not create pull request.");
+    } finally {
+      setCreatingPullRequest(false);
     }
   }
 
@@ -314,6 +344,10 @@ export default function ChangesTab({
             onClick={() => {
               setCommitError("");
               setCommitDone("");
+              setCommittedBase("");
+              setCommittedTitle("");
+              setPullRequest(null);
+              setPullRequestError("");
               setCommitOpen(true);
             }}
             disabled={!diff || !available}
@@ -324,9 +358,25 @@ export default function ChangesTab({
         </div>
       </div>
       {commitDone && (
-        <p className="border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
-          {commitDone}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+          <span>{commitDone}</span>
+          {pullRequest ? (
+            <a href={pullRequest.url} target="_blank" rel="noreferrer" className="underline">
+              Draft PR{pullRequest.number ? ` #${pullRequest.number}` : ""}
+            </a>
+          ) : (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              disabled={!committedBase || creatingPullRequest}
+              onClick={() => void createPullRequest()}
+            >
+              {creatingPullRequest ? "Creating PR…" : "Create draft PR"}
+            </Button>
+          )}
+          {pullRequestError && <span className="text-danger">{pullRequestError}</span>}
+        </div>
       )}
       {recoveryPatch && (
         <div className="flex items-center justify-between gap-3 border-b border-warning/40 bg-warning-muted/30 px-3 py-2 text-xs">

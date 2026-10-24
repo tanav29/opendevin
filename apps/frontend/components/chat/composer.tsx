@@ -92,7 +92,13 @@ export default function ChatComposer({
       <div className="flex items-center justify-between gap-2 px-2 pb-2">
         <div className="flex items-center gap-1.5">{actions}</div>
         {busy ? (
-          <Button type="button" variant="outline" size="icon-sm" onClick={onStop}>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            onClick={onStop}
+            aria-label="Stop agent"
+          >
             <HugeiconsIcon icon={StopIcon} size={16} strokeWidth={1.8} />
           </Button>
         ) : (

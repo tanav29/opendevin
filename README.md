@@ -165,7 +165,7 @@ All application routes are under `/api` and require the Better Auth session unle
 | Projects | `/api/projects` and `/api/projects/:id` |
 | Sessions | `/api/sessions`, `/api/sessions/:id`, and related session actions |
 | Chat | `POST /api/sessions/:id/chat`, `POST /api/sessions/:id/stop` |
-| Workspace | Diff, files, revert, preview, dev server, and commit routes under `/api/sessions/:id/*` |
+| Workspace | Diff, files, revert, preview, dev server, commit, and draft pull-request routes under `/api/sessions/:id/*` |
 | Terminal | WebSocket `/api/sessions/:id/pty` |
 
 The chat endpoint streams plain text. The terminal WebSocket accepts JSON `input` and `resize` messages and returns terminal data, replay, readiness, and error messages.

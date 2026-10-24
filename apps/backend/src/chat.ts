@@ -265,6 +265,7 @@ export function startAgentTurn(
     modelHistory: ModelMessage[];
     tools: Awaited<ReturnType<typeof connectSandboxTools>>["tools"];
     systemPrompt?: string;
+    projectInstructions?: string;
   },
   reservation?: { controller: AbortController; kind: TurnKind },
 ) {
@@ -279,7 +280,13 @@ export function startAgentTurn(
     model: createOpenRouter({ apiKey: opts.apiKey })(opts.modelId),
     system:
       opts.systemPrompt ??
-      buildSystemPrompt(opts.workspacePath, opts.repo, opts.branch, opts.sandboxNote),
+      buildSystemPrompt(
+        opts.workspacePath,
+        opts.repo,
+        opts.branch,
+        opts.sandboxNote,
+        opts.projectInstructions,
+      ),
     messages: opts.modelHistory,
     ...(opts.tools ? { tools: opts.tools, stopWhen: AGENT_STOP } : {}),
     abortSignal: controller.signal,
@@ -358,7 +365,7 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
       return;
     }
 
-    const { tools, sandboxNote } = await connectSandboxTools(
+    const { tools, sandboxNote, projectInstructions } = await connectSandboxTools(
       session.sandboxId,
       session.workspacePath || WORKSPACE_PATH,
     );
@@ -402,6 +409,7 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
         sandboxNote,
         modelHistory,
         tools,
+        projectInstructions,
       },
       { controller, kind: "initial" },
     );
