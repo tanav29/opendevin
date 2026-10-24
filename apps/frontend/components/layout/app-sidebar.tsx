@@ -12,7 +12,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Chat, HugeiconsFreeIcons, Robot02Icon } from "@hugeicons/core-free-icons";
+import { Chat, Robot02Icon } from "@hugeicons/core-free-icons";
 
 import {
   Sidebar,
@@ -103,14 +103,9 @@ export function AppSidebar() {
     return counts;
   }, [sessions]);
 
-  const runningCount = sessions.filter(
-    (s) => s.status === "running" || s.status === "queued",
-  ).length;
   const runningSessions = sessions.filter((s) => s.status === "running" || s.status === "queued");
   const displayName =
     me?.github.login || me?.user.name || (auth.status === "signed-out" ? "Guest" : "…");
-  const displaySub =
-    me?.user.email || (auth.status === "signed-out" ? "Sign in to sync" : "Loading…");
 
   return (
     <>
@@ -130,7 +125,7 @@ export function AppSidebar() {
 
         <SidebarContent>
 
-        {auth.status === "signed-out" || auth.status === "unavailable" && (
+        {(auth.status === "signed-out" || auth.status === "unavailable") && (
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>

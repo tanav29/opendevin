@@ -3,7 +3,6 @@
 import { FormEvent, ReactNode, useEffect, useRef } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
-import { Button } from "@/components/ui/button";
 
 // Shared composer shell for Bot and session chats, so both keep the same input,
 // send/stop controls, drag-and-drop, and height behavior.

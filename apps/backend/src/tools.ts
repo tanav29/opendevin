@@ -6,6 +6,7 @@ import { WORKSPACE_PATH } from "./config.js";
 import { sanitizeRel, shellQuote } from "./sanitize.js";
 import { runSandbox } from "./sandbox.js";
 import { BOT_PROJECT_REPO } from "./config.js";
+import { webTools } from "./web-tools.js";
 
 export type SandboxToolset = ReturnType<typeof sandboxTools>;
 
@@ -56,6 +57,7 @@ export async function connectSandboxTools(
 export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
   const cwd = workspacePath || WORKSPACE_PATH;
   return {
+    ...webTools(),
     list_files: tool({
       description:
         "List files in the cloned repo workspace. Use path relative to workspace root, e.g. '.' or 'src'.",

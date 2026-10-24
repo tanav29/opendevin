@@ -3,7 +3,7 @@
 import { memo, useState } from "react";
 import Markdown from "react-markdown";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft01Icon, ArrowRight01Icon, Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 
 function ToolCallCard({

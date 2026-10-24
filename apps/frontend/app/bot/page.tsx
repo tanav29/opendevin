@@ -51,7 +51,7 @@ export default function BotPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [bot?.messages.length, sending]);
+  }, [bot?.messages.length, bot?.messages.at(-1)?.content, sending]);
 
   async function send(text = input) {
     const message = text.trim();
@@ -165,7 +165,6 @@ export default function BotPage() {
   }
 
   const sandboxStatus = bot?.sandboxStatus ?? "pending";
-  const failed = bot?.status === "failed" || sandboxStatus === "error";
   const chatDisabled = sending;
 
   return (
@@ -175,7 +174,6 @@ export default function BotPage() {
           <HugeiconsIcon icon={Robot02Icon} className="h-5" />
           <h1 className="text-md font-medium">Bot</h1>
         </div>
-        <ChatStatusBadges sandbox={sandboxStatus} agent={bot?.status ?? "idle"} />
         <div className="flex shrink-0 items-center gap-1">
           <Button
             type="button"
@@ -190,28 +188,32 @@ export default function BotPage() {
         </div>
       </header>
 
-{/*move it to toast {failed && bot?.lastError && (
-          <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-            <p className="text-sm font-medium">Bot couldn&apos;t finish that task.</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{bot.lastError}</p>
-          </div>
-        )}*/}
-
         <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
-          {bot?.messages.map((message) => (
+          {bot?.messages
+            .filter((message) => message.id !== "streaming" || message.content)
+            .map((message) => (
+              <ChatMessageRow
+                key={message.id}
+                role={message.role}
+                content={message.content}
+                presentation="bot"
+                workingLabel=""
+                onAnswer={(text) => void send(text)}
+              />
+            ))}
+          {sending && (
             <ChatMessageRow
-              key={message.id}
-              role={message.role}
-              content={message.content}
+              key="working"
+              role="assistant"
+              content=""
               presentation="bot"
-              workingLabel=""
-              onAnswer={(text) => void send(text)}
+              workingLabel="Bot is working"
             />
-          ))}
+          )}
         <div ref={bottomRef} />
       </section>
 
-      <div className="absolute bottom-0 left-0 right-0 shrink-0 max-w-5xl sm:mx-8 mx-4 pb-4">
+      <div className="absolute bottom-0 left-0 right-0 shrink-0 sm:mx-8 mx-4 pb-4">
         <ChatComposer
           value={input}
           onValueChange={setInput}

@@ -11,7 +11,6 @@ import {
   IconPlayerStop,
   IconRefresh,
   IconTrash,
-  IconTerminal,
   IconLayoutSidebarRight,
 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
@@ -19,7 +18,6 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { ApiErrorState, asApiError, isNotFoundError } from "@/components/api-error-state";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -50,7 +48,6 @@ const SessionPanel = dynamic(() => import("./session-panel"), {
 });
 import {
   API,
-  PROVISIONING_SANDBOX,
   formatDate,
   isWorking,
   type ChatMessage,
@@ -292,24 +289,10 @@ function ReconnectConflictDialog({
           </Button>
           {conflict?.patchAvailable && (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="hidden md:inline-flex"
-                onClick={onReview}
-                disabled={reconnecting}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={onReview}>
                 Review patch
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="md:hidden"
-                onClick={onDownload}
-                disabled={reconnecting}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={onDownload}>
                 Download patch
               </Button>
             </>
@@ -342,7 +325,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [reconnectConflict, setReconnectConflict] = useState<ReconnectConflict | null>(null);
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [degraded, setDegraded] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
@@ -368,7 +350,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         throw new Error(error);
       }
 
-      setDegraded(response.headers.get("x-sandbox-degraded") === "1");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       const id = crypto.randomUUID();
@@ -589,11 +570,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }
 
-  function retry() {
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    if (lastUser && !sending && !activeAgent) void sendMessage(lastUser.content);
-  }
-
   async function kill() {
     if (
       !sessionId ||
@@ -635,12 +611,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     void sendMessage(input);
   }
 
-  const provisioning = PROVISIONING_SANDBOX.has(provisioningPhase);
-  const workspaceUnavailable =
-    provisioningPhase === "error" ||
-    provisioningPhase === "unavailable" ||
-    (sandboxStatus === "ready" && status?.sandboxAvailable === false);
-  const agentFailed = agentStatus === "failed" || agentStatus === "interrupted";
   const ready = provisioningPhase === "ready" && (status?.sandboxAvailable ?? false);
   const chatDisabled = !ready || sending || agentBusy;
   const sessionNotFound = isNotFoundError(loadError);
@@ -707,7 +677,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               {detail?.branch && <p>repoName/{detail.branch}</p>}
             </div>
           </div>
-          <ChatStatusBadges sandbox={provisioningPhase} agent={agentStatus} result={verification} />
           <div className="flex shrink-0 items-center gap-1">
             <DevRunButton
               sessionId={sessionId}
@@ -760,7 +729,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </header>
 
-          <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
+          <section className="flex max-w-5xl h-full gap-4 sm:mx-8 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
               {messages.map((message, index) => {
                 const startedAt = messages
                   .slice(0, index)
@@ -801,7 +770,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               <div ref={bottomRef} />
           </section>
 
-            <div className="absolute bottom-0 left-0 right-0 shrink-0 max-w-5xl sm:mx-8 mx-4 pb-4">
+            <div className="absolute bottom-0 left-0 right-0 shrink-0 sm:mx-8 mx-4 pb-4">
               <ChatComposer
                 value={input}
                 onValueChange={setInput}
@@ -894,6 +863,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               defaultPort={status?.devPort}
             />
           )}
+          <ReconnectConflictDialog
+            conflict={reconnectConflict}
+            reconnecting={reconnecting}
+            onOpenChange={(open) => {
+              if (!open) setReconnectConflict(null);
+            }}
+            onReview={() => {
+              setReconnectConflict(null);
+              setPrefs({ ...prefs, open: true, tab: "changes" });
+            }}
+            onDownload={() => void downloadRecoveryPatch()}
+            onConfirm={() => void reconnect(true)}
+          />
       </main>
   );
 }
