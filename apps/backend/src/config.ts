@@ -1,6 +1,6 @@
 export const WORKSPACE_PATH = "/home/user/workspace";
 export const BOT_PROJECT_REPO = "main-bot";
-export const BOT_MODEL = "openai/gpt-4o-mini";
+export const BOT_MODEL = process.env.MODEL; // get from .env fucker
 export const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 
 export const TOOL_LOG_MAX_MESSAGES = 60;

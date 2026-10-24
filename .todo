@@ -1,8 +1,7 @@
 
-[x] bot chat has its own empty sandbox, reset/delete-history flow, concise text-only system prompt, and WhatsApp-style UI
-[x] give bot read-only tools to search sessions and report status/results
-[x] bot reuses the agent pipeline and existing sandbox tools
-[x] bot is in the top navbar as Bot with a MessageCircle icon
+[ ] consistent ui of bot and sessions chat (sandbox status, inputs, ...)
+[ ] More better messge typeing from bot like every text section has there own msg bubble, include a text on starting that on it or got it working, if bot have done resoning, make that in system rpompt and return only concise text like person chating
+[ ] add tool for bot to share a file on sandbox via link and show that in chat as a file icon and name and download button. by returning a presigned url here (https://docs.e2b.dev/filesystem/download#download-with-pre-signed-url)
 
 [future] 11 async-completion: webhooks/email/slack on done, shareable read-only session link
 [future] 15 integrations: linear/jira/figma/sentry, MCP servers, web-search/docs-fetch tool

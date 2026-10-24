@@ -6,7 +6,7 @@
     "build": "prisma generate && tsc",
     "db:generate": "prisma generate",
     "start": "node dist/index.js",
-    "db:migrate": "prisma migrate de4v",
+    "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.5.4",
-    "@prisma/client": "^6.19.3",
+    "@prisma/adapter-better-sqlite3": "7.10.1",
+    "@prisma/client": "^7.10.1",
     "ai": "^5.0.264",
     "better-auth": "^1.7.5",
     "cors": "^2.8.6",
@@ -33,7 +34,7 @@
     "@types/ws": "^8.18.1",
     "oxfmt": "^0.66.0",
     "oxlint": "^1.85.0",
-    "prisma": "^6.19.3",
+    "prisma": "^7.10.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
