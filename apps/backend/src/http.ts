@@ -1,6 +1,12 @@
+import { waitUntil } from "@vercel/functions";
 import type { NextFunction, Request, Response } from "express";
 import { auth } from "./auth/auth.js";
 import { prisma } from "./db/prisma.js";
+
+export function scheduleBackgroundTask(task: Promise<unknown>): void {
+  if (process.env.VERCEL) waitUntil(task);
+  else void task;
+}
 
 export class HttpError extends Error {
   status: number;

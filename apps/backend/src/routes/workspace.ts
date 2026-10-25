@@ -10,6 +10,7 @@ import {
   ownedSession,
   sandboxNotReadyReason,
   routeParam,
+  scheduleBackgroundTask,
 } from "../http.js";
 import {
   parseGitHubRepo,
@@ -52,12 +53,14 @@ export function registerWorkspaceRoutes(app: Express): void {
         const recoveryPatch = recoveryPending ? { diff: persisted, capturedAt: persistedAt } : null;
         if (diff) {
           if (!recoveryPending) {
-            void prisma.projectSession
-              .update({
-                where: { id: found.owner.id },
-                data: { lastDiff: diff, lastDiffAt: new Date() },
-              })
-              .catch(() => undefined);
+            scheduleBackgroundTask(
+              prisma.projectSession
+                .update({
+                  where: { id: found.owner.id },
+                  data: { lastDiff: diff, lastDiffAt: new Date() },
+                })
+                .catch(() => undefined),
+            );
           }
           return res.json({ diff, truncated, persisted: false, recoveryPatch });
         }
@@ -251,7 +254,7 @@ export function registerWorkspaceRoutes(app: Express): void {
         if (checkout.exitCode === 0 || clean.exitCode === 0) {
           // Refresh rather than clear: other changed files may still exist, and an
           // empty lastDiff is also the reconnect policy's clean-workspace signal.
-          void snapshotWorkspaceDiff(found.owner.id).catch(() => undefined);
+          scheduleBackgroundTask(snapshotWorkspaceDiff(found.owner.id).catch(() => undefined));
           return res.json({ ok: true, path: rel });
         }
         return res.status(409).json({

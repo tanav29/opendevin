@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { Express } from "express";
 import { Server as SocketIOServer } from "socket.io";
-import { createApp } from "./app.js";
+import { createApp } from "./application.js";
 import { auth } from "./auth/auth.js";
 import { FRONTEND_ORIGINS, WORKSPACE_PATH } from "./config.js";
 import { authHeaders } from "./http.js";

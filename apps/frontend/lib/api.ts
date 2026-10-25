@@ -1,7 +1,10 @@
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, "");
+
 export const API =
-  process.env.NODE_ENV === "development"
+  configuredApiUrl ||
+  (process.env.NODE_ENV === "development"
     ? "http://localhost:3001"
-    : "https://od-backend.vercel.app";
+    : "https://od-backend.vercel.app");
 
 export class ApiError extends Error {
   readonly status: number;

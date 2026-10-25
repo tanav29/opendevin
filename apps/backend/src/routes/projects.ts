@@ -5,7 +5,13 @@ import { prisma } from "../db/prisma.js";
 import { runInitialTurn } from "../chat.js";
 import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "../config.js";
 import { githubHeaders, githubTokenForUser } from "../github.js";
-import { asyncRoute, currentUser, ownedProject, routeParam } from "../http.js";
+import {
+  asyncRoute,
+  currentUser,
+  ownedProject,
+  routeParam,
+  scheduleBackgroundTask,
+} from "../http.js";
 import { dropPty } from "../pty.js";
 import { isRepoUrl, parseGitHubRepo, sanitizeBranch } from "../sanitize.js";
 import { killSandbox, provisionSandbox } from "../sandbox.js";
@@ -300,9 +306,11 @@ export function registerProjectRoutes(app: Express): void {
         include: { messages: true },
       });
 
-      void provisionSandbox(created.id)
-        .then((ready) => (ready ? runInitialTurn(created.id) : undefined))
-        .catch((error) => console.error("Sandbox provisioning failed", error));
+      scheduleBackgroundTask(
+        provisionSandbox(created.id)
+          .then((ready) => (ready ? runInitialTurn(created.id) : undefined))
+          .catch((error) => console.error("Sandbox provisioning failed", error)),
+      );
       return res.status(201).json(created);
     }),
   );

@@ -1,7 +1,13 @@
 import type { Express } from "express";
 import { prisma } from "../db/prisma.js";
 import { BOT_PROJECT_REPO, resolveChatModel } from "../config.js";
-import { asyncRoute, currentUser, ownedSession, routeParam } from "../http.js";
+import {
+  asyncRoute,
+  currentUser,
+  ownedSession,
+  routeParam,
+  scheduleBackgroundTask,
+} from "../http.js";
 import { dropPty } from "../pty.js";
 import {
   cancelSandboxProvisioning,
@@ -184,18 +190,20 @@ export function registerSessionRoutes(app: Express): void {
         where: { id: found.owner.id },
         data: { sandboxId: "", sandboxStatus: "creating", status: "queued", lastError: null },
       });
-      void provisionSandbox(found.owner.id)
-        .then(async (ready) => {
-          if (!ready) return;
-          await prisma.projectSession.update({
-            where: { id: found.owner.id },
-            data: {
-              status: "idle",
-              lastError: FRESH_CLONE_WARNING,
-            },
-          });
-        })
-        .catch((error) => console.error("Sandbox reconnect failed", error));
+      scheduleBackgroundTask(
+        provisionSandbox(found.owner.id)
+          .then(async (ready) => {
+            if (!ready) return;
+            await prisma.projectSession.update({
+              where: { id: found.owner.id },
+              data: {
+                status: "idle",
+                lastError: FRESH_CLONE_WARNING,
+              },
+            });
+          })
+          .catch((error) => console.error("Sandbox reconnect failed", error)),
+      );
       return res.status(202).json({
         sandboxStatus: "creating",
         replaced: true,
