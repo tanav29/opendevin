@@ -1,3 +1,5 @@
+overrides:
+  e2b>chalk: 4.1.2
 allowBuilds:
   "@prisma/client": false
   "@prisma/engines": false
