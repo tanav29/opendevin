@@ -1,9 +1,9 @@
-import type { Express, Response } from "express";
+import type { Express } from "express";
 import { prisma } from "../db/prisma.js";
 import {
   activeTurns,
   claimAgentTurn,
-  drainAgentStream,
+  pipeAgentUIMessageStream,
   persistFinishedTurn,
   releaseAgentTurn,
   startAgentTurn,
@@ -110,10 +110,6 @@ export function registerChatRoutes(app: Express): void {
         const modelHistory = await loadToolLog(owner.id);
         modelHistory.push({ role: "user", content });
 
-        let clientGone = false;
-        req.on("close", () => {
-          if (!res.writableEnded) clientGone = true;
-        });
         const { result } = startAgentTurn(
           owner.id,
           {
@@ -129,35 +125,46 @@ export function registerChatRoutes(app: Express): void {
           },
           { controller, kind: "chat" },
         );
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
-        res.setHeader("Transfer-Encoding", "chunked");
         res.setHeader("x-model", modelId);
         if (!tools) res.setHeader("x-sandbox-degraded", "1");
-
-        let streamed = "";
         let latestPlan: string | null = null;
-        const write = (text: string) => {
-          streamed += text;
-          if (!clientGone) res.write(text);
-        };
-        const { messages, text, visibleText, usage } = await drainAgentStream(
+        await pipeAgentUIMessageStream(
           result,
-          write,
+          res,
+          async ({ messages, text, visibleText, usage }) => {
+            if (!visibleText.trim())
+              throw new Error("The agent finished without an assistant response. Retry the task.");
+            await persistFinishedTurn(owner.id, {
+              replyText: visibleText.trim() ? visibleText : text,
+              modelHistory,
+              toolMessages: messages,
+              planJson: latestPlan,
+              usage,
+            });
+          },
           (planJson) => {
             latestPlan = planJson;
           },
+          true,
+          async (error) => {
+            const stopped = controller.signal.aborted;
+            const message = stopped
+              ? "The agent run was stopped."
+              : error instanceof Error
+                ? error.message.slice(0, 500)
+                : "The agent run failed. Retry the task.";
+            await snapshotWorkspaceDiff(owner.id).catch(() => undefined);
+            await prisma.projectSession
+              .update({
+                where: { id: owner.id },
+                data: {
+                  status: stopped ? "stopped" : "failed",
+                  lastError: withContinuityWarning(owner.lastError, message),
+                },
+              })
+              .catch(() => undefined);
+          },
         );
-        if (!visibleText.trim()) {
-          throw new Error("The agent finished without an assistant response. Retry the task.");
-        }
-        await persistFinishedTurn(owner.id, {
-          replyText: streamed.trim() ? streamed : text,
-          modelHistory,
-          toolMessages: messages,
-          planJson: latestPlan,
-          usage,
-        });
-        if (!res.writableEnded) res.end();
         return;
       } catch (error) {
         const aborted =
@@ -181,13 +188,8 @@ export function registerChatRoutes(app: Express): void {
         if (!res.headersSent) {
           return res.status(aborted ? 409 : 500).json({ error: message });
         }
-        const msg = aborted
-          ? "Agent stopped."
-          : error instanceof Error && (error as { statusCode?: number }).statusCode === 402
-            ? "Agent unavailable: insufficient credits. Add credits at https://openrouter.ai/settings/credits or check OPENROUTER_API_KEY."
-            : "Agent run failed — please retry.";
-        streamFailureTail(res, msg);
-        return res.end();
+        if (!res.writableEnded) res.end();
+        return;
       } finally {
         releaseAgentTurn(owner.id, controller);
       }
@@ -214,15 +216,4 @@ export function registerChatRoutes(app: Express): void {
       return res.json({ ok: true, stopped });
     }),
   );
-}
-
-function streamFailureTail(res: Response, msg: string): void {
-  try {
-    if (!res.writableEnded)
-      res.write(
-        `\n\n<details data-tool="error"><summary>⚠️ Agent run failed</summary>\n\n${msg}\n\n</details>\n`,
-      );
-  } catch {
-    // Client already gone — nothing to stream.
-  }
 }

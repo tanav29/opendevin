@@ -2,10 +2,12 @@
   "name": "@opendevin/backend",
   "type": "module",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
     "db:generate": "prisma generate",
     "start": "node dist/index.js",
+    "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "fmt": "oxfmt",
@@ -16,7 +18,7 @@
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.5.4",
-    "@prisma/adapter-better-sqlite3": "7.10.1",
+    "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "ai": "^5.0.264",
     "better-auth": "^1.7.5",
@@ -24,6 +26,7 @@
     "dotenv": "^17.4.2",
     "e2b": "^2.51.0",
     "express": "^5.2.1",
+    "pg": "^8.23.1",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   },

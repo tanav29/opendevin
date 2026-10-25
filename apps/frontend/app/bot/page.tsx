@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { Trash2 } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Attachment01Icon, Robot02Icon } from "@hugeicons/core-free-icons";
@@ -10,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import ChatComposer from "@/components/chat/composer";
 import ChatMessageRow from "@/components/chat/message-row";
-import ChatStatusBadges from "@/components/chat/status-badges";
 import {
   MAX_MESSAGE_CHARS,
   serializeAttachments,
@@ -32,10 +33,33 @@ export default function BotPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
-  const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const confirm = useConfirm();
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: `${API}/api/bot/chat`,
+        credentials: "include",
+        prepareSendMessagesRequest: ({ messages }) => ({
+          body: {
+            message:
+              messages
+                .at(-1)
+                ?.parts.filter((part) => part.type === "text")
+                .map((part) => part.text)
+                .join("") ?? "",
+          },
+        }),
+      }),
+    [],
+  );
+  const {
+    messages: liveMessages,
+    sendMessage,
+    stop: stopChat,
+    setMessages,
+  } = useChat({ transport });
 
   async function refresh() {
     try {
@@ -51,7 +75,13 @@ export default function BotPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [bot?.messages.length, bot?.messages.at(-1)?.content, sending]);
+  }, [
+    bot?.messages.length,
+    bot?.messages.at(-1)?.content,
+    liveMessages.length,
+    liveMessages.at(-1)?.parts.filter((part) => part.type === "text").map((part) => part.text).join(""),
+    sending,
+  ]);
 
   async function send(text = input) {
     const message = text.trim();
@@ -65,84 +95,23 @@ export default function BotPage() {
     setInput("");
     resetAttachments();
     setSending(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setBot((current) =>
-      current
-        ? {
-            ...current,
-            status: "running",
-            lastError: null,
-            messages: [
-              ...current.messages,
-              { id: `local-${Date.now()}`, role: "user", content: full },
-              { id: "streaming", role: "assistant", content: "" },
-            ],
-          }
-        : current,
-    );
     try {
-      const response = await fetch(`${API}/api/bot/chat`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: full }),
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new ApiError(response.status, body.error || "Bot could not respond.");
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        setBot((current) =>
-          current
-            ? {
-                ...current,
-                messages: current.messages.map((item) =>
-                  item.id === "streaming" ? { ...item, content: item.content + chunk } : item,
-                ),
-              }
-            : current,
-        );
-      }
-      const tail = decoder.decode();
-      if (tail) {
-        setBot((current) =>
-          current
-            ? {
-                ...current,
-                messages: current.messages.map((item) =>
-                  item.id === "streaming" ? { ...item, content: item.content + tail } : item,
-                ),
-              }
-            : current,
-        );
-      }
+      await sendMessage({ text: full });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         toast.info("Bot stopped.");
       } else {
         toast.error(error instanceof ApiError ? error.message : "Could not reach Bot.");
-        setBot((current) =>
-          current
-            ? { ...current, messages: current.messages.filter((item) => item.id !== "streaming") }
-            : current,
-        );
       }
     } finally {
-      abortRef.current = null;
       setSending(false);
       await refresh();
+      setMessages([]);
     }
   }
 
   async function stop() {
-    abortRef.current?.abort();
+    stopChat();
     await api("/api/bot/stop", { method: "POST" }).catch(() => undefined);
   }
 
@@ -164,7 +133,6 @@ export default function BotPage() {
     }
   }
 
-  const sandboxStatus = bot?.sandboxStatus ?? "pending";
   const chatDisabled = sending;
 
   return (
@@ -188,28 +156,39 @@ export default function BotPage() {
         </div>
       </header>
 
-        <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
-          {bot?.messages
-            .filter((message) => message.id !== "streaming" || message.content)
-            .map((message) => (
-              <ChatMessageRow
-                key={message.id}
-                role={message.role}
-                content={message.content}
-                presentation="bot"
-                workingLabel=""
-                onAnswer={(text) => void send(text)}
-              />
-            ))}
-          {sending && (
-            <ChatMessageRow
-              key="working"
-              role="assistant"
-              content=""
-              presentation="bot"
-              workingLabel="Bot is working"
-            />
-          )}
+      <section className="flex max-w-5xl h-full gap-4 sm:mx-8 mx-4 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
+        {bot?.messages.map((message) => (
+          <ChatMessageRow
+            key={message.id}
+            role={message.role}
+            content={message.content}
+            presentation="bot"
+            workingLabel=""
+            onAnswer={(text) => void send(text)}
+          />
+        ))}
+        {liveMessages.map((message) => (
+          <ChatMessageRow
+            key={message.id}
+            role={message.role === "user" ? "user" : "assistant"}
+            content={message.parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("")}
+            presentation="bot"
+            workingLabel=""
+            onAnswer={(text) => void send(text)}
+          />
+        ))}
+        {sending && (
+          <ChatMessageRow
+            key="working"
+            role="assistant"
+            content=""
+            presentation="bot"
+            workingLabel="Bot is working"
+          />
+        )}
         <div ref={bottomRef} />
       </section>
 

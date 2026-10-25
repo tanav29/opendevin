@@ -28,7 +28,7 @@ export function resolveChatModel(): { modelId: string; apiKey: string | undefine
 }
 
 export function resolveBotModel(): { modelId: string; apiKey: string | undefined } {
-  const raw = process.env.BOT_MODEL?.trim() || BOT_MODEL;
+  const raw = process.env.BOT_MODEL?.trim() || BOT_MODEL?.trim() || "openai/gpt-4o-mini";
   const modelId = raw.includes("/") ? raw : `openai/${raw}`;
   return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }

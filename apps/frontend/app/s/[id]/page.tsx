@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
-import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import dynamic from "next/dynamic";
 import {
   IconArrowLeft,
@@ -32,7 +32,6 @@ import { usePanelPrefs } from "./panel-prefs";
 import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
 import ChatComposer from "@/components/chat/composer";
-import ChatStatusBadges from "@/components/chat/status-badges";
 import {
   MAX_MESSAGE_CHARS,
   serializeAttachments,
@@ -326,64 +325,30 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
-  const sessionIdRef = useRef(sessionId);
-  sessionIdRef.current = sessionId;
-  const chatTransport = useRef<ChatTransport<UIMessage>>({
-    async sendMessages({ messages, abortSignal }) {
-      const lastMessage = messages.at(-1);
-      const message = lastMessage?.parts
-        .filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join("");
-      const response = await fetch(`${API}/api/sessions/${sessionIdRef.current}/chat`, {
-        method: "POST",
+  const chatTransport = useMemo(
+    () =>
+      new DefaultChatTransport<UIMessage>({
+        api: `${API}/api/sessions/${sessionId}/chat`,
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-        signal: abortSignal,
-      });
-      if (!response.ok || !response.body) {
-        let error = "The agent couldn't respond. Please try again.";
-        try {
-          error = ((await response.json()) as { error?: string }).error || error;
-        } catch {}
-        throw new Error(error);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const id = crypto.randomUUID();
-      let started = false;
-      return new ReadableStream<UIMessageChunk>({
-        async pull(controller) {
-          if (!started) {
-            controller.enqueue({ type: "text-start", id });
-            started = true;
-          }
-          const { done, value } = await reader.read();
-          const delta = decoder.decode(value, { stream: !done });
-          if (delta) controller.enqueue({ type: "text-delta", id, delta });
-          if (done) {
-            controller.enqueue({ type: "text-end", id });
-            controller.close();
-            reader.releaseLock();
-          }
-        },
-        cancel() {
-          void reader.cancel();
-        },
-      });
-    },
-    async reconnectToStream() {
-      return null;
-    },
-  });
+        prepareSendMessagesRequest: ({ messages: outgoing }) => ({
+          body: {
+            message:
+              outgoing
+                .at(-1)
+                ?.parts.filter((part) => part.type === "text")
+                .map((part) => part.text)
+                .join("") ?? "",
+          },
+        }),
+      }),
+    [sessionId],
+  );
   const {
     messages: liveMessages,
     sendMessage: streamMessage,
     stop: stopStreaming,
     setMessages: setLiveMessages,
-  } = useChat({ id: sessionId, transport: chatTransport.current });
+  } = useChat({ id: sessionId, transport: chatTransport });
   const latestLiveText = liveMessages
     .at(-1)
     ?.parts.filter((part) => part.type === "text")
@@ -445,7 +410,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       ? "unavailable"
       : sandboxStatus);
   const agentStatus = lifecycle?.agent ?? status?.status ?? detail?.status ?? "idle";
-  const verification = lifecycle?.verification ?? "pending";
   const activeAgent = agentStatus === "running" || lifecycle?.activeTurn === true;
   const agentQueued = agentStatus === "queued";
   const agentBusy = activeAgent || agentQueued;
@@ -757,7 +721,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 {liveMessages.map((message) => (
                   <ChatMessageRow
                     key={message.id}
-                    role={message.role}
+                    role={message.role === "user" ? "user" : "assistant"}
                     content={message.parts
                       .filter((part) => part.type === "text")
                       .map((part) => part.text)

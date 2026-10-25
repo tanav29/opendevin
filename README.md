@@ -24,7 +24,7 @@ This is a pnpm workspace managed with Turborepo:
 ```text
 apps/frontend   Next.js 16 + React 19 application     http://localhost:3000
 apps/backend    Express 5 API + WebSocket server      http://localhost:3001
-                Better Auth + Prisma + SQLite
+                Better Auth + Prisma + PostgreSQL
                 OpenRouter AI SDK + E2B sandboxes
 docs/           Design and implementation notes
 ```
@@ -40,7 +40,7 @@ Important backend modules:
 - `apps/backend/src/chat.ts` and `apps/backend/src/agent.ts` — agent turns, streaming, tools, and persistence
 - `apps/backend/src/sandbox.ts` — E2B creation, repository cloning, commands, and port probing
 - `apps/backend/src/pty.ts` — terminal PTY bridge
-- `apps/backend/prisma/schema.prisma` — SQLite data model
+- `apps/backend/prisma/schema.prisma` — PostgreSQL data model
 
 Important frontend directories:
 
@@ -68,7 +68,7 @@ cp apps/backend/.env.example apps/backend/.env
 Set these values in `apps/backend/.env`:
 
 ```dotenv
-DATABASE_URL="file:./dev.db"
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:3001"
 FRONTEND_URL="http://localhost:3000"
@@ -109,13 +109,13 @@ From the repository root:
 ```bash
 corepack enable
 pnpm install
-pnpm --filter @opendevin/backend exec prisma db push
+pnpm --filter @opendevin/backend db:push
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Check the backend at [http://localhost:3001/api/health](http://localhost:3001/api/health); it should return `{ "ok": true }`.
 
-The database command creates or updates the local SQLite database at `apps/backend/prisma/dev.db` when `DATABASE_URL` is `file:./dev.db`. Prisma Client is generated automatically by the backend build, or explicitly with:
+The database command creates or updates the PostgreSQL database specified by `DATABASE_URL`. Prisma Client is generated automatically by the backend build, or explicitly with:
 
 ```bash
 pnpm --filter @opendevin/backend db:generate
@@ -134,7 +134,7 @@ pnpm --filter @opendevin/frontend dev        # Run only the frontend
 pnpm --filter @opendevin/backend dev         # Run only the backend
 pnpm --filter @opendevin/backend build       # Generate Prisma Client and compile API
 pnpm --filter @opendevin/backend start       # Run the compiled backend
-pnpm --filter @opendevin/backend exec prisma db push # Apply the Prisma schema to SQLite
+pnpm --filter @opendevin/backend db:push          # Apply the Prisma schema to PostgreSQL
 pnpm --filter @opendevin/backend db:migrate  # Create/apply a development migration
 pnpm --filter @opendevin/backend db:reset    # Reset the development database
 pnpm --filter @opendevin/backend exec prisma studio
@@ -172,17 +172,17 @@ The chat endpoint streams plain text. The terminal WebSocket accepts JSON `input
 
 ## Data, sandboxes, and security
 
-- SQLite stores users, Better Auth accounts and sessions, projects, project sessions, and chat messages.
+- PostgreSQL stores users, Better Auth accounts and sessions, projects, project sessions, and chat messages.
 - Each API operation checks that the authenticated user owns the project or session being accessed.
 - GitHub access tokens are kept server-side and used for private clones and GitHub pushes. Never log, commit, or expose them to the frontend.
 - E2B sandboxes are temporary cloud workspaces with a one-hour timeout. They can expire or become unavailable; use Reconnect sandbox to provision a replacement.
 - Project environment variables are passed into setup and development commands inside the sandbox. Do not put secrets in repository files or prompts.
-- Never commit `.env` files, API keys, OAuth secrets, tokens, or the local SQLite database.
+- Never commit `.env` files, API keys, OAuth secrets, or tokens.
 
 ## Development notes
 
 - The current backend is Express, not Hono.
-- The current persistence layer is Prisma with SQLite, not Drizzle or Convex.
+- The current persistence layer is Prisma with PostgreSQL, not Drizzle or Convex.
 - Frontend application code belongs in `apps/frontend`; avoid editing reusable files in `apps/frontend/components/ui/`.
 - Keep changes focused and run the relevant build, lint, or formatting command before opening a pull request.
 

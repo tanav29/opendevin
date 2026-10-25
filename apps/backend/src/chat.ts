@@ -1,5 +1,11 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { streamText, type ModelMessage } from "ai";
+import {
+  pipeUIMessageStreamToResponse,
+  createUIMessageStream,
+  streamText,
+  type ModelMessage,
+} from "ai";
+import type { Response } from "express";
 import { prisma } from "./db/prisma.js";
 import { AGENT_STOP, buildSystemPrompt, loadToolLog, saveToolLog, trimToolLog } from "./agent.js";
 import { resolveChatModel, WORKSPACE_PATH } from "./config.js";
@@ -26,6 +32,37 @@ export function claimAgentTurn(sessionId: string, kind: TurnKind): AbortControll
 }
 
 export type AgentUsage = { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+
+export async function pipeAgentUIMessageStream(
+  result: Parameters<typeof drainAgentStream>[0],
+  res: Response,
+  onFinish: (turn: Awaited<ReturnType<typeof drainAgentStream>>) => Promise<void>,
+  onPlan?: (tasksJson: string) => void,
+  includeToolMarkers = true,
+  onError?: (error: unknown) => Promise<void>,
+): Promise<void> {
+  const stream = createUIMessageStream({
+    execute: async ({ writer }) => {
+      try {
+        const id = crypto.randomUUID();
+        writer.write({ type: "text-start", id });
+        const turn = await drainAgentStream(
+          result,
+          (delta) => writer.write({ type: "text-delta", id, delta }),
+          onPlan,
+          includeToolMarkers,
+        );
+        await onFinish(turn);
+        writer.write({ type: "text-end", id });
+      } catch (error) {
+        await onError?.(error);
+        throw error;
+      }
+    },
+    onError: (error) => (error instanceof Error ? error.message : "The agent run failed."),
+  });
+  await pipeUIMessageStreamToResponse({ response: res, stream });
+}
 
 // --- Stream markers --------------------------------------------------------
 // The chat endpoint streams compact HTML markers for tool/question/error

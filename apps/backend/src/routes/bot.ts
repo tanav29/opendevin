@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { prisma } from "../db/prisma.js";
 import {
   claimAgentTurn,
-  drainAgentStream,
+  pipeAgentUIMessageStream,
   persistFinishedTurn,
   releaseAgentTurn,
   startAgentTurn,
@@ -135,31 +135,33 @@ export function registerBotRoutes(app: Express): void {
           },
           { controller, kind: "chat" },
         );
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
-        res.setHeader("Transfer-Encoding", "chunked");
-        let clientGone = false;
-        req.on("close", () => {
-          if (!res.writableEnded) clientGone = true;
-        });
-        let streamed = "";
-        const { messages, text, visibleText, usage } = await drainAgentStream(
+        await pipeAgentUIMessageStream(
           result,
-          (chunk) => {
-            streamed += chunk;
-            if (!clientGone) res.write(chunk);
+          res,
+          async ({ messages, text, visibleText, usage }) => {
+            if (!visibleText.trim()) throw new Error("Bot finished without a response. Retry.");
+            await persistFinishedTurn(session.id, {
+              replyText: visibleText.trim() ? visibleText : text,
+              modelHistory,
+              toolMessages: messages,
+              planJson: null,
+              usage,
+            });
           },
           undefined,
           false,
+          async (error) => {
+            await prisma.projectSession
+              .update({
+                where: { id: session.id },
+                data: {
+                  status: controller.signal.aborted ? "stopped" : "failed",
+                  lastError: error instanceof Error ? error.message : "Bot failed.",
+                },
+              })
+              .catch(() => undefined);
+          },
         );
-        if (!visibleText.trim()) throw new Error("Bot finished without a response. Retry.");
-        await persistFinishedTurn(session.id, {
-          replyText: streamed || text,
-          modelHistory,
-          toolMessages: messages,
-          planJson: null,
-          usage,
-        });
-        if (!res.writableEnded) res.end();
       } catch (error) {
         const stopped = controller.signal.aborted;
         await prisma.projectSession
