@@ -1,4 +1,7 @@
-export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+export const API =
+  process.env.NODE_ENV === "development"
+    ? "http://localhost:3001"
+    : "https://od-backend.vercel.app";
 
 export class ApiError extends Error {
   readonly status: number;

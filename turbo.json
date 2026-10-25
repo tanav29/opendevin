@@ -12,15 +12,13 @@
         "DATABASE_URL",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
-        "FRONTEND_URL",
         "PORT",
         "MODEL",
         "OPENROUTER_API_KEY",
         "E2B_API_KEY",
         "EXA_API_KEY",
         "GITHUB_CLIENT_ID",
-        "GITHUB_CLIENT_SECRET",
-        "NEXT_PUBLIC_API_URL"
+        "GITHUB_CLIENT_SECRET"
       ]
     },
     "lint": {

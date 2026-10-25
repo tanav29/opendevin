@@ -33,11 +33,13 @@ export function resolveBotModel(): { modelId: string; apiKey: string | undefined
   return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }
 
+export const FRONTEND_ORIGINS = [
+  "http://localhost:3000",
+  "https://opendevin.vercel.app",
+];
+
 export const config = {
   get port() {
     return Number(process.env.PORT || 3001);
-  },
-  get frontendUrl() {
-    return process.env.FRONTEND_URL || "http://localhost:3000";
   },
 } as const;

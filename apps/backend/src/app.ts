@@ -3,14 +3,14 @@ import cors from "cors";
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth/auth.js";
-import { LIMITS, config } from "./config.js";
+import { FRONTEND_ORIGINS, LIMITS } from "./config.js";
 import { errorMiddleware } from "./http.js";
 import { registerRoutes } from "./routes/index.js";
 
 export function createApp(): express.Express {
   const app = express();
 
-  app.use(cors({ origin: config.frontendUrl, credentials: true }));
+  app.use(cors({ origin: FRONTEND_ORIGINS, credentials: true }));
   app.all("/api/auth/*splat", toNodeHandler(auth));
   app.use(express.json({ limit: LIMITS.routerJsonLimit }));
 

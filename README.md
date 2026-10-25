@@ -71,7 +71,6 @@ Set these values in `apps/backend/.env`:
 DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:3001"
-FRONTEND_URL="http://localhost:3000"
 PORT="3001"
 
 GITHUB_CLIENT_ID="your-github-client-id"
@@ -84,11 +83,7 @@ E2B_API_KEY="your-e2b-api-key"
 
 `MODEL` may be a full OpenRouter model ID such as `anthropic/claude-sonnet-4`; a model without a provider prefix is automatically treated as an OpenAI model. The backend currently reads `OPENROUTER_API_KEY` and does not use a separate `OPENAI_API_KEY`.
 
-The frontend defaults to `http://localhost:3001`. To use another backend URL, create `apps/frontend/.env.local`:
-
-```dotenv
-NEXT_PUBLIC_API_URL="http://localhost:3001"
-```
+The frontend uses `http://localhost:3001` in development and `https://od-backend.vercel.app` in production. The backend allows the frontend origins `http://localhost:3000` and `https://opendevin.vercel.app`.
 
 Do not commit either environment file.
 

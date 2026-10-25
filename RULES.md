@@ -30,10 +30,10 @@ Explicitly rejected: Hono, Drizzle, Convex. Old `AGENTS.md` text mentioning them
 ## 3. Architecture / ports
 
 - `GET /` -> `{name:"OpenDevin API", ok:true}`, `GET /api/health` -> `{ok:true}`.
-- CORS: `FRONTEND_URL || http://localhost:3000`, `credentials:true`.
+- CORS and Better Auth trust `http://localhost:3000` and `https://opendevin.vercel.app`, with `credentials:true`.
 - Auth: `app.all("/api/auth/*splat", toNodeHandler(auth))`, Better Auth GitHub OAuth. Callback `http://localhost:3001/api/auth/callback/github`.
 - Ownership check on every session route: `ownedSession()` = session user owns `project.userId`. 401 if no session, 404 if not owned.
-- Frontend talks to backend via `NEXT_PUBLIC_API_URL` or same-origin proxy, always with credentials.
+- Frontend talks to `http://localhost:3001` in development and `https://od-backend.vercel.app` in production, always with credentials.
 
 ## 4. V1 features (must work)
 
@@ -81,7 +81,7 @@ pnpm --filter @opendevin/backend db:push
 pnpm dev  # :3000 frontend, :3001 backend
 ```
 
-Env: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `E2B_API_KEY`, `FRONTEND_URL`, `PORT`.
+Env: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `E2B_API_KEY`, `PORT`.
 
 ## 9. Non-goals / forbids (v1)
 
