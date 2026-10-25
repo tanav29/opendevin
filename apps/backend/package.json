@@ -16,6 +16,9 @@
     "lint:fix": "oxlint --fix",
     "test": "tsx --test test/*.test.ts"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^1.5.4",
     "@prisma/adapter-pg": "^7.10.1",
