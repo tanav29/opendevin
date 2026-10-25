@@ -2,7 +2,6 @@ export const API =
   process.env.NODE_ENV === "development"
     ? "http://localhost:3001"
     : "https://od-backend.vercel.app";
-export const WS_API = API.replace(/^http/, "ws");
 
 export type ProvisioningPhase =
   | "pending"

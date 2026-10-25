@@ -1,113 +1,118 @@
 import { createServer, type Server } from "node:http";
 import type { Express } from "express";
-import { WebSocketServer } from "ws";
+import { Server as SocketIOServer } from "socket.io";
+import { createApp } from "./app.js";
 import { auth } from "./auth/auth.js";
-import { WORKSPACE_PATH } from "./config.js";
+import { FRONTEND_ORIGINS, WORKSPACE_PATH } from "./config.js";
 import { authHeaders } from "./http.js";
 import { prisma } from "./db/prisma.js";
 import { attachPty, detachPty, replayPty, resizePty, writePty } from "./pty.js";
 import { checkSandboxAvailable } from "./sandbox.js";
 
-// Terminal PTY bridge: browser WS <-> shared E2B PTY for the session.
-// Message protocol (JSON): client -> {type:"input",data} | {type:"resize",cols,rows};
-// server -> {type:"ready",pid} | {type:"replay",data} | {type:"data",data} | {type:"reset"} | {type:"error",error}.
-export function createHttpServer(app: Express): { server: Server; wss: WebSocketServer } {
+export function createHttpServer(app: Express): { server: Server; io: SocketIOServer } {
   const server = createServer(app);
-  const wss = new WebSocketServer({ noServer: true });
-
-  server.on("upgrade", (req, socket, head) => {
-    void (async () => {
-      const url = new URL(req.url || "", "http://localhost");
-      const match = url.pathname.match(/^\/api\/sessions\/([^/]+)\/pty$/);
-      if (!match) {
-        socket.destroy();
-        return;
-      }
-      const fail = (code: string) => {
-        socket.write(`HTTP/1.1 ${code}\r\nConnection: close\r\n\r\n`);
-        socket.destroy();
-      };
-      let owner: { id: string; sandboxId: string; workspacePath: string } | null | undefined;
-      try {
-        const session = await auth.api.getSession({ headers: authHeaders(req) });
-        if (!session) return fail("401 Unauthorized");
-        owner = await prisma.projectSession.findFirst({
-          where: { id: match[1], project: { userId: session.user.id } },
-          include: { project: true },
-        });
-        if (!owner) return fail("404 Not Found");
-        if (!owner.sandboxId || !(await checkSandboxAvailable(owner.sandboxId)))
-          return fail("409 Conflict");
-      } catch {
-        return fail("500 Internal Server Error");
-      }
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        (async () => {
-          const cols = Number(url.searchParams.get("cols") || 80);
-          const rows = Number(url.searchParams.get("rows") || 24);
-          const sessionOwner = owner as { id: string; sandboxId: string; workspacePath: string };
-          try {
-            const entry = await attachPty(
-              sessionOwner.id,
-              sessionOwner.sandboxId,
-              sessionOwner.workspacePath || WORKSPACE_PATH,
-              cols,
-              rows,
-              ws,
-            );
-            ws.send(JSON.stringify({ type: "ready", pid: entry.pid }));
-            const replay = replayPty(sessionOwner.id);
-            if (replay) ws.send(JSON.stringify({ type: "replay", data: replay }));
-          } catch {
-            ws.send(
-              JSON.stringify({
-                error:
-                  "Terminal unavailable: the sandbox PTY could not start. Reconnect and retry.",
-              }),
-            );
-            ws.close();
-            return;
-          }
-          ws.on("message", (raw) => {
-            void (async () => {
-              let message: { type?: string; data?: string; cols?: number; rows?: number };
-              try {
-                message = JSON.parse(String(raw));
-              } catch {
-                return;
-              }
-              try {
-                if (message.type === "input" && typeof message.data === "string") {
-                  const reset = await writePty(
-                    sessionOwner.id,
-                    sessionOwner.sandboxId,
-                    sessionOwner.workspacePath || WORKSPACE_PATH,
-                    message.data.slice(0, 16_000),
-                  );
-                  if (reset) ws.send(JSON.stringify({ type: "reset" }));
-                } else if (message.type === "resize") {
-                  await resizePty(
-                    sessionOwner.id,
-                    sessionOwner.sandboxId,
-                    Number(message.cols) || 80,
-                    Number(message.rows) || 24,
-                  );
-                }
-              } catch {
-                ws.send(
-                  JSON.stringify({
-                    type: "error",
-                    error: "Terminal write failed: the sandbox is unreachable.",
-                  }),
-                );
-              }
-            })();
-          });
-          ws.on("close", () => detachPty(sessionOwner.id, ws));
-        })().catch(() => ws.close());
-      });
-    })();
+  const io = new SocketIOServer(server, {
+    path: "/api/socket.io",
+    transports: ["websocket"],
+    cors: { origin: FRONTEND_ORIGINS, credentials: true },
+    allowRequest: (request, callback) => {
+      const origin = request.headers.origin;
+      callback(null, !origin || FRONTEND_ORIGINS.includes(origin));
+    },
   });
 
-  return { server, wss };
+  io.use(async (socket, next) => {
+    try {
+      const session = await auth.api.getSession({ headers: authHeaders(socket.request) });
+      if (!session) return next(new Error("Sign in required"));
+
+      const owner = await prisma.projectSession.findFirst({
+        where: {
+          id: String(socket.handshake.auth.sessionId || ""),
+          project: { userId: session.user.id },
+        },
+        select: { id: true, sandboxId: true, workspacePath: true },
+      });
+      if (!owner) return next(new Error("Session not found"));
+      if (!owner.sandboxId || !(await checkSandboxAvailable(owner.sandboxId)))
+        return next(new Error("Sandbox unavailable"));
+
+      socket.data.owner = owner;
+      next();
+    } catch {
+      next(new Error("Terminal authentication failed"));
+    }
+  });
+
+  io.on("connection", (socket) => {
+    const owner = socket.data.owner as {
+      id: string;
+      sandboxId: string;
+      workspacePath: string;
+    };
+    const cols = Number(socket.handshake.auth.cols) || 80;
+    const rows = Number(socket.handshake.auth.rows) || 24;
+
+    void (async () => {
+      try {
+        const entry = await attachPty(
+          owner.id,
+          owner.sandboxId,
+          owner.workspacePath || WORKSPACE_PATH,
+          cols,
+          rows,
+          socket,
+        );
+        if (!socket.connected) {
+          detachPty(owner.id, socket);
+          return;
+        }
+        socket.emit("pty:ready", { pid: entry.pid });
+        const replay = replayPty(owner.id);
+        if (replay) socket.emit("pty:replay", { data: replay });
+      } catch {
+        socket.emit("pty:error", {
+          error: "Terminal unavailable: the sandbox PTY could not start. Reconnect and retry.",
+        });
+        socket.disconnect(true);
+        return;
+      }
+
+      socket.on("pty:input", (data: unknown) => {
+        if (typeof data !== "string") return;
+        void writePty(
+          owner.id,
+          owner.sandboxId,
+          owner.workspacePath || WORKSPACE_PATH,
+          data.slice(0, 16_000),
+        )
+          .then((reset) => {
+            if (reset) socket.emit("pty:reset");
+          })
+          .catch(() => {
+            socket.emit("pty:error", {
+              error: "Terminal write failed: the sandbox is unreachable.",
+            });
+          });
+      });
+
+      socket.on("pty:resize", (size: unknown) => {
+        if (!size || typeof size !== "object") return;
+        const dimensions = size as { cols?: unknown; rows?: unknown };
+        void resizePty(
+          owner.id,
+          owner.sandboxId,
+          Number(dimensions.cols) || 80,
+          Number(dimensions.rows) || 24,
+        );
+      });
+
+      socket.on("disconnect", () => detachPty(owner.id, socket));
+    })().catch(() => socket.disconnect(true));
+  });
+
+  return { server, io };
 }
+
+const { server } = createHttpServer(createApp());
+export default server;

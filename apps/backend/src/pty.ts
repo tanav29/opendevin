@@ -1,5 +1,5 @@
 import { Sandbox } from "e2b";
-import type { WebSocket } from "ws";
+import type { Socket } from "socket.io";
 import { WORKSPACE_PATH } from "./config.js";
 
 // Single shared PTY per session. Entries survive tab close/reconnect and die
@@ -9,7 +9,7 @@ import { WORKSPACE_PATH } from "./config.js";
 export type PtyEntry = {
   sandboxId: string;
   pid: number;
-  sockets: Set<WebSocket>;
+  sockets: Set<Socket>;
   decoder: TextDecoder;
   ring: string[];
   ringBytes: number;
@@ -35,9 +35,8 @@ function broadcast(entry: PtyEntry, text: string) {
     entry.ringBytes -= entry.ring[0].length;
     entry.ring.shift();
   }
-  const message = JSON.stringify({ type: "data", data: text });
   for (const socket of entry.sockets) {
-    if (socket.readyState === socket.OPEN) socket.send(message);
+    if (socket.connected) socket.emit("pty:data", { data: text });
   }
 }
 
@@ -89,7 +88,7 @@ export async function attachPty(
   workspacePath: string,
   cols: number,
   rows: number,
-  socket: WebSocket,
+  socket: Socket,
 ): Promise<PtyEntry> {
   let entry = entries.get(sessionId);
   const pending = connecting.get(sessionId);
@@ -111,7 +110,7 @@ export function replayPty(sessionId: string): string {
   return entries.get(sessionId)?.ring.join("") || "";
 }
 
-export function detachPty(sessionId: string, socket: WebSocket) {
+export function detachPty(sessionId: string, socket: Socket) {
   entries.get(sessionId)?.sockets.delete(socket);
 }
 

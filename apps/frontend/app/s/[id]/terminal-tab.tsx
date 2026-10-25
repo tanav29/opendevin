@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { WS_API } from "./lib";
-
-type PtyMessage = { type?: string; pid?: number; data?: string; error?: string };
+import { io, type Socket } from "socket.io-client";
+import { API } from "./lib";
 
 export default function TerminalTab({
   sessionId,
@@ -24,7 +23,8 @@ export default function TerminalTab({
     if (!available || active === false) return;
     let disposed = false;
     let term: { destroy(): void } | null = null;
-    let ws: WebSocket | null = null;
+    let socket: Socket | null = null;
+    let terminalReady = false;
 
     void (async () => {
       const element = containerRef.current;
@@ -36,11 +36,10 @@ export default function TerminalTab({
           autoResize: true,
           cursorBlink: true,
           onData: (data) => {
-            if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
+            if (terminalReady && socket?.connected) socket.emit("pty:input", data);
           },
           onResize: (cols, rows) => {
-            if (ws?.readyState === WebSocket.OPEN)
-              ws.send(JSON.stringify({ type: "resize", cols, rows }));
+            if (terminalReady && socket?.connected) socket.emit("pty:resize", { cols, rows });
           },
         });
         await terminal.init();
@@ -50,27 +49,37 @@ export default function TerminalTab({
         }
         term = terminal;
 
-        const socket = new WebSocket(
-          `${WS_API}/api/sessions/${sessionId}/pty?cols=${terminal.cols}&rows=${terminal.rows}`,
-        );
-        ws = socket;
-        socket.onmessage = (event) => {
-          let message: PtyMessage;
-          try {
-            message = JSON.parse(String(event.data));
-          } catch {
-            return;
-          }
-          if (message.type === "data" || message.type === "replay")
-            terminal.write(message.data || "");
-          else if (message.type === "reset") terminal.write("\x1bc");
-          else if (message.type === "error" || message.error)
-            terminal.write(`\r\n\x1b[31m${message.error || "Terminal error"}\x1b[0m\r\n`);
-        };
-        socket.onerror = () => {
+        const connection = io(API, {
+          path: "/api/socket.io",
+          transports: ["websocket"],
+          withCredentials: true,
+          autoConnect: false,
+          auth: { sessionId, cols: terminal.cols, rows: terminal.rows },
+        });
+        socket = connection;
+        connection.on("connect_error", () => {
           if (!disposed)
             setConnectError("Terminal connection failed. The sandbox may have expired.");
-        };
+        });
+        connection.on("disconnect", () => {
+          terminalReady = false;
+          if (!disposed) setConnectError("Terminal connection lost. Reconnecting…");
+        });
+        connection.on("pty:ready", () => {
+          terminalReady = true;
+          setConnectError("");
+        });
+        connection.on("pty:data", (message: { data?: string }) =>
+          terminal.write(message.data || ""),
+        );
+        connection.on("pty:replay", (message: { data?: string }) =>
+          terminal.write(message.data || ""),
+        );
+        connection.on("pty:reset", () => terminal.write("\x1bc"));
+        connection.on("pty:error", (message: { error?: string }) => {
+          terminal.write(`\r\n\x1b[31m${message.error || "Terminal error"}\x1b[0m\r\n`);
+        });
+        connection.connect();
       } catch {
         if (!disposed)
           setConnectError("Terminal could not start. Reconnect the sandbox and retry.");
@@ -80,7 +89,7 @@ export default function TerminalTab({
     return () => {
       disposed = true;
       try {
-        ws?.close();
+        socket?.disconnect();
       } catch {
         // Socket already gone.
       }
