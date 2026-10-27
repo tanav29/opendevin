@@ -116,6 +116,31 @@ export async function snapshotDiffAndIdle(sessionId: string): Promise<void> {
   await prisma.projectSession.update({ where: { id: sessionId }, data: { status: "idle" } });
 }
 
+// Skills installed via skills.sh (`.agents/skills/`, `skills-lock.json`) are
+// agent tooling, not project code. Keep them out of version control so
+// commits and the Changes tab only ever carry real code changes. Idempotent.
+export async function ensureSkillsIgnored(sandbox: Sandbox, cwd: string): Promise<void> {
+  const file = `${cwd}/.gitignore`;
+  const entries = [".agents/", "skills-lock.json"];
+  let current = "";
+  try {
+    const contents = await sandbox.files.read(file);
+    if (typeof contents === "string") current = contents;
+  } catch {
+    // No .gitignore yet — create one below.
+  }
+  const missing = entries.filter(
+    (entry) =>
+      !new RegExp(`(^|\\n)${entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\n|$)`).test(current),
+  );
+  if (missing.length === 0) return;
+  const base = current && !current.endsWith("\n") ? `${current}\n` : current;
+  await sandbox.files.write(
+    file,
+    `${base}\n# Agent skills installed from skills.sh (tooling, not project code)\n${missing.join("\n")}\n`,
+  );
+}
+
 const TREE_SKIP_DIRS: Record<string, true> = { ".git": true, node_modules: true };
 
 export async function listWorkspaceTree(

@@ -24,6 +24,7 @@ export async function connectSandboxTools(
   tools: SandboxToolset | undefined;
   sandboxNote: string;
   projectInstructions: string;
+  sandbox: Sandbox | null;
 }> {
   if (!sandboxId) {
     return {
@@ -31,6 +32,7 @@ export async function connectSandboxTools(
       sandboxNote:
         "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.",
       projectInstructions: "",
+      sandbox: null,
     };
   }
   try {
@@ -43,13 +45,19 @@ export async function connectSandboxTools(
     } catch {
       // Repositories without a root AGENTS.md use the default agent instructions.
     }
-    return { tools: sandboxTools(sandbox, cwd), sandboxNote: "", projectInstructions };
+    return {
+      tools: sandboxTools(sandbox, cwd),
+      sandboxNote: "",
+      projectInstructions,
+      sandbox,
+    };
   } catch {
     return {
       tools: undefined,
       sandboxNote:
         "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.",
       projectInstructions: "",
+      sandbox: null,
     };
   }
 }

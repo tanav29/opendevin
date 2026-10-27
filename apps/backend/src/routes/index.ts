@@ -6,6 +6,7 @@ import { registerProjectRoutes } from "./projects.js";
 import { registerSessionRoutes } from "./sessions.js";
 import { registerWorkspaceRoutes } from "./workspace.js";
 import { registerBotRoutes } from "./bot.js";
+import { registerSkillRoutes } from "./skills.js";
 
 export function registerRoutes(app: Express): void {
   registerSystemRoutes(app);
@@ -15,4 +16,5 @@ export function registerRoutes(app: Express): void {
   registerChatRoutes(app);
   registerBotRoutes(app);
   registerWorkspaceRoutes(app);
+  registerSkillRoutes(app);
 }

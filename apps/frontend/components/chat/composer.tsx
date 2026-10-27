@@ -16,6 +16,7 @@ export default function ChatComposer({
   canSend = true,
   placeholder,
   attachments,
+  skills,
   notice,
   actions,
   onPasteFiles,
@@ -31,6 +32,7 @@ export default function ChatComposer({
   canSend?: boolean;
   placeholder: string;
   attachments?: ReactNode;
+  skills?: ReactNode;
   notice?: ReactNode;
   actions?: ReactNode;
   onPasteFiles?: (files: FileList) => void;
@@ -66,6 +68,7 @@ export default function ChatComposer({
       }}
     >
       {attachments}
+      {skills}
       {notice}
       <textarea
         ref={textareaRef}

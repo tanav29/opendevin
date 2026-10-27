@@ -37,6 +37,8 @@ import {
   serializeAttachments,
   useAttachments,
 } from "@/components/chat/use-attachments";
+import { serializeSkills, useSkills } from "@/components/chat/use-skills";
+import { SkillChips, SkillsButton } from "@/components/chat/skills-modal";
 const ChatMessageRow = dynamic(() => import("@/components/chat/message-row"), {
   ssr: false,
   loading: () => <span className="text-muted-foreground">Loading response…</span>,
@@ -325,6 +327,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
+  const { skills, toggle: toggleSkill, remove: removeSkill, resetSkills } = useSkills();
   const chatTransport = useMemo(
     () =>
       new DefaultChatTransport<UIMessage>({
@@ -496,9 +499,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || !sessionId || sending || agentBusy || !ready)
+    if (
+      (!trimmed && attachments.length === 0 && skills.length === 0) ||
+      !sessionId ||
+      sending ||
+      agentBusy ||
+      !ready
+    )
       return;
-    const blocks = serializeAttachments(attachments);
+    const blocks = [serializeAttachments(attachments), serializeSkills(skills)]
+      .filter(Boolean)
+      .join("\n\n");
     const full = trimmed ? (blocks ? `${trimmed}\n\n${blocks}` : trimmed) : blocks;
     if (full.length > MAX_MESSAGE_CHARS) {
       toast.error(`Message exceeds the ${MAX_MESSAGE_CHARS.toLocaleString()}-character limit.`);
@@ -506,6 +517,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
     setInput("");
     resetAttachments();
+    resetSkills();
     setSending(true);
     try {
       await streamMessage({ text: full });
@@ -742,7 +754,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 onStop={stop}
                 busy={sending || activeAgent}
                 disabled={chatDisabled}
-                canSend={Boolean(input.trim()) || attachments.length > 0}
+                canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
                 placeholder="Tell the agent what to do…"
                 onPasteFiles={(files) => void addFiles(files)}
                 onDropFiles={(files) => void addFiles(files)}
@@ -768,6 +780,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     </div>
                   ) : undefined
                 }
+                skills={
+                  skills.length > 0 ? (
+                    <SkillChips skills={skills} onRemove={removeSkill} />
+                  ) : undefined
+                }
                 notice={
                   (activeAgent || agentQueued) && !sending ? (
                     <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
@@ -789,6 +806,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                         if (e.target.files) void addFiles(e.target.files);
                         e.target.value = "";
                       }}
+                    />
+                    <SkillsButton
+                      selected={skills}
+                      onToggle={toggleSkill}
+                      disabled={chatDisabled}
                     />
                     <Button
                       type="button"

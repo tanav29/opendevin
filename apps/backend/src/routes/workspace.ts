@@ -22,6 +22,7 @@ import {
 import { probePort, runSandbox, waitForPort } from "../sandbox.js";
 import { activeTurns } from "../chat.js";
 import {
+  ensureSkillsIgnored,
   hasUnrestoredWorkspace,
   listWorkspaceTree,
   readWorkspaceDiff,
@@ -373,6 +374,9 @@ export function registerWorkspaceRoutes(app: Express): void {
         const sandbox = await Sandbox.connect(found.owner.sandboxId);
         const cwd = found.owner.workspacePath || WORKSPACE_PATH;
         const run = (command: string) => runSandbox(sandbox, command, cwd, 30_000);
+        // Skills installed outside the <skills> flow would otherwise show up as
+        // untracked files and pollute the commit review.
+        await ensureSkillsIgnored(sandbox, cwd).catch(() => undefined);
         const branch = await run("git branch --show-current");
         const status = await run("git status --porcelain=v1 -uall");
         if (branch.exitCode !== 0 || status.exitCode !== 0) {
@@ -442,6 +446,8 @@ export function registerWorkspaceRoutes(app: Express): void {
         const sandbox = await Sandbox.connect(owner.sandboxId);
         const cwd = owner.workspacePath || WORKSPACE_PATH;
         const run = (command: string) => runSandbox(sandbox, command, cwd, 120_000);
+        // Last line of defense: never let skills.sh files into a pushed commit.
+        await ensureSkillsIgnored(sandbox, cwd).catch(() => undefined);
         const current = await run("git branch --show-current");
         if (current.exitCode !== 0) {
           return res.status(409).json({ error: "Commit preflight failed: Git branch is invalid." });

@@ -16,8 +16,9 @@ import {
 } from "../workspace.js";
 import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "../config.js";
 import { asyncRoute, ownedSession, routeParam } from "../http.js";
-import { loadToolLog } from "../agent.js";
+import { loadToolLog, parseSkillsBlock } from "../agent.js";
 import { connectSandboxTools } from "../tools.js";
+import { ensureSkillsIgnored } from "../workspace.js";
 
 export function registerChatRoutes(app: Express): void {
   app.post(
@@ -89,7 +90,7 @@ export function registerChatRoutes(app: Express): void {
           },
         });
 
-        const { tools, sandboxNote, projectInstructions } = await connectSandboxTools(
+        const { tools, sandboxNote, projectInstructions, sandbox } = await connectSandboxTools(
           owner.sandboxId,
           owner.workspacePath || WORKSPACE_PATH,
         );
@@ -102,6 +103,14 @@ export function registerChatRoutes(app: Express): void {
             data: { status: "failed", sandboxStatus: "error", lastError: error },
           });
           return res.status(503).json({ error });
+        }
+        const selectedSkills = parseSkillsBlock(content);
+        if (selectedSkills.length > 0 && sandbox) {
+          // Keep skills.sh files out of version control from the moment the
+          // agent starts installing them.
+          await ensureSkillsIgnored(sandbox, owner.workspacePath || WORKSPACE_PATH).catch(
+            () => undefined,
+          );
         }
 
         // Model history comes from toolLog (user/assistant/tool messages, including
@@ -122,6 +131,7 @@ export function registerChatRoutes(app: Express): void {
             modelHistory,
             tools,
             projectInstructions,
+            skills: selectedSkills,
           },
           { controller, kind: "chat" },
         );

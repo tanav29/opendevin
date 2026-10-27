@@ -7,7 +7,15 @@ import {
 } from "ai";
 import type { Response } from "express";
 import { prisma } from "./db/prisma.js";
-import { AGENT_STOP, buildSystemPrompt, loadToolLog, saveToolLog, trimToolLog } from "./agent.js";
+import {
+  AGENT_STOP,
+  buildSkillsNote,
+  buildSystemPrompt,
+  loadToolLog,
+  saveToolLog,
+  trimToolLog,
+  type SkillSelection,
+} from "./agent.js";
 import { resolveChatModel, WORKSPACE_PATH } from "./config.js";
 import { LIMITS } from "./config.js";
 import { connectSandboxTools, SHARED_FILE_PREFIX } from "./tools.js";
@@ -303,6 +311,7 @@ export function startAgentTurn(
     tools: Awaited<ReturnType<typeof connectSandboxTools>>["tools"];
     systemPrompt?: string;
     projectInstructions?: string;
+    skills?: SkillSelection[];
   },
   reservation?: { controller: AbortController; kind: TurnKind },
 ) {
@@ -316,14 +325,16 @@ export function startAgentTurn(
   const result = streamText({
     model: createOpenRouter({ apiKey: opts.apiKey })(opts.modelId),
     system:
-      opts.systemPrompt ??
-      buildSystemPrompt(
-        opts.workspacePath,
-        opts.repo,
-        opts.branch,
-        opts.sandboxNote,
-        opts.projectInstructions,
-      ),
+      opts.systemPrompt != null
+        ? `${opts.systemPrompt}${buildSkillsNote(opts.skills ?? [])}`
+        : buildSystemPrompt(
+            opts.workspacePath,
+            opts.repo,
+            opts.branch,
+            opts.sandboxNote,
+            opts.projectInstructions,
+            opts.skills ?? [],
+          ),
     messages: opts.modelHistory,
     ...(opts.tools ? { tools: opts.tools, stopWhen: AGENT_STOP } : {}),
     abortSignal: controller.signal,

@@ -12,7 +12,8 @@ import { botSessionTools, connectSandboxTools } from "../tools.js";
 import { BOT_PROJECT_REPO, LIMITS, resolveBotModel, WORKSPACE_PATH } from "../config.js";
 import { asyncRoute, currentUser } from "../http.js";
 import { killSandbox, provisionSandbox } from "../sandbox.js";
-import { loadToolLog } from "../agent.js";
+import { loadToolLog, parseSkillsBlock } from "../agent.js";
+import { ensureSkillsIgnored } from "../workspace.js";
 
 const BOT_TITLE = "Bot";
 const BOT_SYSTEM_PROMPT =
@@ -114,6 +115,14 @@ export function registerBotRoutes(app: Express): void {
           session.workspacePath || WORKSPACE_PATH,
         );
         if (!connected.tools) throw new Error("Bot workspace is unavailable. Retry.");
+        const selectedSkills = parseSkillsBlock(prompt);
+        if (selectedSkills.length > 0 && connected.sandbox) {
+          // Keep skills.sh files out of version control in the Bot workspace too.
+          await ensureSkillsIgnored(
+            connected.sandbox,
+            session.workspacePath || WORKSPACE_PATH,
+          ).catch(() => undefined);
+        }
         const modelHistory = await loadToolLog(session.id);
         modelHistory.push({ role: "user", content: prompt });
         const tools = { ...connected.tools, ...botSessionTools(user.user.id) };
@@ -132,6 +141,7 @@ export function registerBotRoutes(app: Express): void {
             modelHistory,
             tools,
             systemPrompt: `${BOT_SYSTEM_PROMPT} The signed-in user is ${user.user.name} (${user.user.email}).${instructions}`,
+            skills: selectedSkills,
           },
           { controller, kind: "chat" },
         );

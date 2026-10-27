@@ -17,6 +17,8 @@ import {
   serializeAttachments,
   useAttachments,
 } from "@/components/chat/use-attachments";
+import { serializeSkills, useSkills } from "@/components/chat/use-skills";
+import { SkillChips, SkillsButton } from "@/components/chat/skills-modal";
 
 type BotMessage = { id: string; role: "user" | "assistant"; content: string };
 type BotState = {
@@ -33,6 +35,7 @@ export default function BotPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
+  const { skills, toggle: toggleSkill, remove: removeSkill, resetSkills } = useSkills();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const confirm = useConfirm();
@@ -85,7 +88,9 @@ export default function BotPage() {
 
   async function send(text = input) {
     const message = text.trim();
-    const blocks = serializeAttachments(attachments);
+    const blocks = [serializeAttachments(attachments), serializeSkills(skills)]
+      .filter(Boolean)
+      .join("\n\n");
     const full = message ? (blocks ? `${message}\n\n${blocks}` : message) : blocks;
     if (!full || sending) return;
     if (full.length > MAX_MESSAGE_CHARS) {
@@ -94,6 +99,7 @@ export default function BotPage() {
     }
     setInput("");
     resetAttachments();
+    resetSkills();
     setSending(true);
     try {
       await sendMessage({ text: full });
@@ -200,7 +206,7 @@ export default function BotPage() {
           onStop={() => void stop()}
           busy={sending}
           disabled={chatDisabled}
-          canSend={Boolean(input.trim()) || attachments.length > 0}
+          canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
           placeholder="Message Bot…"
           className="sticky bottom-0 mt-3"
           onPasteFiles={(files) => void addFiles(files)}
@@ -227,6 +233,9 @@ export default function BotPage() {
               </div>
             ) : undefined
           }
+          skills={
+            skills.length > 0 ? <SkillChips skills={skills} onRemove={removeSkill} /> : undefined
+          }
           actions={
             <>
               <input
@@ -240,6 +249,7 @@ export default function BotPage() {
                   e.target.value = "";
                 }}
               />
+              <SkillsButton selected={skills} onToggle={toggleSkill} disabled={chatDisabled} />
               <Button
                 type="button"
                 variant="ghost"
