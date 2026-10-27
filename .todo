@@ -1,9 +1,9 @@
 [ ] ui need lot of net
-[x] empty sandbox in the repo selection too
-
+[ ] add context component from shadcn to the input box for context details see docs here https://ui.shadcn.com/docs/ai-elements/base/context
 
 [feature] Durable background tasks: resume after disconnect, request approvals, send completion notifications
 [feature partial] Create draft PRs after pushing; sync CI/reviews and agent follow-up remain
 [feature] Project memory and reusable skills; add MCP and web/docs tools
 [feature] Browser verification with screenshots and console/network errors
 [x] Browser verification v0.8.3: agent-browser was blocked by Application Control; browser-control CLI failed with `browserContext.newPage: Protocol error (Target.createTarget): No current window` (relay connected, zero targets). Recovered via the T3 preview browser; /s/test rendered, mock streaming worked, and no API requests were made.
+[x] Browser Control 0.8.3 session UI check: --target-url localhost:3000/s/cmvqruzg7000170g38rsoc7ve was ambiguous because Brave root tab and a relay preview tab matched. status --json identified the Brave user tab at target index 0; adopted it and navigated to the requested session. Cold navigation initially hit Next blocking-prerender-client-hook from AppShell usePathname outside Suspense; added a Suspense boundary and confirmed session content rendered. After a later hot reload, DOM reads returned no page content and reload failed with Page.reload: Protocol error (Debugger is not attached to the tab with id 1540886959); page.url() still returned the session URL. browser-control doctor is healthy (CLI/relay 0.8.3, extension 0.0.25, one active target, no unhealthy targets). Expected: attached session remains inspectable after edit; actual: attachment dropped during HMR. Recovery: health-check execute and doctor; no relay restart or user-tab replacement.

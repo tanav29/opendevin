@@ -3,8 +3,14 @@
 import { memo, useState } from "react";
 import Markdown from "react-markdown";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowRight01Icon, Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
+import {
+  CircleCheckFreeIcons,
+  CircleFreeIcons,
+  Download01Icon,
+  File02Icon,
+} from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
+import { Activity, Check, ChevronDown, CircleDashedIcon, Wrench, XIcon } from "lucide-react";
 
 function ToolCallCard({
   name,
@@ -17,16 +23,22 @@ function ToolCallCard({
   status: "working" | "done" | "failed";
   id: string;
 }) {
-  const statusIcon = status === "working" ? "◌" : status === "done" ? "✓" : "×";
   return (
-    <div key={id} className="flex min-w-0 items-center gap-2 font-mono text-md">
+    <div key={id} className="flex min-w-0 items-center gap-2 font-mono text-sm">
       <span
-        className="flex size-4 shrink-0 items-center justify-center text-md"
+        className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
         aria-label={status}
       >
-        {statusIcon}
+        {status === "working" ? (
+          <CircleDashedIcon className="animate-spin" />
+        ) : status === "done" ? (
+          <Check />
+        ) : (
+          <XIcon />
+        )}
       </span>
-      <span className="shrink-0 font-medium text-foreground text-md">{name}</span>
+      <Wrench className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="shrink-0 font-medium text-foreground">{name}</span>
       {argument && <span className="truncate text-muted-foreground">{argument}</span>}
     </div>
   );
@@ -44,19 +56,18 @@ function QuestionCard({
   id: string;
 }) {
   return (
-    <div key={id} className="rounded-xl border border-warning/40 bg-warning-muted/40 p-3.5">
+    <div key={id} className="rounded-xl border bg-warning-muted/40 p-3.5">
       <p className="text-[13px] font-medium leading-5">{question}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {options.map((opt) => (
-          <button
+          <Button
             key={opt}
-            type="button"
             disabled={!onAnswer}
             onClick={() => onAnswer?.(opt)}
-            className="rounded-md border border-border bg-card px-2.5 py-1 text-[12px] hover:bg-muted disabled:cursor-default disabled:opacity-60"
+            variant={"outline"}
           >
             {opt}
-          </button>
+          </Button>
         ))}
       </div>
       {!onAnswer && (
@@ -70,27 +81,17 @@ function QuestionCard({
 
 function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; id: string }) {
   return (
-    <div key={id} className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        Plan · {tasks.filter((t) => t.status === "done").length}/{tasks.length}
-      </p>
-      <ul className="mt-2 space-y-1.5">
+    <div key={id} className="rounded-xl border border-border bg-card p-3">
+      <ul className="space-y-1.5">
         {tasks.map((t, i) => (
-          <li key={`${i}-${t.title}`} className="flex items-start gap-2 text-[13px]">
-            <span
-              className={
-                t.status === "done"
-                  ? "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-success text-[10px] text-white"
-                  : t.status === "in_progress"
-                    ? "mt-0.5 size-4 shrink-0 animate-pulse rounded-full border-2 border-warning border-t-transparent"
-                    : "mt-0.5 size-4 shrink-0 rounded-full border border-border"
-              }
-            >
-              {t.status === "done" ? "✓" : ""}
+          <li key={`${i}-${t.title}`} className="flex items-center gap-2 text-xs">
+            <span className={t.status === "done" ? "" : "text-muted-foreground"}>
+              {t.status === "done" ? <HugeiconsIcon className="w-4 h-4" icon={CircleCheckFreeIcons} /> : <HugeiconsIcon className="w-4 h-4" icon={CircleFreeIcons} />}
             </span>
-            <span className={t.status === "done" ? "text-muted-foreground line-through" : ""}>
+            <span className={t.status === "done" ? "" : "text-muted-foreground"}>
               {t.title}
             </span>
+            <span className={t.status === "done" ? "" : "text-muted-foreground"}>{t.title}</span>
           </li>
         ))}
       </ul>
@@ -396,8 +397,8 @@ function Message({
   bubble?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
-  // Keep everything after the final tool call visible. Earlier text remains
-  // with the tool activity inside the expandable section.
+  // Keep everything after the final tool call visible.
+  // Everything before the last tool call will be in collapsable
   let lastTextIndex = -1;
   let lastToolIndex = -1;
   for (let index = parsedBlocks.length - 1; index >= 0; index--) {
@@ -417,20 +418,19 @@ function Message({
     : collapseActivity
       ? parsedBlocks.filter((_, index) => index >= activityEnd)
       : parsedBlocks;
-  const activity = collapseActivity
-    ? parsedBlocks.filter((_, index) => index < activityEnd)
-    : [];
+  const activity = collapseActivity ? parsedBlocks.filter((_, index) => index < activityEnd) : [];
+
   return (
-    <div className="space-y-2">
+    <div>
       {collapseActivity && activity.length > 0 && (
-        <details className="group text-xs text-muted-foreground">
+        <details className="group mb-4 border-b text-sm text-muted-foreground">
           <summary className="flex w-full cursor-pointer select-none items-center gap-2 py-2 hover:text-foreground">
-            <HugeiconsIcon className="transition-transform group-open:rotate-90 w-4" icon={ArrowRight01Icon} />
-            <span>
-              {workDuration === undefined ? "Show work" : `Worked for ${workDuration}s`}
+            <span className="font-medium text-foreground/80">
+              {workDuration === undefined ? "Work in progress" : `Worked for ${workDuration}s`}
             </span>
+            <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
           </summary>
-          <div className="space-y-3 border-t border-border/60 py-3">
+          <div className="space-y-1 py-3">
             {activity.map((block, index) => (
               <div key={`activity-${index}`} className="min-w-0">
                 {block.kind === "md" && (

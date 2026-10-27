@@ -41,7 +41,6 @@ import { serializeSkills, useSkills } from "@/components/chat/use-skills";
 import { SkillChips, SkillsButton } from "@/components/chat/skills-modal";
 const ChatMessageRow = dynamic(() => import("@/components/chat/message-row"), {
   ssr: false,
-  loading: () => <span className="text-muted-foreground">Loading response…</span>,
 });
 const SessionPanel = dynamic(() => import("./session-panel"), {
   ssr: false,
@@ -634,78 +633,81 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   return (
-      <main className="h-screen bg-background w-full overflow-clip">
-        <header className="absolute top-0 left-0 right-0 z-10 flex shrink-0 items-center justify-between gap-3 bg-sidebar border-b px-3 py-2">
-          <div className="flex items-center gap-2 justify-center">
-            <SidebarTrigger className="md:hidden" />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Back to project"
-              onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
-            >
-              <IconArrowLeft />
-            </Button>
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate">
-                {detail?.title || "Loading session…"}
-              </h1>
-              {detail?.branch && <p>repoName/{detail.branch}</p>}
-            </div>
+    <main className="flex h-screen w-full min-w-0 flex-col bg-background">
+      <header className="z-10 flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <SidebarTrigger className="md:hidden" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Back to project"
+            onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
+          >
+            <IconArrowLeft />
+          </Button>
+          <div className="flex min-w-0 items-center gap-2 text-sm">
+            <h1 className="truncate font-medium">{detail?.title || "Loading session…"}</h1>
+            {detail?.branch && (
+              <span className="hidden shrink-0 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground sm:inline-flex">
+                {detail.branch}
+              </span>
+            )}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <DevRunButton
-              sessionId={sessionId}
-              sandboxReady={ready}
-              devCommand={status?.devCommand}
-              devPort={status?.devPort}
-              onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
-              onError={(message) => toast.error(message)}
-            />
-            <SessionInfoDialog
-              sessionId={sessionId}
-              detail={detail}
-              status={status}
-              onReconnect={() => void reconnect()}
-              onKill={() => void kill()}
-              reconnecting={reconnecting}
-              killing={killing}
-            />
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant="secondary"
-                  size="icon-sm"
-                  aria-label="Delete session"
-                  onClick={() => void removeSession()}
-                  disabled={deleting}
-                >
-                  <IconTrash />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Delete this session and its history</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant={prefs.open ? "outline" : "secondary"}
-                  size="icon-sm"
-                  aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
-                  onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
-                  disabled={!ready}
-                  title={!ready ? "Workspace panel needs a running sandbox" : undefined}
-                >
-                  <IconLayoutSidebarRight />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </header>
-
-          <section className="flex max-w-5xl h-full gap-4 sm:mx-8 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <DevRunButton
+            sessionId={sessionId}
+            sandboxReady={ready}
+            devCommand={status?.devCommand}
+            devPort={status?.devPort}
+            onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
+            onError={(message) => toast.error(message)}
+          />
+          <SessionInfoDialog
+            sessionId={sessionId}
+            detail={detail}
+            status={status}
+            onReconnect={() => void reconnect()}
+            onKill={() => void kill()}
+            reconnecting={reconnecting}
+            killing={killing}
+          />
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                aria-label="Delete session"
+                onClick={() => void removeSession()}
+                disabled={deleting}
+              >
+                <IconTrash />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete this session and its history</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant={prefs.open ? "outline" : "secondary"}
+                size="icon-sm"
+                aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+                onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
+                disabled={!ready}
+                title={!ready ? "Workspace panel needs a running sandbox" : undefined}
+              >
+                <IconLayoutSidebarRight />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </header>
+        <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+          <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
               {messages.map((message, index) => {
                 const startedAt = messages
                   .slice(0, index)
@@ -730,25 +732,25 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   />
                 );
               })}
-              {/*Why chat messages and live messages are diff component fuck you ai*/}
-                {liveMessages.map((message) => (
-                  <ChatMessageRow
-                    key={message.id}
-                    role={message.role === "user" ? "user" : "assistant"}
-                    content={message.parts
-                      .filter((part) => part.type === "text")
-                      .map((part) => part.text)
-                      .join("")}
-                    collapseActivity={false}
-                    presentation="session"
-                    workingLabel="Working"
-                    onAnswer={(text) => void sendMessage(text)}
-                  />
-                ))}
+              {/* Historical and streaming messages have different source shapes. */}
+              {liveMessages.map((message) => (
+                <ChatMessageRow
+                  key={message.id}
+                  role={message.role === "user" ? "user" : "assistant"}
+                  content={message.parts
+                    .filter((part) => part.type === "text")
+                    .map((part) => part.text)
+                    .join("")}
+                  collapseActivity
+                  presentation="session"
+                  workingLabel="Working"
+                  onAnswer={(text) => void sendMessage(text)}
+                />
+              ))}
               <div ref={bottomRef} />
-          </section>
-
-            <div className="absolute bottom-0 left-0 right-0 shrink-0 sm:mx-8 mx-4 pb-4">
+            </div>
+          </div>
+          <div className="absolute inset-x-0 bottom-0 z-20 pb-6 px-4 mx-auto w-full max-w-3xl">
               <ChatComposer
                 value={input}
                 onValueChange={setInput}
@@ -817,7 +819,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon-sm"
+                      size="icon"
                       onClick={() => fileRef.current?.click()}
                       disabled={chatDisabled}
                       className="px-2 text-[12px]"
@@ -836,34 +838,35 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   </>
                 }
               />
-            </div>
+          </div>
+        </section>
 
-          {prefs.open && (
-            <SessionPanel
-              sessionId={sessionId}
-              sandboxId={status?.sandboxId || detail?.sandboxId || ""}
-              sandboxReady={ready}
-              defaultTitle={detail?.title || ""}
-              prefs={prefs}
-              onPrefs={setPrefs}
-              onReconnect={() => void reconnect()}
-              onCommitted={() => void refresh(sessionId, false)}
-              defaultPort={status?.devPort}
-            />
-          )}
-          <ReconnectConflictDialog
-            conflict={reconnectConflict}
-            reconnecting={reconnecting}
-            onOpenChange={(open) => {
-              if (!open) setReconnectConflict(null);
-            }}
-            onReview={() => {
-              setReconnectConflict(null);
-              setPrefs({ ...prefs, open: true, tab: "changes" });
-            }}
-            onDownload={() => void downloadRecoveryPatch()}
-            onConfirm={() => void reconnect(true)}
+        {prefs.open && (
+          <SessionPanel
+            sessionId={sessionId}
+            sandboxId={status?.sandboxId || detail?.sandboxId || ""}
+            sandboxReady={ready}
+            defaultTitle={detail?.title || ""}
+            prefs={prefs}
+            onPrefs={setPrefs}
+            onReconnect={() => void reconnect()}
+            onCommitted={() => void refresh(sessionId, false)}
+            defaultPort={status?.devPort}
           />
-      </main>
+        )}
+      <ReconnectConflictDialog
+        conflict={reconnectConflict}
+        reconnecting={reconnecting}
+        onOpenChange={(open) => {
+          if (!open) setReconnectConflict(null);
+        }}
+        onReview={() => {
+          setReconnectConflict(null);
+          setPrefs({ ...prefs, open: true, tab: "changes" });
+        }}
+        onDownload={() => void downloadRecoveryPatch()}
+        onConfirm={() => void reconnect(true)}
+      />
+    </main>
   );
 }

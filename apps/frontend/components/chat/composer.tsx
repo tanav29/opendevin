@@ -3,6 +3,7 @@
 import { FormEvent, ReactNode, useEffect, useRef } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
+import { Button } from "../ui/button";
 
 // Shared composer shell for Bot and session chats, so both keep the same input,
 // send/stop controls, drag-and-drop, and height behavior.
@@ -57,7 +58,7 @@ export default function ChatComposer({
   return (
     <form
       onSubmit={submit}
-      className={`mx-auto w-full max-w-3xl rounded-[2rem] squircle border border-border bg-card shadow-[0_8px_30px_rgba(0,0,0,0.07)] transition-shadow focus-within:border-ring focus-within:shadow-[0_10px_36px_rgba(0,0,0,0.11)] ${disabled ? "opacity-60" : ""} ${className}`}
+      className={`mx-auto w-full max-w-3xl rounded-[2rem] backdrop-blur-xl squircle border border-border bg-card/39 ${className}`}
       onDragOver={(event) => {
         if (onDropFiles) event.preventDefault();
       }}
@@ -89,28 +90,26 @@ export default function ChatComposer({
         rows={1}
         placeholder={placeholder}
         aria-label={placeholder}
-        className="min-h-14 w-full resize-none rounded-2xl border-0 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+        className="min-h-14 w-full resize-none rounded-2xl scrollbar-none border-0 bg-transparent px-4 py-3 text-md outline-none placeholder:text-muted-foreground focus-visible:ring-0"
       />
       <div className="flex items-center justify-between gap-2 px-2 pb-2">
         <div className="flex items-center gap-1.5">{actions}</div>
         {busy ? (
-          <button
-            type="button"
+          <Button
+            variant={"outline"}
+            size={"icon"}
             onClick={onStop}
-            className="bg-red-700 rounded-[99rem] squircle w-7 h-7 flex items-center justify-center hover:scale-105 cursor-pointer transition-transform active:scale-95"
-            aria-label="Stop agent"
           >
-            <HugeiconsIcon icon={StopIcon} size={16} strokeWidth={1.8} />
-          </button>
+            <HugeiconsIcon icon={StopIcon} />
+          </Button>
         ) : (
-          <button
-            type="submit"
-            disabled={disabled || !canSend}
-              aria-label="Send message"
-              className="bg-blue-700 rounded-[99rem] squircle w-7 h-7 flex items-center justify-center hover:scale-105 cursor-pointer transition-transform active:scale-95"
+          <Button
+              variant={"default"}
+              size={"icon"}
+              disabled={disabled || !canSend}
           >
-            <HugeiconsIcon icon={ArrowUp01Icon} size={16} strokeWidth={1.8} />
-          </button>
+            <HugeiconsIcon icon={ArrowUp01Icon} />
+          </Button>
         )}
       </div>
     </form>

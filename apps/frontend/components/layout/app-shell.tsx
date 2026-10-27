@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "./app-sidebar";
@@ -13,6 +13,38 @@ export function AppShell({
 }: {
   children: React.ReactNode;
   defaultOpen?: boolean;
+}) {
+  return (
+    <Suspense fallback={<AppShellFallback defaultOpen={defaultOpen}>{children}</AppShellFallback>}>
+      <AppShellContent defaultOpen={defaultOpen}>{children}</AppShellContent>
+    </Suspense>
+  );
+}
+
+function AppShellFallback({
+  children,
+  defaultOpen,
+}: {
+  children: React.ReactNode;
+  defaultOpen: boolean;
+}) {
+  return (
+    <ConfirmProvider>
+      <TooltipProvider delay={0}>
+        <SidebarProvider defaultOpen={defaultOpen}>
+          <SidebarInset className="min-w-0 border overflow-clip">{children}</SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
+    </ConfirmProvider>
+  );
+}
+
+function AppShellContent({
+  children,
+  defaultOpen,
+}: {
+  children: React.ReactNode;
+  defaultOpen: boolean;
 }) {
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();

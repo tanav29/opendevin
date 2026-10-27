@@ -248,13 +248,12 @@ export function SkillsButton({
       <Button
         type="button"
         variant="ghost"
-        size="icon-sm"
+        size="icon"
         disabled={disabled}
         onClick={() => setMenuOpen((open) => !open)}
         aria-label="Add skills"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        className="px-2 text-[12px]"
       >
         <HugeiconsIcon icon={PlusSignIcon} size={18} strokeWidth={1.8} />
       </Button>
@@ -271,8 +270,6 @@ export function SkillsButton({
             <HugeiconsIcon
               icon={SparklesIcon}
               size={16}
-              strokeWidth={1.8}
-              className="text-blue-700"
             />
             <span className="flex-1">Skills</span>
             {selected.length > 0 && (
