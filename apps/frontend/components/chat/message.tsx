@@ -396,22 +396,29 @@ function Message({
   bubble?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
-  // Keep the final response visible when activity is collapsed. Earlier text
-  // remains with the tool activity inside the expandable section.
+  // Keep everything after the final tool call visible. Earlier text remains
+  // with the tool activity inside the expandable section.
   let lastTextIndex = -1;
+  let lastToolIndex = -1;
   for (let index = parsedBlocks.length - 1; index >= 0; index--) {
-    if (parsedBlocks[index].kind === "md") {
+    if (lastTextIndex < 0 && parsedBlocks[index].kind === "md") {
       lastTextIndex = index;
-      break;
     }
+    if (lastToolIndex < 0 && parsedBlocks[index].kind === "tool") lastToolIndex = index;
   }
+  const activityEnd =
+    lastToolIndex >= 0
+      ? lastToolIndex + 1
+      : lastTextIndex >= 0
+        ? lastTextIndex
+        : parsedBlocks.length;
   const blocks = textOnly
     ? parsedBlocks.filter((block) => block.kind === "md" || block.kind === "file")
     : collapseActivity
-      ? parsedBlocks.filter((_, index) => index === lastTextIndex)
+      ? parsedBlocks.filter((_, index) => index >= activityEnd)
       : parsedBlocks;
   const activity = collapseActivity
-    ? parsedBlocks.filter((_, index) => index !== lastTextIndex)
+    ? parsedBlocks.filter((_, index) => index < activityEnd)
     : [];
   return (
     <div className="space-y-2">
@@ -470,7 +477,6 @@ function Message({
         </details>
       )}
       {blocks.map((b, k) => {
-        if (collapseActivity && b.kind !== "md" && b.kind !== "file") return null;
         if (b.kind === "md") {
           return (
             <div

@@ -20,6 +20,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 
 export type TaskFormProject = { id: string; repo: string };
+const EMPTY_SANDBOX = "__empty_sandbox__";
 
 type GithubRepo = {
   id: number;
@@ -73,7 +74,7 @@ export default function TaskForm({
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects],
   );
-  const repositoryLabel = selectedRepo?.fullName || activeProject?.repo || "Select repository";
+  const repositoryLabel = selectedRepo?.fullName || activeProject?.repo || (activeProjectId ? "Empty sandbox" : "Select repository");
   const sourceBranchLabel = branch || "Choose a branch";
 
   const reposQuery = useQuery({
@@ -122,6 +123,37 @@ export default function TaskForm({
     }
   }
 
+  async function handleEmptySandboxSelect() {
+    const selectionId = ++repoSelectionRef.current;
+    setSelectedRepo(null);
+    setRepoSearch("");
+    setIssue(null);
+    setBranch("main");
+    const existing = projects.find((project) => !project.repo.trim());
+    if (existing) {
+      setResolvedProjectId(existing.id);
+      return;
+    }
+    setResolving(true);
+    setResolvedProjectId("");
+    try {
+      const created = await api<TaskFormProject>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({ repo: "" }),
+      });
+      if (selectionId !== repoSelectionRef.current) return;
+      setResolvedProjectId(created.id);
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (error) {
+      if (selectionId === repoSelectionRef.current) {
+        setBranch("");
+        toast.error(error instanceof Error ? error.message : "Could not create workspace");
+      }
+    } finally {
+      if (selectionId === repoSelectionRef.current) setResolving(false);
+    }
+  }
+
   const branchesQuery = useQuery({
     queryKey: ["task-form-branches", activeProjectId],
     queryFn: () =>
@@ -144,7 +176,8 @@ export default function TaskForm({
 
   useEffect(() => {
     if (defaultBranch) setBranch(defaultBranch);
-  }, [defaultBranch, activeProjectId]);
+    else if (activeProjectId && !activeProject?.repo.trim()) setBranch("main");
+  }, [defaultBranch, activeProjectId, activeProject?.repo]);
 
   const filteredBranches = branches.filter((item) =>
     item.toLowerCase().includes(branchSearch.trim().toLowerCase()),
@@ -237,8 +270,12 @@ export default function TaskForm({
         <div className="flex min-w-0 flex-1 items-center">
           {!isLockedToProject && (
             <Select
-              value={selectedRepo ? String(selectedRepo.id) : ""}
+              value={selectedRepo ? String(selectedRepo.id) : activeProjectId && !activeProject?.repo.trim() ? EMPTY_SANDBOX : ""}
               onValueChange={(v: string | null) => {
+                if (v === EMPTY_SANDBOX) {
+                  void handleEmptySandboxSelect();
+                  return;
+                }
                 const repo = repos.find((r) => String(r.id) === v) ?? null;
                 if (repo) void handleRepoSelect(repo);
               }}
@@ -248,6 +285,7 @@ export default function TaskForm({
                 <SelectValue placeholder="Select repo" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={EMPTY_SANDBOX}>Empty sandbox</SelectItem>
                 <div onKeyDown={(e) => e.stopPropagation()}>
                   <Input
                     value={repoSearch}

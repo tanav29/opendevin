@@ -1,4 +1,9 @@
+[ ] ui need lot of net
+[x] empty sandbox in the repo selection too
+
+
 [feature] Durable background tasks: resume after disconnect, request approvals, send completion notifications
 [feature partial] Create draft PRs after pushing; sync CI/reviews and agent follow-up remain
 [feature] Project memory and reusable skills; add MCP and web/docs tools
 [feature] Browser verification with screenshots and console/network errors
+[x] Browser verification v0.8.3: agent-browser was blocked by Application Control; browser-control CLI failed with `browserContext.newPage: Protocol error (Target.createTarget): No current window` (relay connected, zero targets). Recovered via the T3 preview browser; /s/test rendered, mock streaming worked, and no API requests were made.

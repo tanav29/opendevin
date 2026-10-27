@@ -723,6 +723,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     role={message.role === "user" ? "user" : "assistant"}
                     content={message.content}
                     workDuration={message.role === "assistant" ? workDuration : undefined}
+                    collapseActivity
                     presentation="session"
                     workingLabel="Working"
                     onAnswer={(text) => void sendMessage(text)}
@@ -738,6 +739,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                       .filter((part) => part.type === "text")
                       .map((part) => part.text)
                       .join("")}
+                    collapseActivity={false}
                     presentation="session"
                     workingLabel="Working"
                     onAnswer={(text) => void sendMessage(text)}

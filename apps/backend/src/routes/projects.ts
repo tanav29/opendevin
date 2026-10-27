@@ -49,9 +49,8 @@ export function registerProjectRoutes(app: Express): void {
       const session = await currentUser(req);
       if (!session) return res.status(401).json({ error: "Sign in required" });
       const { repo } = req.body as { repo?: string };
-      if (!repo?.trim()) return res.status(400).json({ error: "Repository is required" });
       const project = await prisma.project.create({
-        data: { repo: repo.trim(), userId: session.user.id },
+        data: { repo: repo?.trim() ?? "", userId: session.user.id },
       });
       return res.status(201).json(project);
     }),

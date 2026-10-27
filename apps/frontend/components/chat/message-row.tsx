@@ -7,6 +7,7 @@ export default function ChatMessageRow({
   content,
   onAnswer,
   workDuration,
+  collapseActivity,
   workingLabel = "Working",
   presentation = "chat",
 }: {
@@ -14,6 +15,7 @@ export default function ChatMessageRow({
   content: string;
   onAnswer?: (text: string) => void;
   workDuration?: number;
+  collapseActivity?: boolean;
   workingLabel?: string;
   presentation?: "chat" | "bot" | "session";
 }) {
@@ -33,7 +35,7 @@ export default function ChatMessageRow({
           <Message
             content={content}
             onAnswer={onAnswer}
-            collapseActivity
+            collapseActivity={collapseActivity ?? workDuration !== undefined}
             workDuration={workDuration}
             bubble={false}
           />
