@@ -82,7 +82,11 @@ export default function BotPage() {
     bot?.messages.length,
     bot?.messages.at(-1)?.content,
     liveMessages.length,
-    liveMessages.at(-1)?.parts.filter((part) => part.type === "text").map((part) => part.text).join(""),
+    liveMessages
+      .at(-1)
+      ?.parts.filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join(""),
     sending,
   ]);
 

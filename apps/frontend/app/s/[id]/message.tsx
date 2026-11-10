@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import Markdown from 'react-markdown';
+import Markdown from "react-markdown";
 
 function ToolCallCard({
   name,
@@ -16,10 +16,7 @@ function ToolCallCard({
 }) {
   const statusIcon = status === "working" ? "◌" : status === "done" ? "✓" : "×";
   return (
-    <div
-      key={id}
-      className="flex min-w-0 items-center gap-2 font-mono text-md"
-    >
+    <div key={id} className="flex min-w-0 items-center gap-2 font-mono text-md">
       <span
         className="flex size-4 shrink-0 items-center justify-center text-md"
         aria-label={status}
