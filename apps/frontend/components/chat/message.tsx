@@ -418,10 +418,11 @@ function Message({
       {collapseActivity && activity.length > 0 && (
         <details className="group text-xs text-muted-foreground">
           <summary className="flex w-full cursor-pointer select-none items-center gap-2 py-2 hover:text-foreground">
-            <HugeiconsIcon className="transition-transform group-open:rotate-90 w-4" icon={ArrowRight01Icon} />
-            <span>
-              {workDuration === undefined ? "Show work" : `Worked for ${workDuration}s`}
-            </span>
+            <HugeiconsIcon
+              className="transition-transform group-open:rotate-90 w-4"
+              icon={ArrowRight01Icon}
+            />
+            <span>{workDuration === undefined ? "Show work" : `Worked for ${workDuration}s`}</span>
           </summary>
           <div className="space-y-3 border-t border-border/60 py-3">
             {activity.map((block, index) => (
@@ -447,9 +448,7 @@ function Message({
                     onAnswer={onAnswer}
                   />
                 )}
-                {block.kind === "plan" && (
-                  <PlanCard id={`activity-${index}`} tasks={block.tasks} />
-                )}
+                {block.kind === "plan" && <PlanCard id={`activity-${index}`} tasks={block.tasks} />}
                 {block.kind === "file" && (
                   <FileCard
                     id={`activity-${index}`}

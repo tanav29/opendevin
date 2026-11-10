@@ -604,12 +604,16 @@ export function registerWorkspaceRoutes(app: Express): void {
       const repo = parseGitHubRepo(found.owner.project.repo || "");
       const token = await githubTokenForUser(found.owner.project.userId);
       if (!repo || !token)
-        return res.status(400).json({ error: "A GitHub repository and access token are required." });
+        return res
+          .status(400)
+          .json({ error: "A GitHub repository and access token are required." });
       const head = sanitizeBranch(found.owner.branch);
       const base = sanitizeBranch(req.body?.base);
       const title = typeof req.body?.title === "string" ? req.body.title.trim().slice(0, 250) : "";
       if (!head.startsWith("opendevin/session-") || !base || base === head || !title)
-        return res.status(400).json({ error: "A pushed session branch, base branch, and title are required." });
+        return res
+          .status(400)
+          .json({ error: "A pushed session branch, base branch, and title are required." });
 
       const url = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/pulls`;
       const headers = githubHeaders(token);
@@ -619,9 +623,16 @@ export function registerWorkspaceRoutes(app: Express): void {
           { headers },
         );
         if (existingResponse.ok) {
-          const existing = (await existingResponse.json()) as Array<{ html_url?: string; number?: number }>;
+          const existing = (await existingResponse.json()) as Array<{
+            html_url?: string;
+            number?: number;
+          }>;
           if (existing[0]?.html_url)
-            return res.json({ url: existing[0].html_url, number: existing[0].number, existing: true });
+            return res.json({
+              url: existing[0].html_url,
+              number: existing[0].number,
+              existing: true,
+            });
         }
         const response = await fetch(url, {
           method: "POST",
@@ -643,9 +654,13 @@ export function registerWorkspaceRoutes(app: Express): void {
           return res.status(response.status || 502).json({
             error: result.message || "GitHub could not create the draft pull request.",
           });
-        return res.status(201).json({ url: result.html_url, number: result.number, existing: false });
+        return res
+          .status(201)
+          .json({ url: result.html_url, number: result.number, existing: false });
       } catch {
-        return res.status(502).json({ error: "Could not reach GitHub to create the pull request." });
+        return res
+          .status(502)
+          .json({ error: "Could not reach GitHub to create the pull request." });
       }
     }),
   );

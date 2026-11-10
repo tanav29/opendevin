@@ -634,234 +634,224 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   return (
-      <main className="h-screen bg-background w-full overflow-clip">
-        <header className="absolute top-0 left-0 right-0 z-10 flex shrink-0 items-center justify-between gap-3 bg-sidebar border-b px-3 py-2">
-          <div className="flex items-center gap-2 justify-center">
-            <SidebarTrigger className="md:hidden" />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Back to project"
-              onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
-            >
-              <IconArrowLeft />
-            </Button>
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate">
-                {detail?.title || "Loading session…"}
-              </h1>
-              {detail?.branch && <p>repoName/{detail.branch}</p>}
-            </div>
+    <main className="h-screen bg-background w-full overflow-clip">
+      <header className="absolute top-0 left-0 right-0 z-10 flex shrink-0 items-center justify-between gap-3 bg-sidebar border-b px-3 py-2">
+        <div className="flex items-center gap-2 justify-center">
+          <SidebarTrigger className="md:hidden" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Back to project"
+            onClick={() => (window.location.href = detail ? `/p/${detail.projectId}` : "/")}
+          >
+            <IconArrowLeft />
+          </Button>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="truncate">{detail?.title || "Loading session…"}</h1>
+            {detail?.branch && <p>repoName/{detail.branch}</p>}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <DevRunButton
-              sessionId={sessionId}
-              sandboxReady={ready}
-              devCommand={status?.devCommand}
-              devPort={status?.devPort}
-              onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
-              onError={(message) => toast.error(message)}
-            />
-            <SessionInfoDialog
-              sessionId={sessionId}
-              detail={detail}
-              status={status}
-              onReconnect={() => void reconnect()}
-              onKill={() => void kill()}
-              reconnecting={reconnecting}
-              killing={killing}
-            />
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant="secondary"
-                  size="icon-sm"
-                  aria-label="Delete session"
-                  onClick={() => void removeSession()}
-                  disabled={deleting}
-                >
-                  <IconTrash />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Delete this session and its history</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-flex" />}>
-                <Button
-                  variant={prefs.open ? "outline" : "secondary"}
-                  size="icon-sm"
-                  aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
-                  onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
-                  disabled={!ready}
-                  title={!ready ? "Workspace panel needs a running sandbox" : undefined}
-                >
-                  <IconLayoutSidebarRight />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </header>
-
-          <section className="flex max-w-5xl h-full gap-4 sm:mx-8 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
-              {messages.map((message, index) => {
-                const startedAt = messages
-                  .slice(0, index)
-                  .reverse()
-                  .find((previous) => previous.role === "user")?.createdAt;
-                const elapsedMs = startedAt
-                  ? Date.parse(message.createdAt) - Date.parse(startedAt)
-                  : NaN;
-                const workDuration = Number.isFinite(elapsedMs)
-                  ? Math.max(1, Math.round(elapsedMs / 1000))
-                  : undefined;
-                return (
-                  <ChatMessageRow
-                    key={message.id}
-                    role={message.role === "user" ? "user" : "assistant"}
-                    content={message.content}
-                    workDuration={message.role === "assistant" ? workDuration : undefined}
-                    presentation="session"
-                    workingLabel="Working"
-                    onAnswer={(text) => void sendMessage(text)}
-                  />
-                );
-              })}
-              {/*Why chat messages and live messages are diff component fuck you ai*/}
-                {liveMessages.map((message) => (
-                  <ChatMessageRow
-                    key={message.id}
-                    role={message.role === "user" ? "user" : "assistant"}
-                    content={message.parts
-                      .filter((part) => part.type === "text")
-                      .map((part) => part.text)
-                      .join("")}
-                    presentation="session"
-                    workingLabel="Working"
-                    onAnswer={(text) => void sendMessage(text)}
-                  />
-                ))}
-              <div ref={bottomRef} />
-          </section>
-
-            <div className="absolute bottom-0 left-0 right-0 shrink-0 sm:mx-8 mx-4 pb-4">
-              <ChatComposer
-                value={input}
-                onValueChange={setInput}
-                onSubmit={send}
-                onStop={stop}
-                busy={sending || activeAgent}
-                disabled={chatDisabled}
-                canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
-                placeholder="Tell the agent what to do…"
-                onPasteFiles={(files) => void addFiles(files)}
-                onDropFiles={(files) => void addFiles(files)}
-                attachments={
-                  attachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-                      {attachments.map((a) => (
-                        <span
-                          key={a.id}
-                          className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
-                        >
-                          {a.name} · {(a.content.length / 1024).toFixed(1)}KB
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(a.id)}
-                            className="text-muted-foreground hover:text-foreground"
-                            aria-label={`Remove ${a.name}`}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : undefined
-                }
-                skills={
-                  skills.length > 0 ? (
-                    <SkillChips skills={skills} onRemove={removeSkill} />
-                  ) : undefined
-                }
-                notice={
-                  (activeAgent || agentQueued) && !sending ? (
-                    <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
-                      {agentQueued
-                        ? "The agent is preparing this task. It will be ready for a new message shortly."
-                        : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
-                    </p>
-                  ) : undefined
-                }
-                actions={
-                  <>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      disabled={chatDisabled}
-                      onChange={(e) => {
-                        if (e.target.files) void addFiles(e.target.files);
-                        e.target.value = "";
-                      }}
-                    />
-                    <SkillsButton
-                      selected={skills}
-                      onToggle={toggleSkill}
-                      disabled={chatDisabled}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => fileRef.current?.click()}
-                      disabled={chatDisabled}
-                      className="px-2 text-[12px]"
-                      aria-label="Attach files"
-                    >
-                      <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
-                    </Button>
-                    <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
-                      {status?.plan && status.plan.length > 0
-                        ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
-                        : ""}
-                      {status?.usage?.totalTokens
-                        ? `Context: ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
-                        : ""}
-                    </p>
-                  </>
-                }
-              />
-            </div>
-
-          {prefs.open && (
-            <SessionPanel
-              sessionId={sessionId}
-              sandboxId={status?.sandboxId || detail?.sandboxId || ""}
-              sandboxReady={ready}
-              defaultTitle={detail?.title || ""}
-              prefs={prefs}
-              onPrefs={setPrefs}
-              onReconnect={() => void reconnect()}
-              onCommitted={() => void refresh(sessionId, false)}
-              defaultPort={status?.devPort}
-            />
-          )}
-          <ReconnectConflictDialog
-            conflict={reconnectConflict}
-            reconnecting={reconnecting}
-            onOpenChange={(open) => {
-              if (!open) setReconnectConflict(null);
-            }}
-            onReview={() => {
-              setReconnectConflict(null);
-              setPrefs({ ...prefs, open: true, tab: "changes" });
-            }}
-            onDownload={() => void downloadRecoveryPatch()}
-            onConfirm={() => void reconnect(true)}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <DevRunButton
+            sessionId={sessionId}
+            sandboxReady={ready}
+            devCommand={status?.devCommand}
+            devPort={status?.devPort}
+            onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
+            onError={(message) => toast.error(message)}
           />
-      </main>
+          <SessionInfoDialog
+            sessionId={sessionId}
+            detail={detail}
+            status={status}
+            onReconnect={() => void reconnect()}
+            onKill={() => void kill()}
+            reconnecting={reconnecting}
+            killing={killing}
+          />
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                aria-label="Delete session"
+                onClick={() => void removeSession()}
+                disabled={deleting}
+              >
+                <IconTrash />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete this session and its history</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<span className="inline-flex" />}>
+              <Button
+                variant={prefs.open ? "outline" : "secondary"}
+                size="icon-sm"
+                aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+                onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
+                disabled={!ready}
+                title={!ready ? "Workspace panel needs a running sandbox" : undefined}
+              >
+                <IconLayoutSidebarRight />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {prefs.open ? "Hide workspace panel" : "Show workspace panel"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </header>
+
+      <section className="flex max-w-5xl h-full gap-4 sm:mx-8 pt-16 pb-32 flex-col bg-background overflow-y-auto scrollbar-none">
+        {messages.map((message, index) => {
+          const startedAt = messages
+            .slice(0, index)
+            .reverse()
+            .find((previous) => previous.role === "user")?.createdAt;
+          const elapsedMs = startedAt ? Date.parse(message.createdAt) - Date.parse(startedAt) : NaN;
+          const workDuration = Number.isFinite(elapsedMs)
+            ? Math.max(1, Math.round(elapsedMs / 1000))
+            : undefined;
+          return (
+            <ChatMessageRow
+              key={message.id}
+              role={message.role === "user" ? "user" : "assistant"}
+              content={message.content}
+              workDuration={message.role === "assistant" ? workDuration : undefined}
+              presentation="session"
+              workingLabel="Working"
+              onAnswer={(text) => void sendMessage(text)}
+            />
+          );
+        })}
+        {/*Why chat messages and live messages are diff component fuck you ai*/}
+        {liveMessages.map((message) => (
+          <ChatMessageRow
+            key={message.id}
+            role={message.role === "user" ? "user" : "assistant"}
+            content={message.parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("")}
+            presentation="session"
+            workingLabel="Working"
+            onAnswer={(text) => void sendMessage(text)}
+          />
+        ))}
+        <div ref={bottomRef} />
+      </section>
+
+      <div className="absolute bottom-0 left-0 right-0 shrink-0 sm:mx-8 mx-4 pb-4">
+        <ChatComposer
+          value={input}
+          onValueChange={setInput}
+          onSubmit={send}
+          onStop={stop}
+          busy={sending || activeAgent}
+          disabled={chatDisabled}
+          canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
+          placeholder="Tell the agent what to do…"
+          onPasteFiles={(files) => void addFiles(files)}
+          onDropFiles={(files) => void addFiles(files)}
+          attachments={
+            attachments.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+                {attachments.map((a) => (
+                  <span
+                    key={a.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+                  >
+                    {a.name} · {(a.content.length / 1024).toFixed(1)}KB
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label={`Remove ${a.name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : undefined
+          }
+          skills={
+            skills.length > 0 ? <SkillChips skills={skills} onRemove={removeSkill} /> : undefined
+          }
+          notice={
+            (activeAgent || agentQueued) && !sending ? (
+              <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
+                {agentQueued
+                  ? "The agent is preparing this task. It will be ready for a new message shortly."
+                  : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
+              </p>
+            ) : undefined
+          }
+          actions={
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                className="hidden"
+                disabled={chatDisabled}
+                onChange={(e) => {
+                  if (e.target.files) void addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <SkillsButton selected={skills} onToggle={toggleSkill} disabled={chatDisabled} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileRef.current?.click()}
+                disabled={chatDisabled}
+                className="px-2 text-[12px]"
+                aria-label="Attach files"
+              >
+                <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
+              </Button>
+              <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
+                {status?.plan && status.plan.length > 0
+                  ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
+                  : ""}
+                {status?.usage?.totalTokens
+                  ? `Context: ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
+                  : ""}
+              </p>
+            </>
+          }
+        />
+      </div>
+
+      {prefs.open && (
+        <SessionPanel
+          sessionId={sessionId}
+          sandboxId={status?.sandboxId || detail?.sandboxId || ""}
+          sandboxReady={ready}
+          defaultTitle={detail?.title || ""}
+          prefs={prefs}
+          onPrefs={setPrefs}
+          onReconnect={() => void reconnect()}
+          onCommitted={() => void refresh(sessionId, false)}
+          defaultPort={status?.devPort}
+        />
+      )}
+      <ReconnectConflictDialog
+        conflict={reconnectConflict}
+        reconnecting={reconnecting}
+        onOpenChange={(open) => {
+          if (!open) setReconnectConflict(null);
+        }}
+        onReview={() => {
+          setReconnectConflict(null);
+          setPrefs({ ...prefs, open: true, tab: "changes" });
+        }}
+        onDownload={() => void downloadRecoveryPatch()}
+        onConfirm={() => void reconnect(true)}
+      />
+    </main>
   );
 }

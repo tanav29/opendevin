@@ -106,8 +106,8 @@ export default function ChatComposer({
           <button
             type="submit"
             disabled={disabled || !canSend}
-              aria-label="Send message"
-              className="bg-blue-700 rounded-[99rem] squircle w-7 h-7 flex items-center justify-center hover:scale-105 cursor-pointer transition-transform active:scale-95"
+            aria-label="Send message"
+            className="bg-blue-700 rounded-[99rem] squircle w-7 h-7 flex items-center justify-center hover:scale-105 cursor-pointer transition-transform active:scale-95"
           >
             <HugeiconsIcon icon={ArrowUp01Icon} size={16} strokeWidth={1.8} />
           </button>
