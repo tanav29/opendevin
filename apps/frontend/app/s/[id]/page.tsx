@@ -747,6 +747,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   onAnswer={(text) => void sendMessage(text)}
                 />
               ))}
+              {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
+                <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
+                  <p className="font-medium text-destructive">Agent run failed</p>
+                  <p className="mt-1 whitespace-pre-wrap">{status?.lastError || detail?.lastError}</p>
+                  {messages.at(-1)?.role === "user" && (
+                    <Button
+                      className="mt-3"
+                      size="sm"
+                      variant="outline"
+                      disabled={chatDisabled}
+                      onClick={() => void sendMessage(messages.at(-1)!.content)}
+                    >
+                      Retry last message
+                    </Button>
+                  )}
+                </div>
+              )}
               <div ref={bottomRef} />
             </div>
           </div>
