@@ -454,9 +454,7 @@ function Message({
                     onAnswer={onAnswer}
                   />
                 )}
-                {block.kind === "plan" && (
-                  <PlanCard id={`activity-${index}`} tasks={block.tasks} />
-                )}
+                {block.kind === "plan" && <PlanCard id={`activity-${index}`} tasks={block.tasks} />}
                 {block.kind === "file" && (
                   <FileCard
                     id={`activity-${index}`}

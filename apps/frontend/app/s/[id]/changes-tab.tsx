@@ -292,7 +292,9 @@ export default function ChangesTab({
       );
       setPullRequest(result);
     } catch (error) {
-      setPullRequestError(error instanceof Error ? error.message : "Could not create pull request.");
+      setPullRequestError(
+        error instanceof Error ? error.message : "Could not create pull request.",
+      );
     } finally {
       setCreatingPullRequest(false);
     }

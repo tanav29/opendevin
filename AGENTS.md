@@ -7,3 +7,5 @@ We use pnpm
 Dont edit shadcn files in components/ui/
 
 We need a basic minimal shadcnish ui in `/apps/frontend`
+
+Test with `browse` cli and not `agent-browser`.

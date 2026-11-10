@@ -96,17 +96,21 @@ export default function ChatComposer({
         <div className="flex items-center gap-1.5">{actions}</div>
         {busy ? (
           <Button
-            variant={"outline"}
-            size={"icon"}
+            type="button"
+            variant="outline"
+            size="icon"
             onClick={onStop}
+            aria-label="Stop generation"
           >
             <HugeiconsIcon icon={StopIcon} />
           </Button>
         ) : (
           <Button
-              variant={"default"}
-              size={"icon"}
-              disabled={disabled || !canSend}
+            type="submit"
+            variant="default"
+            size="icon"
+            disabled={disabled || !canSend}
+            aria-label="Send message"
           >
             <HugeiconsIcon icon={ArrowUp01Icon} />
           </Button>

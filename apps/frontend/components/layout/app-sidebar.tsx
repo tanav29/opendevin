@@ -124,11 +124,10 @@ export function AppSidebar() {
         </SidebarHeader>
 
         <SidebarContent>
-
-        {(auth.status === "signed-out" || auth.status === "unavailable") && (
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
+          {(auth.status === "signed-out" || auth.status === "unavailable") && (
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={pathname === "/login"}
@@ -139,10 +138,10 @@ export function AppSidebar() {
                       <span>Sign in</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
 
           {auth.status === "signed-in" && (
             <>
@@ -166,7 +165,7 @@ export function AppSidebar() {
                       <SidebarMenuButton
                         isActive={pathname === "/bot"}
                         tooltip="Bot"
-                         size="sm"
+                        size="sm"
                         render={<Link href="/bot" prefetch />}
                       >
                         <HugeiconsIcon icon={Robot02Icon} />
@@ -176,9 +175,6 @@ export function AppSidebar() {
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
-
-
-
 
               <Collapsible defaultOpen className="group/collapsible">
                 <SidebarGroup>
@@ -247,14 +243,13 @@ export function AppSidebar() {
                                   tooltip={`${s.title} · Agent ${s.status === "queued" ? "waiting" : statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
                                   render={<Link href={`/s/${s.id}`} prefetch />}
                                 >
-                                  {(s.status == "running" || s.status == "queued") ? (
+                                  {s.status == "running" || s.status == "queued" ? (
                                     <Loader className="h-3 text-muted-foreground" />
-                                  ) :
-                                  s.status == "failed" ? (
+                                  ) : s.status == "failed" ? (
                                     <CircleX className="h-3 text-muted-foreground" />
-                                  ) :
-                                   <HugeiconsIcon icon={Chat} className="text-muted-foreground" />
-                                  }
+                                  ) : (
+                                    <HugeiconsIcon icon={Chat} className="text-muted-foreground" />
+                                  )}
 
                                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
                                   {/*<span
@@ -272,9 +267,9 @@ export function AppSidebar() {
                     </SidebarGroupContent>
                   </CollapsibleContent>
                 </SidebarGroup>
-                  </Collapsible>
+              </Collapsible>
 
-                  <Collapsible defaultOpen className="group/collapsible">
+              <Collapsible defaultOpen className="group/collapsible">
                 <SidebarGroup>
                   <SidebarGroupLabel render={<CollapsibleTrigger />}>
                     Projects
@@ -323,9 +318,8 @@ export function AppSidebar() {
                   </CollapsibleContent>
                 </SidebarGroup>
               </Collapsible>
-
-              </>
-            )}
+            </>
+          )}
         </SidebarContent>
 
         <SidebarFooter>

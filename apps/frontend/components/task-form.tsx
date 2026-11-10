@@ -42,7 +42,11 @@ type Props = {
 
 function matchProject(projects: TaskFormProject[], repo: GithubRepo) {
   const normalize = (value: string) =>
-    value.trim().replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
+    value
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\.git$/i, "")
+      .toLowerCase();
   const repoUrls = new Set([repo.htmlUrl, repo.cloneUrl].map(normalize));
   return projects.find((project) => repoUrls.has(normalize(project.repo))) ?? null;
 }
