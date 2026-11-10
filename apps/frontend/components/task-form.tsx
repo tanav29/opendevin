@@ -286,7 +286,7 @@ export default function TaskForm({
             >
               <SelectTrigger className="text-xs w-auto border-0 bg-transparent!">
                 <IconBrandGithub className="size-3.5 shrink-0 text-muted-foreground" />
-                <SelectValue placeholder="Select repo" />
+                <SelectValue placeholder="Select repo">{activeProjectId ? repositoryLabel : undefined}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={EMPTY_SANDBOX}>Empty sandbox</SelectItem>

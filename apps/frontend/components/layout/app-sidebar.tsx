@@ -299,13 +299,12 @@ export function AppSidebar() {
                               <SidebarMenuItem key={p.id}>
                                 <SidebarMenuButton
                                   isActive={active}
-                                  tooltip={p.repo}
+                                  tooltip={p.repo || "Empty sandbox"}
                                   render={<Link href={`/p/${p.id}`} prefetch />}
                                 >
                                   <IconFolder className="shrink-0 text-muted-foreground" />
                                   <span className="min-w-0 flex-1 truncate">
-                                    {p.repo.split("/")[p.repo.split("/").length - 2]}/
-                                    {p.repo.split("/")[p.repo.split("/").length - 1]}
+                                    {p.repo ? p.repo.split("/").slice(-2).join("/") : "Empty sandbox"}
                                   </span>
                                 </SidebarMenuButton>
                                 {count > 0 && <SidebarMenuBadge>{count}</SidebarMenuBadge>}
