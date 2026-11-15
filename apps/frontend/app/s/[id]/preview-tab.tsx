@@ -134,19 +134,16 @@ export default function PreviewTab({
           onChange={(e) => setPort(e.target.value)}
           placeholder="3000"
           inputMode="numeric"
-          className="w-16"
+          className="w-16 font-mono text-xs h-7"
         />
         <Input
           value={path}
           onChange={(e) => setPath(e.target.value)}
           placeholder="/"
-          className="min-w-0 flex-1"
+          className="min-w-0 flex-1 font-mono text-xs h-7"
         />
-        <Button onClick={() => void resolve()} disabled={resolving}>
+        <Button onClick={() => void resolve()} disabled={resolving} size="sm">
           {url ? "Reload" : resolving ? "…" : "Open"}
-        </Button>
-        <Button variant="outline" onClick={() => void startDev()} disabled={starting}>
-          {starting ? "…" : "Auto-start"}
         </Button>
       </div>
       {url && (

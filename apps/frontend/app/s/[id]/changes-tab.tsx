@@ -2,17 +2,10 @@
 
 import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
-import { IconRefresh } from "@tabler/icons-react";
+import { Download, GitBranch, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 
@@ -21,7 +14,6 @@ export default function ChangesTab({
   sandboxId,
   available,
   active,
-  defaultTitle,
   onReconnect,
   onCommitted,
   onUseComment,
@@ -44,28 +36,9 @@ export default function ChangesTab({
     capturedAt: string | null;
   } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [commitOpen, setCommitOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [committing, setCommitting] = useState(false);
-  const [commitError, setCommitError] = useState("");
-  const [commitDone, setCommitDone] = useState("");
-  const [committedBase, setCommittedBase] = useState("");
-  const [committedTitle, setCommittedTitle] = useState("");
-  const [pullRequest, setPullRequest] = useState<{ url: string; number?: number } | null>(null);
-  const [creatingPullRequest, setCreatingPullRequest] = useState(false);
-  const [pullRequestError, setPullRequestError] = useState("");
   const [reverting, setReverting] = useState("");
-  const [preflight, setPreflight] = useState<{
-    repo: string;
-    sourceBranch: string;
-    destinationBranch: string;
-    changedFileCount: number;
-    untrackedFiles: string[];
-    untrackedCount: number;
-  } | null>(null);
-  const [preflightLoading, setPreflightLoading] = useState(false);
-  const [preflightError, setPreflightError] = useState("");
-  const [confirmUntracked, setConfirmUntracked] = useState(false);
   const [git, setGit] = useState<{
     branch: string;
     files: { path: string; staged: string; unstaged: string }[];
@@ -115,41 +88,6 @@ export default function ChangesTab({
       };
     }
   }, [sessionId]);
-
-  const readPreflight = useCallback(async () => {
-    setPreflightLoading(true);
-    setPreflightError("");
-    try {
-      const data = await api<{
-        repo: string;
-        sourceBranch: string;
-        destinationBranch: string;
-        changedFileCount: number;
-        untrackedFiles?: string[];
-        untrackedCount?: number;
-      }>(`/api/sessions/${sessionId}/commit/preflight`, undefined, 60_000);
-      setPreflight({
-        repo: data.repo,
-        sourceBranch: data.sourceBranch,
-        destinationBranch: data.destinationBranch,
-        changedFileCount: data.changedFileCount,
-        untrackedFiles: data.untrackedFiles || [],
-        untrackedCount: data.untrackedCount || 0,
-      });
-      setConfirmUntracked(false);
-    } catch (error) {
-      setPreflight(null);
-      setPreflightError(
-        error instanceof Error ? error.message : "Could not check the publish target.",
-      );
-    } finally {
-      setPreflightLoading(false);
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (commitOpen) void readPreflight();
-  }, [commitOpen, readPreflight]);
 
   const applyDiff = useCallback(({ ok, payload }: { ok: boolean; payload: DiffPayload }) => {
     if (!ok) {
@@ -205,6 +143,7 @@ export default function ChangesTab({
       hunkSeparators: "line-info",
       lineDiffType: "word-alt",
       overflow: "scroll",
+      disableFileHeader: true,
     }),
     [],
   );
@@ -253,18 +192,12 @@ export default function ChangesTab({
     }
   }
 
-  const messageReady = Boolean(
-    commitMessage.trim() &&
-    preflight &&
-    !preflightLoading &&
-    (!preflight.untrackedCount || confirmUntracked),
+  const includedFiles = (git?.files || []).filter(
+    (file) => !selectedFiles.length || selectedFiles.includes(file.path),
   );
-
   async function commit() {
-    if (committing || !messageReady) return;
-    const message = commitMessage.trim();
+    if (committing || !includedFiles.length || !available) return;
     setCommitting(true);
-    setCommitError("");
     try {
       const data = await api<{
         branch?: string;
@@ -272,130 +205,74 @@ export default function ChangesTab({
         destinationBranch?: string;
         repo?: string;
         changedFileCount?: number;
+        message?: string;
       }>(
         `/api/sessions/${sessionId}/commit`,
         {
           method: "POST",
           body: JSON.stringify({
-            message,
-            confirmUntracked: preflight?.untrackedCount ? confirmUntracked : true,
+            files: selectedFiles,
+            confirmUntracked: true,
           }),
         },
         180_000,
       );
       const target = data.destinationBranch || data.branch || "the generated session branch";
-      setCommitDone(
-        `Pushed ${data.changedFileCount ?? preflight?.changedFileCount ?? 0} files to ${target}`,
-      );
-      setCommittedBase(data.sourceBranch || preflight?.sourceBranch || "");
-      setCommittedTitle(message);
-      setPullRequest(null);
-      setPullRequestError("");
-      setCommitOpen(false);
-      setCommitMessage("");
+      const result = `Pushed ${data.changedFileCount ?? includedFiles.length} files to ${target}`;
+      toast.success(result);
+      setSelectedFiles([]);
       refresh();
       onCommitted?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Commit failed.";
-      setCommitError(message);
-      if (err instanceof ApiError && err.code === "untracked_files") {
-        setConfirmUntracked(false);
-        await readPreflight();
-      } else {
-        toast.error(message);
-      }
+      toast.error(message);
     } finally {
       setCommitting(false);
     }
   }
 
-  async function createPullRequest() {
-    if (creatingPullRequest || !committedBase || !committedTitle) return;
-    setCreatingPullRequest(true);
-    setPullRequestError("");
-    try {
-      const result = await api<{ url: string; number?: number }>(
-        `/api/sessions/${sessionId}/pull-request`,
-        {
-          method: "POST",
-          body: JSON.stringify({ base: committedBase, title: committedTitle }),
-        },
-        60_000,
-      );
-      setPullRequest(result);
-      void readGit();
-    } catch (error) {
-      setPullRequestError(
-        error instanceof Error ? error.message : "Could not create pull request.",
-      );
-    } finally {
-      setCreatingPullRequest(false);
-    }
-  }
-
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <p className="font-mono text-[11px] text-muted-foreground">
-          {loading
-            ? "Loading diff…"
-            : diff
-              ? `${parsedFiles.length} files${truncated ? " · truncated" : ""}${persisted ? " · saved" : ""}`
-              : "No diff loaded"}
-        </p>
-        <div className="flex gap-1.5">
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={() => void downloadPatch()}
-            disabled={!diff}
-            className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-          >
-            .patch
-          </button>
-          <button
-            onClick={() => {
-              setCommitError("");
-              setCommitDone("");
-              setCommittedBase("");
-              setCommittedTitle("");
-              setPullRequest(null);
-              setPullRequestError("");
-              setCommitOpen(true);
-            }}
-            disabled={!diff || !available}
-            className="rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-40"
-          >
-            Commit
-          </button>
-        </div>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+        <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span
+          className="min-w-0 flex-1 truncate text-xs font-medium"
+          title={git?.branch || "Unknown branch"}
+        >
+          {git?.branch || "Git"}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={refresh}
+          disabled={loading}
+          aria-label="Refresh Git changes"
+          title="Refresh"
+          className="text-muted-foreground"
+        >
+          <RefreshCw className="size-3.5" aria-hidden="true" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => void downloadPatch()}
+          disabled={!diff}
+          aria-label="Download patch"
+          title="Download patch"
+          className="text-muted-foreground"
+        >
+          <Download className="size-3.5" aria-hidden="true" />
+        </Button>
+        <Button
+          size="xs"
+          onClick={() => void commit()}
+          disabled={!git?.files.length || !available || committing}
+        >
+          {committing ? "Pushing?" : "Commit & push"}
+        </Button>
       </div>
-      {commitDone && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
-          <span>{commitDone}</span>
-          {pullRequest ? (
-            <a href={pullRequest.url} target="_blank" rel="noreferrer" className="underline">
-              Draft PR{pullRequest.number ? ` #${pullRequest.number}` : ""}
-            </a>
-          ) : (
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              disabled={!committedBase || creatingPullRequest}
-              onClick={() => void createPullRequest()}
-            >
-              {creatingPullRequest ? "Creating PR…" : "Create draft PR"}
-            </Button>
-          )}
-          {pullRequestError && <span className="text-danger">{pullRequestError}</span>}
-        </div>
-      )}
       {recoveryPatch && (
         <div className="flex items-center justify-between gap-3 border-b border-warning/40 bg-warning-muted/30 px-3 py-2 text-xs">
           <span>
@@ -424,16 +301,12 @@ export default function ChangesTab({
           </button>
         </p>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto py-2">
-        <div className="space-y-4 border-b border-border px-3 pb-4 text-xs">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="space-y-1 px-3 pt-3 text-xs">
           {gitError && <p className="text-danger">{gitError}</p>}
           {!git && !gitError && <p className="text-muted-foreground">Loading Git details…</p>}
           {git && (
             <>
-              <div>
-                <span className="text-muted-foreground">Branch </span>
-                <span className="font-mono break-all">{git.branch || "Unknown"}</span>
-              </div>
               {git.workspaceError && (
                 <p className="text-muted-foreground">
                   {git.workspaceError}{" "}
@@ -442,42 +315,75 @@ export default function ChangesTab({
                   </button>
                 </p>
               )}
-              {(
-                [
-                  ["Staged", "staged"],
-                  ["Unstaged", "unstaged"],
-                ] as const
-              ).map(([label, key]) => {
-                const files = git.files.filter((file) => file[key]);
-                return (
-                  <section key={key}>
-                    <h3 className="font-medium">
-                      {label} <span className="text-muted-foreground">{files.length}</span>
-                    </h3>
-                    {files.length ? (
-                      <ul className="mt-1 space-y-1">
-                        {files.map((file) => (
-                          <li key={file.path} className="flex gap-2 font-mono">
-                            <span
-                              className="w-3 shrink-0 text-muted-foreground"
-                              title={file[key] === "?" ? "Untracked" : file[key]}
-                            >
-                              {file[key]}
-                            </span>
-                            <span className="break-all">{file.path}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="mt-1 text-muted-foreground">
-                        No {label.toLowerCase()} changes.
-                      </p>
-                    )}
-                  </section>
-                );
-              })}
-              <section>
-                <h3 className="font-medium">Pull requests</h3>
+              <section className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-medium">
+                    Changes{" "}
+                    <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {git.files.length}
+                    </span>
+                  </h3>
+                  {selectedFiles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFiles([]);
+                      }}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1 text-muted-foreground">
+                  {git.files.length > 0 &&
+                    (selectedFiles.length
+                      ? `${selectedFiles.length} selected`
+                      : "All files will be included unless you select files")}
+                </p>
+                {git.files.length ? (
+                  <ul className="mt-2 overflow-hidden rounded-md border border-border">
+                    {git.files.map((file) => (
+                      <li key={file.path}>
+                        <label className="flex cursor-pointer items-center gap-2.5 px-2.5 py-2 hover:bg-muted/60">
+                          <input
+                            type="checkbox"
+                            checked={selectedFiles.includes(file.path)}
+                            onChange={(event) => {
+                              setSelectedFiles((current) =>
+                                event.target.checked
+                                  ? [...current, file.path]
+                                  : current.filter((path) => path !== file.path),
+                              );
+                            }}
+                            className="accent-foreground"
+                            aria-label={`Select ${file.path}`}
+                          />
+                          <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
+                            {file.path}
+                          </span>
+                          <span
+                            className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                            title={
+                              file.unstaged === "?"
+                                ? "Untracked"
+                                : `Staged: ${file.staged || "none"}; unstaged: ${file.unstaged || "none"}`
+                            }
+                          >
+                            {file.unstaged === "?"
+                              ? "New"
+                              : [file.staged, file.unstaged].filter(Boolean).join(" / ")}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-muted-foreground">Working tree is clean.</p>
+                )}
+              </section>
+              <section className="border-t border-border py-2.5">
+                <h3 className="font-medium">Pull request</h3>
                 {git.pullRequestError ? (
                   <p className="mt-1 text-muted-foreground">{git.pullRequestError}</p>
                 ) : git.pullRequests.length === 0 ? (
@@ -528,10 +434,10 @@ export default function ChangesTab({
                   ))
                 )}
               </section>
-              <section>
-                <h3 className="font-medium">
+              <details className="border-t border-border py-2.5">
+                <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
                   Commits <span className="text-muted-foreground">{git.commits.length}</span>
-                </h3>
+                </summary>
                 {git.commits.length ? (
                   <ul className="mt-1 space-y-1">
                     {git.commits.map((commit) => (
@@ -550,139 +456,67 @@ export default function ChangesTab({
                   History available in this workspace; shallow clones may have older commits
                   omitted.
                 </p>
-              </section>
+              </details>
             </>
           )}
         </div>
-        {diff === null && !loading && (
-          <p className="px-3 py-6 text-[13px] text-muted-foreground">
-            Open this tab to load the workspace diff.
-          </p>
-        )}
-        {diff !== null && !diff && (
-          <div className="px-3 py-6 text-center">
-            <p className="text-sm font-medium">No changes</p>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              The workspace matches HEAD. Ask the agent to edit files.
+        <details className="mx-3 border-t border-border py-2.5 text-xs">
+          <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
+            Diff{" "}
+            <span className="text-muted-foreground">
+              {loading ? "Loading?" : truncated ? "Truncated" : persisted ? "Saved" : ""}
+            </span>
+          </summary>
+          {diff === null && !loading && (
+            <p className="px-3 py-6 text-[13px] text-muted-foreground">
+              Open this tab to load the workspace diff.
             </p>
-          </div>
-        )}
-        {diff && parsedFiles.length === 0 && (
-          <div className="px-3 py-4">
-            <p className="text-center text-[13px] text-muted-foreground">
-              Pretty view could not parse this diff — showing raw patch.
-            </p>
-            <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-mono text-[11px] whitespace-pre">
-              {diff.slice(0, 20000)}
-            </pre>
-          </div>
-        )}
-        {parsedFiles.map((fileDiff, index) => (
-          <div key={`${fileDiff.name}-${index}`} className="mb-3 min-w-0 overflow-x-auto px-3">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <p className="truncate font-mono text-[11px] text-muted-foreground">
-                {fileDiff.name}
+          )}
+          {diff !== null && !diff && (
+            <div className="px-3 py-6 text-center">
+              <p className="text-sm font-medium">No changes</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                The workspace matches HEAD. Ask the agent to edit files.
               </p>
-              <button
-                onClick={() => void revertFile(fileDiff.name)}
-                disabled={reverting === fileDiff.name}
-                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40"
-                title={`Revert ${fileDiff.name}`}
-              >
-                {reverting === fileDiff.name ? "…" : "Revert"}
-              </button>
             </div>
-            <FileDiff fileDiff={fileDiff} options={diffOptions} className="w-full" />
+          )}
+          {diff && parsedFiles.length === 0 && (
+            <div className="px-3 py-4">
+              <p className="text-center text-[13px] text-muted-foreground">
+                Pretty view could not parse this diff — showing raw patch.
+              </p>
+              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-mono text-[11px] whitespace-pre">
+                {diff.slice(0, 20000)}
+              </pre>
+            </div>
+          )}
+          <div className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
+            {parsedFiles.map((fileDiff, index) => (
+              <details key={`${fileDiff.name}-${index}`}>
+                <summary
+                  className="cursor-pointer truncate px-2.5 py-2 font-mono hover:bg-muted/60"
+                  title={fileDiff.name}
+                >
+                  {fileDiff.name}
+                </summary>
+                <div className="min-w-0 overflow-x-auto border-t border-border">
+                  <div className="flex justify-end px-2 py-1">
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => void revertFile(fileDiff.name)}
+                      disabled={reverting === fileDiff.name}
+                    >
+                      {reverting === fileDiff.name ? "Reverting?" : "Revert"}
+                    </Button>
+                  </div>
+                  <FileDiff fileDiff={fileDiff} options={diffOptions} className="w-full" />
+                </div>
+              </details>
+            ))}
           </div>
-        ))}
+        </details>
       </div>
-      <Dialog open={commitOpen} onOpenChange={setCommitOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Commit changes</DialogTitle>
-            <DialogDescription>
-              Review the exact remote target before committing and pushing.
-            </DialogDescription>
-          </DialogHeader>
-          {preflightLoading ? (
-            <p className="text-sm text-muted-foreground">Checking publish target…</p>
-          ) : preflightError ? (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-danger">{preflightError}</p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void readPreflight()}
-              >
-                <IconRefresh className="size-3.5" /> Retry
-              </Button>
-            </div>
-          ) : preflight ? (
-            <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-xs">
-              <p>
-                <span className="text-muted-foreground">Repository:</span> {preflight.repo}
-              </p>
-              <p>
-                <span className="text-muted-foreground">Source branch:</span>{" "}
-                {preflight.sourceBranch}
-              </p>
-              <p>
-                <span className="text-muted-foreground">Destination branch:</span>{" "}
-                {preflight.destinationBranch}
-              </p>
-              <p>
-                <span className="text-muted-foreground">Changed files:</span>{" "}
-                {preflight.changedFileCount}
-              </p>
-              {preflight.untrackedCount > 0 && (
-                <label className="flex items-start gap-2 text-warning">
-                  <input
-                    type="checkbox"
-                    checked={confirmUntracked}
-                    onChange={(e) => setConfirmUntracked(e.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    `git add -A` includes {preflight.untrackedCount} untracked file(s). Review them
-                    before pushing.
-                    {preflight.untrackedFiles.length > 0 && (
-                      <span className="mt-1 block font-mono text-[11px] break-all">
-                        {preflight.untrackedFiles.join(", ")}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              )}
-            </div>
-          ) : null}
-          <textarea
-            value={commitMessage}
-            onChange={(e) => setCommitMessage(e.target.value)}
-            placeholder={defaultTitle || "Commit message"}
-            rows={3}
-            autoFocus
-            className="w-full resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
-          />
-          {commitError && <p className="text-xs text-danger">{commitError}</p>}
-          <div className="flex justify-end gap-1.5">
-            <button
-              onClick={() => setCommitOpen(false)}
-              disabled={committing}
-              className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => void commit()}
-              disabled={committing || !messageReady}
-              className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-40"
-            >
-              {committing ? "Pushing…" : "Commit + push"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
