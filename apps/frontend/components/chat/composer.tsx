@@ -105,7 +105,6 @@ export default function ChatComposer({
           )}
           <InputGroupTextarea
             value={value}
-            disabled={disabled}
             onChange={(event) => onValueChange(event.target.value)}
             onPaste={(event) => {
               if (onPasteFiles && event.clipboardData.files.length > 0)

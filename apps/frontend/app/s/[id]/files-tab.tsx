@@ -11,6 +11,7 @@ import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 export default function FilesTab({
@@ -26,6 +27,7 @@ export default function FilesTab({
   active: boolean;
   onReconnect: () => void;
 }) {
+  const [editorOpen, setEditorOpen] = useState(false);
   const [paths, setPaths] = useState<string[]>([]);
   const [pathsTruncated, setPathsTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -101,6 +103,7 @@ export default function FilesTab({
     async (path: string) => {
       if (!path || fileLoading) return;
       if (dirty && !window.confirm("Discard unsaved file changes?")) return;
+      setEditorOpen(true);
       setPathInput(path);
       setLoadedPath("");
       setContentTruncated(false);
@@ -201,7 +204,7 @@ export default function FilesTab({
           className="h-7 text-[12px]"
         />
       </div>
-      <div className="min-h-0 max-h-[40%] flex-shrink-0 overflow-auto border-b border-border">
+      <div className="min-h-0 flex-1 overflow-auto">
         {loading ? (
           <p className="px-3 py-4 text-[13px] text-muted-foreground">Listing files…</p>
         ) : paths.length === 0 ? (
@@ -210,6 +213,13 @@ export default function FilesTab({
           <FileTree model={model} className="px-1 py-2" />
         )}
       </div>
+      <Dialog open={editorOpen} onOpenChange={(open) => {
+        if (!open && dirty && !window.confirm("Discard unsaved file changes?")) return;
+        setEditorOpen(open);
+        if (!open) setLoadedPath("");
+      }}>
+      <DialogContent className="h-[80vh] max-w-4xl">
+      <DialogTitle>File editor</DialogTitle>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
           <Input
@@ -274,6 +284,8 @@ export default function FilesTab({
           )}
         </div>
       </div>
+      </DialogContent>
+      </Dialog>
       {pathsTruncated && (
         <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
           Showing first 5,000 files.

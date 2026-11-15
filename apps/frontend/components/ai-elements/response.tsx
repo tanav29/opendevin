@@ -2,6 +2,7 @@
 
 import { Children, isValidElement, type ReactNode } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CodeBlock,
   CodeBlockActions,
@@ -47,6 +48,7 @@ export function Response({ children }: { children: string }) {
   return (
     <div className="typeset typeset-docs min-w-0 break-words text-sm leading-6">
       <Markdown
+        remarkPlugins={[remarkGfm]}
         skipHtml
         components={{
           pre({ children }) {

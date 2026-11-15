@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   BrainIcon,
+  FileIcon, FilePenIcon, FolderTreeIcon, SearchIcon, Trash2Icon, ShareIcon, CircleHelpIcon,
   CircleCheckIcon,
   CircleDotIcon,
   CircleIcon,
@@ -38,18 +39,11 @@ export function Tool({
 }) {
   const running = state === "running";
   const failed = state === "error";
+  const Icon = ({ list_files: FolderTreeIcon, read_file: FileIcon, write_file: FilePenIcon, edit_file: FilePenIcon, delete_file: Trash2Icon, search: SearchIcon, run_command: TerminalIcon, share_file: ShareIcon, ask_user: CircleHelpIcon, Questionnaire: CircleHelpIcon } as Record<string, typeof WrenchIcon>)[name] ?? WrenchIcon;
   const line = (
     <TraceLine status={running ? "running" : failed ? "error" : undefined}>
       <TraceIcon>
-        {running ? (
-          <LoaderCircleIcon className="motion-safe:animate-spin" />
-        ) : failed ? (
-          <XIcon />
-        ) : name === "run_command" ? (
-          <TerminalIcon />
-        ) : (
-          <WrenchIcon />
-        )}
+        <Icon aria-label={name.replaceAll("_", " ")} />
       </TraceIcon>
       <TraceTitle className="whitespace-normal break-words">
         {name.replaceAll("_", " ")}
