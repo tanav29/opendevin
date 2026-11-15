@@ -19,6 +19,7 @@ export type PtyEntry = {
 
 const entries = new Map<string, PtyEntry>();
 const connecting = new Map<string, Promise<PtyEntry>>();
+const writes = new Map<string, Promise<boolean>>();
 const RING_MAX_BYTES = 64 * 1024;
 
 function clampTermSize(cols: number, rows: number): { cols: number; rows: number } {
@@ -147,7 +148,16 @@ export async function writePty(
   text: string,
 ): Promise<boolean> {
   if (!text) return false;
-  return sendToPty(sessionId, sandboxId, workspacePath, text);
+  const previous = writes.get(sessionId);
+  const write = (previous ? previous.catch(() => false) : Promise.resolve(false)).then(() =>
+    sendToPty(sessionId, sandboxId, workspacePath, text),
+  );
+  writes.set(sessionId, write);
+  try {
+    return await write;
+  } finally {
+    if (writes.get(sessionId) === write) writes.delete(sessionId);
+  }
 }
 
 export async function resizePty(sessionId: string, sandboxId: string, cols: number, rows: number) {

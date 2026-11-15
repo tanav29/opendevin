@@ -20,7 +20,8 @@ export default function TerminalTab({
   useEffect(() => {
     if (!available) return;
     let disposed = false;
-    let term: { destroy(): void } | null = null;
+    let term: { dispose(): void } | null = null;
+    let resizeObserver: ResizeObserver | null = null;
     let socket: Socket | null = null;
     let terminalReady = false;
 
@@ -28,31 +29,38 @@ export default function TerminalTab({
       const element = containerRef.current;
       if (!element || disposed) return;
       try {
-        const { WTerm } = await import("@wterm/dom");
+        const [{ Terminal }, { FitAddon }] = await Promise.all([
+          import("@xterm/xterm"),
+          import("@xterm/addon-fit"),
+        ]);
         if (disposed || !containerRef.current) return;
-        const terminal = new WTerm(containerRef.current, {
-          autoResize: true,
+        const terminal = new Terminal({
           cursorBlink: true,
-          onData: (data) => {
-            if (terminalReady && socket?.connected) socket.emit("pty:input", data);
-          },
-          onResize: (cols, rows) => {
-            if (terminalReady && socket?.connected) socket.emit("pty:resize", { cols, rows });
-          },
+          fontFamily: "monospace",
         });
-        await terminal.init();
-        if (disposed) {
-          terminal.destroy();
-          return;
-        }
         term = terminal;
+        const fit = new FitAddon();
+        terminal.loadAddon(fit);
+        terminal.open(element);
+        const resize = () => {
+          if (element.clientWidth && element.clientHeight) fit.fit();
+        };
+        terminal.onData((data) => {
+          if (terminalReady && socket?.connected) socket.emit("pty:input", data);
+        });
+        terminal.onResize(({ cols, rows }) => {
+          if (terminalReady && socket?.connected) socket.emit("pty:resize", { cols, rows });
+        });
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(element);
+        resize();
 
         const connection = io(API, {
           path: "/api/socket.io",
           transports: ["websocket"],
           withCredentials: true,
           autoConnect: false,
-          auth: { sessionId, cols: terminal.cols, rows: terminal.rows },
+          auth: (callback) => callback({ sessionId, cols: terminal.cols, rows: terminal.rows }),
         });
         socket = connection;
         connection.on("connect_error", () => {
@@ -65,6 +73,7 @@ export default function TerminalTab({
         });
         connection.on("pty:ready", () => {
           terminalReady = true;
+          connection.emit("pty:resize", { cols: terminal.cols, rows: terminal.rows });
           setConnectError("");
         });
         connection.on("pty:data", (message: { data?: string }) =>
@@ -86,13 +95,14 @@ export default function TerminalTab({
 
     return () => {
       disposed = true;
+      resizeObserver?.disconnect();
       try {
         socket?.disconnect();
       } catch {
         // Socket already gone.
       }
       try {
-        term?.destroy();
+        term?.dispose();
       } catch {
         // Terminal already gone.
       }
@@ -117,7 +127,7 @@ export default function TerminalTab({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-scroll">
+    <div className="flex h-full flex-col overflow-hidden">
       {connectError && (
         <p className="border-b border-white/10 px-3 py-2 text-xs text-red-400">
           {connectError}{" "}
