@@ -1,8 +1,15 @@
 import { config } from "./config.js";
-import server from "./server.js";
+import { createApp } from "./application.js";
+import { attachTerminal } from "./server.js";
+
+const app = createApp();
 
 if (!process.env.VERCEL) {
-  server.listen(config.port, () => console.log(`API listening on http://localhost:${config.port}`));
+  const server = app.listen(config.port, (error) => {
+    if (error) throw error;
+    console.log(`API listening on http://localhost:${config.port}`);
+  });
+  attachTerminal(server);
 }
 
-export default server;
+export default app;

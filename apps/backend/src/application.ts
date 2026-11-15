@@ -5,19 +5,33 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth/auth.js";
 import { FRONTEND_ORIGINS, LIMITS } from "./config.js";
 import { errorMiddleware } from "./http.js";
-import { registerRoutes } from "./routes/index.js";
+import chatRoutes from "./routes/chat.js";
+import githubRoutes from "./routes/github.js";
+import projectRoutes from "./routes/projects.js";
+import sessionRoutes from "./routes/sessions.js";
+import skillRoutes from "./routes/skills.js";
+import systemRoutes from "./routes/system.js";
+import workspaceRoutes from "./routes/workspace.js";
 
 export function createApp(): express.Express {
   const app = express();
 
+  app.disable("x-powered-by");
   app.use(cors({ origin: FRONTEND_ORIGINS, credentials: true }));
   app.all("/api/auth/*splat", toNodeHandler(auth));
   app.use(express.json({ limit: LIMITS.routerJsonLimit }));
 
-  registerRoutes(app);
+  app.use(
+    systemRoutes,
+    githubRoutes,
+    projectRoutes,
+    sessionRoutes,
+    chatRoutes,
+    workspaceRoutes,
+    skillRoutes,
+  );
+  app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
-  // Keep async route failures (and body-parser errors) as JSON for the client
-  // instead of Express's default HTML error page.
   app.use(errorMiddleware);
 
   return app;

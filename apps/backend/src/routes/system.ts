@@ -1,6 +1,8 @@
-import type { Express } from "express";
+import { Router } from "express";
 
-export function registerSystemRoutes(app: Express): void {
-  app.get("/api/health", (_req, res) => res.json({ ok: true }));
-  app.get("/", (_req, res) => res.json({ name: "OpenDevin API", ok: true }));
-}
+const router = Router();
+
+router.get("/api/health", (_req, res) => res.json({ ok: true }));
+router.get("/", (_req, res) => res.json({ name: "OpenDevin API", ok: true }));
+
+export default router;

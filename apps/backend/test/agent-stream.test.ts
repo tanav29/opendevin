@@ -4,7 +4,13 @@ import { streamText, type TextStreamPart, type ToolSet } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV2 } from "ai/test";
 import type { Sandbox } from "e2b";
 import { AGENT_STOP } from "../src/agent.js";
-import { drainAgentStream } from "../src/chat.js";
+import {
+  activeTurns,
+  claimAgentTurn,
+  drainAgentStream,
+  releaseAgentTurn,
+  stopAgentTurn,
+} from "../src/chat.js";
 import { sandboxTools } from "../src/tools.js";
 
 function stream(parts: TextStreamPart<ToolSet>[]) {
@@ -42,6 +48,7 @@ test("does not treat a generic tool-only stream as an assistant response", async
   );
   assert.equal(result.visibleText, "");
   assert.match(visible, /data-tool="call"/);
+  assert.equal(result.text, visible);
 });
 
 test("keeps clarification questions as visible assistant output", async () => {
@@ -93,8 +100,6 @@ test("streams a download card for shared files without exposing tool markers", a
     (chunk) => {
       streamed += chunk;
     },
-    undefined,
-    false,
   );
   assert.match(result.visibleText, /data-file=/);
   assert.match(streamed, /data-file=/);
@@ -107,6 +112,30 @@ test("propagates SDK stream errors", async () => {
     drainAgentStream(stream([{ type: "error", error }]), () => undefined),
     error,
   );
+});
+
+test("does not persist an aborted stream as a completed reply", async () => {
+  await assert.rejects(
+    drainAgentStream(
+      stream([{ type: "text-delta", id: "text", text: "Still working." }, { type: "abort" }]),
+      () => undefined,
+    ),
+    { name: "AbortError" },
+  );
+});
+
+test("keeps a stopped turn reserved until its owner finishes", () => {
+  const controller = claimAgentTurn("stopping", "chat")!;
+  try {
+    assert.equal(stopAgentTurn("stopping"), true);
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(claimAgentTurn("stopping", "chat"), null);
+    releaseAgentTurn("stopping", new AbortController());
+    assert.equal(activeTurns.has("stopping"), true);
+  } finally {
+    releaseAgentTurn("stopping", controller);
+  }
+  assert.equal(activeTurns.has("stopping"), false);
 });
 
 test("reports the SDK token totals across all steps", async () => {

@@ -367,18 +367,11 @@ export default function SessionChatPreview({
                 key={message.id}
                 role={message.role}
                 content={message.content}
-                presentation="session"
-                workingLabel="Working"
                 onAnswer={(answer) => send(answer)}
               />
             ))}
             {busy && messages.at(-1)?.role === "assistant" && !messages.at(-1)?.content && (
-              <ChatMessageRow
-                role="assistant"
-                content=""
-                presentation="session"
-                workingLabel="Working"
-              />
+              <ChatMessageRow role="assistant" content="" />
             )}
             <div ref={bottomRef} />
           </>

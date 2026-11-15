@@ -40,9 +40,9 @@ test("buildSkillsNote embeds the exact install commands", () => {
 });
 
 test("buildSystemPrompt appends the skills note only when skills are selected", () => {
-  const plain = buildSystemPrompt("/ws", null, "", "", "");
+  const plain = buildSystemPrompt("/ws", null, "", "");
   assert.doesNotMatch(plain, /skills protocol/i);
-  const withSkills = buildSystemPrompt("/ws", null, "", "", "", [
+  const withSkills = buildSystemPrompt("/ws", null, "", "", [
     { source: "prisma/skills", slug: "prisma-cli" },
   ]);
   assert.match(withSkills, /npx skills add prisma\/skills --skill prisma-cli/);

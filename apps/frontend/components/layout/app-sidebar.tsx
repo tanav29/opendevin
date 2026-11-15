@@ -12,7 +12,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Chat, Robot02Icon } from "@hugeicons/core-free-icons";
+import { Chat } from "@hugeicons/core-free-icons";
 
 import {
   Sidebar,
@@ -159,24 +159,6 @@ export function AppSidebar() {
                   />
                 </div>
               </div>
-
-              <SidebarGroup>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        isActive={pathname === "/bot"}
-                        tooltip="Bot"
-                        size="sm"
-                        render={<Link href="/bot" prefetch />}
-                      >
-                        <HugeiconsIcon icon={Robot02Icon} />
-                        <span>Bot</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
 
               <Collapsible defaultOpen className="group/collapsible">
                 <SidebarGroup>

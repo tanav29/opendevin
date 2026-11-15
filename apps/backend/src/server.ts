@@ -1,16 +1,13 @@
-import { createServer, type Server } from "node:http";
-import type { Express } from "express";
+import type { Server } from "node:http";
+import { fromNodeHeaders } from "better-auth/node";
 import { Server as SocketIOServer } from "socket.io";
-import { createApp } from "./application.js";
 import { auth } from "./auth/auth.js";
 import { FRONTEND_ORIGINS, WORKSPACE_PATH } from "./config.js";
-import { authHeaders } from "./http.js";
 import { prisma } from "./db/prisma.js";
 import { attachPty, detachPty, replayPty, resizePty, writePty } from "./pty.js";
 import { checkSandboxAvailable } from "./sandbox.js";
 
-export function createHttpServer(app: Express): { server: Server; io: SocketIOServer } {
-  const server = createServer(app);
+export function attachTerminal(server: Server): SocketIOServer {
   const io = new SocketIOServer(server, {
     path: "/api/socket.io",
     transports: ["websocket"],
@@ -23,7 +20,9 @@ export function createHttpServer(app: Express): { server: Server; io: SocketIOSe
 
   io.use(async (socket, next) => {
     try {
-      const session = await auth.api.getSession({ headers: authHeaders(socket.request) });
+      const session = await auth.api.getSession({
+        headers: fromNodeHeaders(socket.request.headers),
+      });
       if (!session) return next(new Error("Sign in required"));
 
       const owner = await prisma.projectSession.findFirst({
@@ -52,6 +51,8 @@ export function createHttpServer(app: Express): { server: Server; io: SocketIOSe
     };
     const cols = Number(socket.handshake.auth.cols) || 80;
     const rows = Number(socket.handshake.auth.rows) || 24;
+
+    socket.on("disconnect", () => detachPty(owner.id, socket));
 
     void (async () => {
       try {
@@ -106,13 +107,8 @@ export function createHttpServer(app: Express): { server: Server; io: SocketIOSe
           Number(dimensions.rows) || 24,
         );
       });
-
-      socket.on("disconnect", () => detachPty(owner.id, socket));
     })().catch(() => socket.disconnect(true));
   });
 
-  return { server, io };
+  return io;
 }
-
-const { server } = createHttpServer(createApp());
-export default server;

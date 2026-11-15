@@ -17,7 +17,6 @@ export function serializeAttachments(attachments: Attachment[]) {
     .join("\n\n");
 }
 
-// Text attachments are pasted into the message for both Bot and session chats.
 export function useAttachments() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const attachmentsRef = useRef<Attachment[]>([]);

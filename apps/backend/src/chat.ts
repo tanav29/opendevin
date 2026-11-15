@@ -11,7 +11,6 @@ import type { Response } from "express";
 import { prisma } from "./db/prisma.js";
 import {
   AGENT_STOP,
-  buildSkillsNote,
   buildSystemPrompt,
   compactToolContext,
   loadToolLog,
@@ -19,9 +18,8 @@ import {
   trimToolLog,
   type SkillSelection,
 } from "./agent.js";
-import { resolveChatModel, WORKSPACE_PATH } from "./config.js";
-import { LIMITS } from "./config.js";
-import { connectSandboxTools, SHARED_FILE_PREFIX } from "./tools.js";
+import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "./config.js";
+import { connectSandboxTools, SHARED_FILE_PREFIX, type SandboxToolset } from "./tools.js";
 import {
   hasUnrestoredWorkspace,
   snapshotDiffAndIdle,
@@ -30,8 +28,6 @@ import {
 } from "./workspace.js";
 import type { TurnKind } from "./lifecycle.js";
 
-// In-flight agent turns by session. Lets POST /stop abort the model stream
-// server-side instead of only dropping the client's fetch.
 export type ActiveTurn = { controller: AbortController; kind: TurnKind };
 export const activeTurns = new Map<string, ActiveTurn>();
 
@@ -49,7 +45,6 @@ export async function pipeAgentUIMessageStream(
   res: Response,
   onFinish: (turn: Awaited<ReturnType<typeof drainAgentStream>>) => Promise<void>,
   onPlan?: (tasksJson: string) => void,
-  includeToolMarkers = true,
   onError?: (error: unknown) => Promise<void>,
 ): Promise<void> {
   const stream = createUIMessageStream({
@@ -61,7 +56,6 @@ export async function pipeAgentUIMessageStream(
           result,
           (delta) => writer.write({ type: "text-delta", id, delta }),
           onPlan,
-          includeToolMarkers,
         );
         await onFinish(turn);
         writer.write({ type: "text-end", id });
@@ -74,10 +68,6 @@ export async function pipeAgentUIMessageStream(
   });
   await pipeUIMessageStreamToResponse({ response: res, stream });
 }
-
-// --- Stream markers --------------------------------------------------------
-// The chat endpoint streams compact HTML markers for tool/question/error
-// parts. Tool payloads and results stay server-side.
 
 function questionPayload(input: unknown): string {
   let question = "Question";
@@ -150,7 +140,6 @@ export function toolCallMarker(name: string, input: unknown): string {
   return `\n\n<details data-tool="call" data-arg="${argument}"><summary>${name}</summary>\n\n`;
 }
 
-// A shared file renders as a download card in both Bot and session chats.
 export function fileMarker(payloadJson: string): string {
   return `\n\n<div data-file='${payloadJson.replace(/'/g, "&#39;")}'>\n\n</div>\n\n`;
 }
@@ -175,7 +164,6 @@ export async function drainAgentStream(
   },
   sink: (chunk: string) => void,
   onPlan?: (tasksJson: string) => void,
-  includeToolMarkers = true,
 ): Promise<{
   messages: ModelMessage[];
   text: string;
@@ -183,16 +171,21 @@ export async function drainAgentStream(
   usage: AgentUsage | undefined;
 }> {
   let visibleText = "";
+  let text = "";
+  const write = (chunk: string) => {
+    text += chunk;
+    sink(chunk);
+  };
   for await (const p of result.fullStream) {
     if (p.type === "text-delta") {
       visibleText += p.text;
-      sink(p.text);
+      write(p.text);
     } else if (p.type === "tool-call") {
       const name = p.toolName;
-      if (includeToolMarkers && name !== "share_file") {
+      if (name !== "share_file") {
         const marker = toolCallMarker(name, p.input);
         if (name === "ask_user" || name === "update_plan") visibleText += marker;
-        sink(marker);
+        write(marker);
       }
     } else if (p.type === "tool-result" || p.type === "tool-error") {
       const name = p.toolName;
@@ -205,10 +198,10 @@ export async function drainAgentStream(
       ) {
         const marker = fileMarker(output.slice(SHARED_FILE_PREFIX.length));
         visibleText += marker;
-        sink(marker);
+        write(marker);
       }
-      if (includeToolMarkers && name !== "share_file") {
-        sink(toolDoneMarker(name, p.type, output));
+      if (name !== "share_file") {
+        write(toolDoneMarker(name, p.type, output));
       }
       if (name === "update_plan" && typeof output === "string" && output.startsWith("__PLAN__")) {
         try {
@@ -219,11 +212,12 @@ export async function drainAgentStream(
       }
     } else if (p.type === "error") {
       throw p.error;
+    } else if (p.type === "abort") {
+      throw new DOMException("The agent run was stopped.", "AbortError");
     }
   }
-  const [response, text, usage] = await Promise.all([
+  const [response, usage] = await Promise.all([
     result.response,
-    result.text,
     result.totalUsage?.catch(() => undefined),
   ]);
   return {
@@ -273,9 +267,6 @@ export type TurnPersistence = {
   usage: AgentUsage | undefined;
 };
 
-// Persist a finished agent turn: the assistant text to the timeline, the full
-// (text + tool) transcript to toolLog for the next turn, a best-effort diff
-// snapshot, and finally reset the session status so it is not left "running".
 export async function persistFinishedTurn(sessionId: string, turn: TurnPersistence): Promise<void> {
   const content = turn.replyText.trim() ? turn.replyText.slice(0, LIMITS.replyChars) : "";
   if (!content) throw new Error("The agent finished without an assistant response.");
@@ -297,38 +288,30 @@ export function startAgentTurn(
     workspacePath: string;
     repo: string | null;
     branch: string;
-    sandboxNote: string;
     modelHistory: ModelMessage[];
-    tools: Awaited<ReturnType<typeof connectSandboxTools>>["tools"];
-    systemPrompt?: string;
+    tools: SandboxToolset;
     projectInstructions?: string;
     skills?: SkillSelection[];
   },
-  reservation?: { controller: AbortController; kind: TurnKind },
+  reservation: { controller: AbortController; kind: TurnKind },
 ) {
-  const controller = reservation?.controller ?? new AbortController();
-  const kind = reservation?.kind ?? "chat";
-  const current = activeTurns.get(sessionId);
-  if (current && current.controller !== controller) {
-    throw new Error("An agent turn is already running for this session.");
+  const { controller } = reservation;
+  if (activeTurns.get(sessionId)?.controller !== controller) {
+    throw new Error("The agent turn is not reserved for this session.");
   }
-  activeTurns.set(sessionId, { controller, kind });
   const result = streamText({
     model: createOpenRouter({ apiKey: opts.apiKey })(opts.modelId),
-    system:
-      opts.systemPrompt != null
-        ? `${opts.systemPrompt}${buildSkillsNote(opts.skills ?? [])}`
-        : buildSystemPrompt(
-            opts.workspacePath,
-            opts.repo,
-            opts.branch,
-            opts.sandboxNote,
-            opts.projectInstructions,
-            opts.skills ?? [],
-          ),
+    system: buildSystemPrompt(
+      opts.workspacePath,
+      opts.repo,
+      opts.branch,
+      opts.projectInstructions,
+      opts.skills ?? [],
+    ),
     messages: opts.modelHistory,
     prepareStep: ({ messages }) => ({ messages: compactToolContext(messages) }),
-    ...(opts.tools ? { tools: opts.tools, stopWhen: AGENT_STOP } : {}),
+    tools: opts.tools,
+    stopWhen: AGENT_STOP,
     abortSignal: controller.signal,
   });
   return { result, controller };
@@ -392,11 +375,11 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
 
     controller = claimAgentTurn(sessionId, "initial");
     if (!controller) return;
-    const { tools, sandboxNote, projectInstructions } = await connectSandboxTools(
+    const connected = await connectSandboxTools(
       session.sandboxId,
       session.workspacePath || WORKSPACE_PATH,
     );
-    if (!tools && session.sandboxId) {
+    if (!connected) {
       await snapshotWorkspaceDiff(sessionId);
       await prisma.projectSession.update({
         where: { id: sessionId },
@@ -408,6 +391,7 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
       });
       return;
     }
+    const { tools, projectInstructions } = connected;
     controller.signal.throwIfAborted();
     await prisma.projectSession.update({
       where: { id: sessionId },
@@ -425,20 +409,16 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
         workspacePath: session.workspacePath || WORKSPACE_PATH,
         repo: session.project.repo,
         branch: session.branch,
-        sandboxNote,
         modelHistory,
         tools,
         projectInstructions,
       },
       { controller, kind: "initial" },
     );
-    let streamed = "";
     let latestPlan: string | null = null;
     const { messages, text, visibleText, usage } = await drainAgentStream(
       result,
-      (chunk) => {
-        streamed += chunk;
-      },
+      () => undefined,
       (planJson) => {
         latestPlan = planJson;
       },
@@ -447,33 +427,41 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
       throw new Error("The agent finished without an assistant response. Retry the task.");
     }
     await persistFinishedTurn(sessionId, {
-      replyText: streamed.trim() ? streamed : text,
+      replyText: text,
       modelHistory,
       toolMessages: messages,
       planJson: latestPlan,
       usage,
     });
   } catch (error) {
-    console.error("runInitialTurn failed", error);
-    const stopped = controller?.signal.aborted ?? false;
-    const message = stopped
-      ? "The agent run was stopped."
-      : error instanceof Error
-        ? error.message.slice(0, 500)
-        : "The initial agent run failed.";
-    if (controller) await snapshotWorkspaceDiff(sessionId).catch(() => undefined);
-    await prisma.projectSession
-      .update({
-        where: { id: sessionId },
-        data: {
-          status: stopped ? "stopped" : "failed",
-          lastError: withContinuityWarning(previousError, message),
-        },
-      })
-      .catch(() => undefined);
+    await failAgentTurn(sessionId, error, controller?.signal, previousError);
   } finally {
     if (controller) releaseAgentTurn(sessionId, controller);
   }
 }
 
-export { persistTurnExtras };
+export async function failAgentTurn(
+  sessionId: string,
+  error: unknown,
+  signal?: AbortSignal,
+  previousError: string | null = null,
+): Promise<string> {
+  const stopped = signal?.aborted || (error instanceof Error && error.name === "AbortError");
+  if (!stopped) console.error("Agent turn failed", error);
+  const message = stopped
+    ? "The agent run was stopped."
+    : error instanceof Error
+      ? error.message.slice(0, 500)
+      : "The agent run failed. Retry the task.";
+  await snapshotWorkspaceDiff(sessionId).catch(() => undefined);
+  await prisma.projectSession
+    .update({
+      where: { id: sessionId },
+      data: {
+        status: stopped ? "stopped" : "failed",
+        lastError: withContinuityWarning(previousError, message),
+      },
+    })
+    .catch(() => undefined);
+  return message;
+}

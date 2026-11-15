@@ -2,7 +2,6 @@
 
 import { Badge } from "@/components/ui/badge";
 
-// Shared sandbox/agent/result badges so Bot and session headers stay consistent.
 export default function ChatStatusBadges({
   sandbox,
   agent,

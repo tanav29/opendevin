@@ -491,8 +491,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   key={message.id}
                   role={message.role === "user" ? "user" : "assistant"}
                   content={message.content}
-                  presentation="session"
-                  workingLabel="Working"
                   onAnswer={(text) => void sendMessage(text)}
                 />
               ))}
@@ -505,8 +503,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     .filter((part) => part.type === "text")
                     .map((part) => part.text)
                     .join("")}
-                  presentation="session"
-                  workingLabel="Working"
                   onAnswer={(text) => void sendMessage(text)}
                 />
               ))}

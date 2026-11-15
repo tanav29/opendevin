@@ -34,7 +34,7 @@ The frontend calls the backend over HTTP and uses a WebSocket for the terminal. 
 Important backend modules:
 
 - `apps/backend/src/index.ts` — starts the API and WebSocket server
-- `apps/backend/src/app.ts` — Express app, CORS, Better Auth, routes, and errors
+- `apps/backend/src/application.ts` — Express app, CORS, Better Auth, routes, and errors
 - `apps/backend/src/routes/` — project, session, chat, workspace, GitHub, and health routes
 - `apps/backend/src/auth/auth.ts` — Better Auth configuration
 - `apps/backend/src/chat.ts` and `apps/backend/src/agent.ts` — agent turns, streaming, tools, and persistence

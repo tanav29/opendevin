@@ -5,8 +5,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
 import { Button } from "../ui/button";
 
-// Shared composer shell for Bot and session chats, so both keep the same input,
-// send/stop controls, drag-and-drop, and height behavior.
 export default function ChatComposer({
   value,
   onValueChange,

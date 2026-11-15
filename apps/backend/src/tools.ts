@@ -1,11 +1,9 @@
 import { tool } from "ai";
 import { Sandbox } from "e2b";
 import { z } from "zod";
-import { prisma } from "./db/prisma.js";
 import { LIMITS, WORKSPACE_PATH } from "./config.js";
 import { sanitizeRel, shellQuote } from "./sanitize.js";
 import { runSandbox } from "./sandbox.js";
-import { BOT_PROJECT_REPO } from "./config.js";
 import { webTools } from "./web-tools.js";
 import { truncateOutput } from "./tool-output.js";
 
@@ -16,26 +14,11 @@ export type SandboxToolset = ReturnType<typeof sandboxTools>;
 export const SHARED_FILE_PREFIX = "__FILE__";
 export const SHARED_FILE_URL_TTL_SECONDS = 3600;
 
-// Attach sandbox tools when the workspace sandbox is reachable, otherwise
-// return a note so the agent answers from general knowledge.
 export async function connectSandboxTools(
   sandboxId: string,
   workspacePath: string,
-): Promise<{
-  tools: SandboxToolset | undefined;
-  sandboxNote: string;
-  projectInstructions: string;
-  sandbox: Sandbox | null;
-}> {
-  if (!sandboxId) {
-    return {
-      tools: undefined,
-      sandboxNote:
-        "The cloud sandbox is still provisioning (repo clone pending). Answer from general knowledge and ask the user to retry once it is ready.",
-      projectInstructions: "",
-      sandbox: null,
-    };
-  }
+): Promise<{ tools: SandboxToolset; projectInstructions: string; sandbox: Sandbox } | null> {
+  if (!sandboxId) return null;
   try {
     const sandbox = await Sandbox.connect(sandboxId);
     const cwd = workspacePath || WORKSPACE_PATH;
@@ -48,18 +31,11 @@ export async function connectSandboxTools(
     }
     return {
       tools: sandboxTools(sandbox, cwd),
-      sandboxNote: "",
       projectInstructions,
       sandbox,
     };
   } catch {
-    return {
-      tools: undefined,
-      sandboxNote:
-        "The cloud sandbox is currently unreachable. Answer from general knowledge and suggest reconnecting the sandbox.",
-      projectInstructions: "",
-      sandbox: null,
-    };
+    return null;
   }
 }
 
@@ -270,100 +246,6 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
           .max(12),
       }),
       execute: async ({ tasks }) => `__PLAN__${JSON.stringify(tasks)}`,
-    }),
-  };
-}
-
-export function botSessionTools(userId: string) {
-  return {
-    search_sessions: tool({
-      description:
-        "Search the user's project sessions by title, repository, status, or recent message text. Read-only.",
-      inputSchema: z.object({ query: z.string().min(1).max(200) }),
-      execute: async ({ query }: { query: string }) => {
-        const sessions = await prisma.projectSession.findMany({
-          where: {
-            archivedAt: null,
-            project: { userId, repo: { not: BOT_PROJECT_REPO } },
-          },
-          include: {
-            project: { select: { repo: true } },
-            messages: { orderBy: { createdAt: "desc" }, take: 1, select: { content: true } },
-          },
-          orderBy: { updatedAt: "desc" },
-          take: 100,
-        });
-        const needle = query.toLowerCase();
-        return sessions
-          .filter(
-            (session: {
-              title: string;
-              status: string;
-              project: { repo: string };
-              messages: { content: string }[];
-            }) => {
-              const latest = session.messages[0]?.content ?? "";
-              return [session.title, session.project.repo, session.status, latest]
-                .join("\n")
-                .toLowerCase()
-                .includes(needle);
-            },
-          )
-          .slice(0, 20)
-          .map(
-            (session: {
-              id: string;
-              title: string;
-              status: string;
-              sandboxStatus: string;
-              project: { repo: string };
-              messages: { content: string }[];
-              updatedAt: Date;
-            }) => ({
-              id: session.id,
-              title: session.title,
-              repo: session.project.repo,
-              status: session.status,
-              sandboxStatus: session.sandboxStatus,
-              lastMessage: (session.messages[0]?.content ?? "").slice(-500),
-              updatedAt: session.updatedAt,
-            }),
-          );
-      },
-    }),
-    get_session_status: tool({
-      description:
-        "Read one of the user's project sessions, including whether it is working or done and its latest text. Read-only.",
-      inputSchema: z.object({ sessionId: z.string().min(1) }),
-      execute: async ({ sessionId }: { sessionId: string }) => {
-        const session = await prisma.projectSession.findFirst({
-          where: {
-            id: sessionId,
-            archivedAt: null,
-            project: { userId, repo: { not: BOT_PROJECT_REPO } },
-          },
-          include: {
-            project: { select: { repo: true } },
-            messages: {
-              orderBy: { createdAt: "desc" },
-              take: 1,
-              select: { role: true, content: true, createdAt: true },
-            },
-          },
-        });
-        if (!session) return "Session not found.";
-        const working = session.status === "running" || session.status === "queued";
-        return {
-          id: session.id,
-          title: session.title,
-          repo: session.project.repo,
-          status: working ? "working" : "done",
-          agentStatus: session.status,
-          sandboxStatus: session.sandboxStatus,
-          lastMessage: (session.messages[0]?.content ?? "").slice(-500),
-          updatedAt: session.updatedAt,
-        };
-      },
     }),
   };
 }

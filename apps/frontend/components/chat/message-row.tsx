@@ -10,8 +10,6 @@ export default function ChatMessageRow({
   role: "user" | "assistant";
   content: string;
   onAnswer?: (text: string) => void;
-  workingLabel?: string;
-  presentation?: "chat" | "bot" | "session";
 }) {
   if (role === "user") {
     return (
