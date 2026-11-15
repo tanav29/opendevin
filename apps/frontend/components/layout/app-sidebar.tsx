@@ -35,7 +35,6 @@ import { statusLabel } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
 import { CircleX, Code2, Loader } from "lucide-react";
-import { SandboxStatus } from "@/components/sandbox-status";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -43,7 +42,6 @@ type Session = {
   title: string;
   status: string;
   sandboxStatus: string;
-  sandboxExpiresAt?: string | null;
   branch: string;
   updatedAt: string;
   projectId: string;
@@ -236,11 +234,6 @@ export function AppSidebar() {
                                   )}
 
                                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                                  <SandboxStatus
-                                    status={s.sandboxStatus}
-                                    expiresAt={s.sandboxExpiresAt}
-                                    compact
-                                  />
                                 </SidebarMenuButton>
                               </SidebarMenuItem>
                             );

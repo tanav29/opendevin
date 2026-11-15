@@ -100,7 +100,6 @@ router.get("/api/sessions/:id/status", async (req, res) => {
     sandboxStatus: owner.sandboxStatus,
     sandboxAvailable,
     sandboxId: owner.sandboxId,
-    sandboxExpiresAt: owner.sandboxExpiresAt,
     workspacePath: owner.workspacePath,
     lastError: owner.lastError,
     status: owner.status,
@@ -157,7 +156,6 @@ router.post("/api/sessions/:id/reconnect", async (req, res) => {
     data: {
       sandboxId: "",
       sandboxStatus: "creating",
-      sandboxExpiresAt: null,
       status: "queued",
       lastError: null,
     },
@@ -205,7 +203,6 @@ router.post("/api/sessions/:id/kill", async (req, res) => {
     where: { id: owner.id },
     data: {
       sandboxId: "",
-      sandboxExpiresAt: null,
       sandboxStatus: "error",
       status: "stopped",
       lastError: "Sandbox killed by user. Reconnect to start a new one.",

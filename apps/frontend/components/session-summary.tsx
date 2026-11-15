@@ -7,8 +7,7 @@ import { IconGitBranch, IconClock } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { repoName, timeAgo, timestamp } from "@/lib/format";
-import { Archive, CircleDashed, Loader } from "lucide-react";
-import { SandboxStatus } from "./sandbox-status";
+import { Archive, Box, CircleDashed, Loader } from "lucide-react";
 import { Button } from "./ui/button";
 import { useConfirm } from "./ui/confirm";
 import { api } from "@/lib/api";
@@ -22,7 +21,15 @@ export type SessionSummaryData = {
   createdAt?: string | null;
   status?: string | null;
   sandboxStatus?: string | null;
-  sandboxExpiresAt?: string | null;
+};
+
+const SANDBOX_TONE: Record<string, string> = {
+  ready: "text-success",
+  error: "text-danger",
+  pending: "text-warning",
+  creating: "text-warning",
+  cloning: "text-warning",
+  "setting-up": "text-warning",
 };
 
 function isWorking(session: SessionSummaryData) {
@@ -50,13 +57,11 @@ function SummaryContent({ session, showRepo }: { session: SessionSummaryData; sh
         )}
       </div>
       <div className="min-w-0 flex-1 -my-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <p className="min-w-0 truncate text-sm font-medium">
-            {session.title || "Untitled session"}
-          </p>
-          <SandboxStatus status={sandboxStatus} expiresAt={session.sandboxExpiresAt} compact />
-        </div>
+        <p className="truncate text-sm font-medium">{session.title || "Untitled session"}</p>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <div className={cn(SANDBOX_TONE[sandboxStatus] || "text-muted-foreground")}>
+            <Box className="size-3" />
+          </div>
           {showRepo && session.repo && <span className="truncate">{repoName(session.repo)}</span>}
           {session.branch && (
             <span className="inline-flex min-w-0 items-center gap-1 font-mono">

@@ -175,14 +175,13 @@ async function provisionSandboxUnlocked(sessionId: string): Promise<boolean> {
 
   await prisma.projectSession.update({
     where: { id: sessionId },
-    data: { sandboxStatus: "creating", sandboxExpiresAt: null, status: "queued", lastError: null },
+    data: { sandboxStatus: "creating", status: "queued", lastError: null },
   });
 
   try {
     if (!process.env.E2B_API_KEY) {
       throw new Error("E2B_API_KEY is not configured");
     }
-    const sandboxExpiresAt = new Date(Date.now() + SANDBOX_TIMEOUT_MS);
     const sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
     if (provisioningCanceled(sessionId)) {
       await killSandbox(sandbox.sandboxId);
@@ -193,7 +192,6 @@ async function provisionSandboxUnlocked(sessionId: string): Promise<boolean> {
       where: { id: sessionId },
       data: {
         sandboxId: sandbox.sandboxId,
-        sandboxExpiresAt,
         sandboxStatus: existing.project.repo?.trim() ? "cloning" : "setting-up",
         status: "queued",
       },

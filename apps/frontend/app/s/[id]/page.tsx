@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { SandboxStatus } from "@/components/sandbox-status";
 import { usePanelPrefs } from "./panel-prefs";
 import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
@@ -468,12 +467,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <span className="hidden sm:inline-flex">
-            <SandboxStatus
-              status={provisioningPhase}
-              expiresAt={status?.sandboxExpiresAt ?? detail?.sandboxExpiresAt}
-            />
-          </span>
           <DevRunButton
             sessionId={sessionId}
             sandboxReady={ready}

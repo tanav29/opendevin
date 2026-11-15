@@ -85,7 +85,6 @@ model ProjectSession {
   status        String   @default("idle")
   sandboxId     String   @default("")
   sandboxStatus String   @default("pending")
-  sandboxExpiresAt DateTime?
   workspacePath String   @default("/home/user/workspace")
   branch        String   @default("")
   model         String   @default("")
