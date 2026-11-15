@@ -1,5 +1,6 @@
 "use client";
 
+import { File as CodeFile } from "@pierre/diffs/react";
 import { useCallback, useEffect, useState } from "react";
 import {
   FileTree,
@@ -27,6 +28,7 @@ export default function FilesTab({
   active: boolean;
   onReconnect: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [paths, setPaths] = useState<string[]>([]);
   const [pathsTruncated, setPathsTruncated] = useState(false);
@@ -103,6 +105,7 @@ export default function FilesTab({
     async (path: string) => {
       if (!path || fileLoading) return;
       if (dirty && !window.confirm("Discard unsaved file changes?")) return;
+      setEditing(false);
       setEditorOpen(true);
       setPathInput(path);
       setLoadedPath("");
@@ -213,78 +216,99 @@ export default function FilesTab({
           <FileTree model={model} className="px-1 py-2" />
         )}
       </div>
-      <Dialog open={editorOpen} onOpenChange={(open) => {
-        if (!open && dirty && !window.confirm("Discard unsaved file changes?")) return;
-        setEditorOpen(open);
-        if (!open) setLoadedPath("");
-      }}>
-      <DialogContent className="h-[80vh] max-w-4xl">
-      <DialogTitle>File editor</DialogTitle>
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
-          <Input
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
-            placeholder="path/to/file.ts"
-            className="h-7 font-mono text-[11px]"
-            spellCheck={false}
-          />
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => void openFile(pathInput)}
-            disabled={!pathInput || fileLoading}
-          >
-            Open
-          </Button>
-          <Button
-            size="xs"
-            onClick={() => void saveFile()}
-            disabled={!loadedPath || pathMismatch || contentTruncated || !dirty || saving}
-          >
-            {saving ? "…" : "Save"}
-          </Button>
-          <span className="ml-auto text-[11px] text-muted-foreground" aria-live="polite">
-            {saving ? "Saving…" : dirty ? "Unsaved changes" : loadedPath ? "Saved" : ""}
-          </span>
-        </div>
-        {fileError && (
-          <p className="border-b border-border px-3 py-1.5 text-xs text-destructive">{fileError}</p>
-        )}
-        {contentTruncated && (
-          <p className="border-b border-border bg-warning-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
-            This file preview is truncated. It is read-only so omitted content cannot be
-            overwritten.
-          </p>
-        )}
-        {pathMismatch && (
-          <p className="border-b border-border bg-warning-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
-            The path changed. Open it before editing or saving this file.
-          </p>
-        )}
-        <div className="min-h-0 flex-1 overflow-auto">
-          {fileLoading ? (
-            <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading file…</p>
-          ) : loadedPath ? (
-            <Textarea
-              value={fileContent}
-              readOnly={contentTruncated || pathMismatch}
-              onChange={(e) => {
-                if (contentTruncated || pathMismatch) return;
-                setFileContent(e.target.value);
-              }}
-              spellCheck={false}
-              className="min-h-full rounded-none border-0 font-mono text-[12px] leading-5 focus-visible:ring-0"
-              placeholder="File content…"
-            />
-          ) : (
-            <p className="px-3 py-4 text-[13px] text-muted-foreground">
-              Select a file in the tree or type a path to edit.
-            </p>
-          )}
-        </div>
-      </div>
-      </DialogContent>
+      <Dialog
+        open={editorOpen}
+        onOpenChange={(open) => {
+          if (!open && dirty && !window.confirm("Discard unsaved file changes?")) return;
+          setEditorOpen(open);
+          if (!open) setLoadedPath("");
+        }}
+      >
+        <DialogContent className="h-[80vh] max-w-4xl">
+          <DialogTitle>File editor</DialogTitle>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
+              <Input
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                placeholder="path/to/file.ts"
+                className="h-7 font-mono text-[11px]"
+                spellCheck={false}
+              />
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void openFile(pathInput)}
+                disabled={!pathInput || fileLoading}
+              >
+                Open
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setEditing(!editing)}
+                disabled={!loadedPath || contentTruncated || pathMismatch}
+              >
+                {editing ? "Preview" : "Edit"}
+              </Button>
+              <Button
+                size="xs"
+                onClick={() => void saveFile()}
+                disabled={!loadedPath || pathMismatch || contentTruncated || !dirty || saving}
+              >
+                {saving ? "…" : "Save"}
+              </Button>
+              <span className="ml-auto text-[11px] text-muted-foreground" aria-live="polite">
+                {saving ? "Saving…" : dirty ? "Unsaved changes" : loadedPath ? "Saved" : ""}
+              </span>
+            </div>
+            {fileError && (
+              <p className="border-b border-border px-3 py-1.5 text-xs text-destructive">
+                {fileError}
+              </p>
+            )}
+            {contentTruncated && (
+              <p className="border-b border-border bg-warning-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+                This file preview is truncated. It is read-only so omitted content cannot be
+                overwritten.
+              </p>
+            )}
+            {pathMismatch && (
+              <p className="border-b border-border bg-warning-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+                The path changed. Open it before editing or saving this file.
+              </p>
+            )}
+            <div className="min-h-0 flex-1 overflow-auto">
+              {fileLoading ? (
+                <p className="px-3 py-4 text-[13px] text-muted-foreground">Loading file…</p>
+              ) : loadedPath && !editing ? (
+                <CodeFile
+                  file={{ name: loadedPath, contents: fileContent }}
+                  options={{
+                    theme: { dark: "pierre-dark", light: "pierre-light" },
+                    overflow: "scroll",
+                  }}
+                />
+              ) : loadedPath ? (
+                <Textarea
+                  value={fileContent}
+                  readOnly={contentTruncated || pathMismatch}
+                  onChange={(e) => {
+                    if (contentTruncated || pathMismatch) return;
+                    setFileContent(e.target.value);
+                  }}
+                  spellCheck={false}
+                  className="min-h-full rounded-none border-0 font-mono text-[12px] leading-5 focus-visible:ring-0"
+                  placeholder="File content…"
+                />
+              ) : (
+                <p className="px-3 py-4 text-[13px] text-muted-foreground">
+                  Select a file in the tree or type a path to edit.
+                </p>
+              )}
+            </div>
+          </div>
+        </DialogContent>
       </Dialog>
       {pathsTruncated && (
         <p className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
