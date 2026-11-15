@@ -12,7 +12,7 @@ export const LIMITS = {
   replyChars: 100_000,
   fileReadChars: 100_000,
   fileWriteChars: 200_000,
-  toolFileReadChars: 20_000,
+  toolFileReadChars: 12_000,
   toolStdoutChars: 12_000,
   toolStderrChars: 4_000,
   cloneErrorChars: 2_000,

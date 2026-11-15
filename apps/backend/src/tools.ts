@@ -2,11 +2,12 @@ import { tool } from "ai";
 import { Sandbox } from "e2b";
 import { z } from "zod";
 import { prisma } from "./db/prisma.js";
-import { WORKSPACE_PATH } from "./config.js";
+import { LIMITS, WORKSPACE_PATH } from "./config.js";
 import { sanitizeRel, shellQuote } from "./sanitize.js";
 import { runSandbox } from "./sandbox.js";
 import { BOT_PROJECT_REPO } from "./config.js";
 import { webTools } from "./web-tools.js";
+import { truncateOutput } from "./tool-output.js";
 
 export type SandboxToolset = ReturnType<typeof sandboxTools>;
 
@@ -64,35 +65,97 @@ export async function connectSandboxTools(
 
 export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
   const cwd = workspacePath || WORKSPACE_PATH;
+
+  // Bound discovery output in the sandbox, and preserve failures through head.
+  async function discover(command: string, limit: number) {
+    const result = await runSandbox(
+      sandbox,
+      `bash -o pipefail -c ${shellQuote(`${command} | head -n ${limit + 1}`)}`,
+      cwd,
+    );
+    if (![0, 1, 141].includes(result.exitCode) || result.stderr.trim()) {
+      return `Search failed (exit=${result.exitCode}): ${truncateOutput(result.stderr || result.stdout, 2000)}`;
+    }
+    const lines = result.stdout.trimEnd().split("\n").filter(Boolean);
+    if (!lines.length) return "No matches.";
+    return (
+      truncateOutput(lines.slice(0, limit).join("\n"), LIMITS.toolStdoutChars) +
+      (lines.length > limit ? "\nMore results; narrow the path/pattern or increase limit." : "")
+    );
+  }
+
   return {
     ...webTools(),
+    list_files: tool({
+      description:
+        "Find workspace files by filename glob (e.g. '*.ts'). Excludes .git/node_modules. Narrow path/pattern before reading.",
+      inputSchema: z.object({
+        path: z.string().default("."),
+        pattern: z.string().min(1).max(200).default("*"),
+        limit: z.number().int().min(1).max(200).default(100),
+      }),
+      execute: async ({ path, pattern, limit }) => {
+        const rel = sanitizeRel(path);
+        if (rel === null) return "Invalid path.";
+        const target = shellQuote(rel ? `./${rel}` : ".");
+        const glob = shellQuote(pattern);
+        const rgGlob = pattern === "*" ? "" : ` --glob ${glob}`;
+        return discover(
+          `if command -v rg >/dev/null 2>&1; then rg --files --hidden${rgGlob} --glob '!.git' --glob '!node_modules' -- ${target}; else find ${target} -type d \\( -name .git -o -name node_modules \\) -prune -o -type f -name ${glob} -print; fi`,
+          limit,
+        );
+      },
+    }),
     read_file: tool({
-      description: "Read a text file from the workspace. Path is relative to workspace root.",
+      description:
+        "Read a workspace text file with line numbers. Use start_line/line_count for targeted reads; line numbers are not file content.",
       inputSchema: z.object({
         path: z.string().describe("Relative file path, e.g. 'package.json'"),
+        start_line: z.number().int().min(1).default(1),
+        line_count: z.number().int().min(1).max(500).default(200),
       }),
-      execute: async ({ path }: { path: string }) => {
+      execute: async ({ path, start_line, line_count }) => {
         const rel = sanitizeRel(path);
         if (rel === null || rel === "")
           return "Invalid path: must be a workspace-relative file, without '..'.";
         const content = await sandbox.files.read(`${cwd}/${rel}`);
-        return typeof content === "string" ? content.slice(0, 20000) : content;
+        const lines = content.split(/\r?\n/);
+        if (lines.at(-1) === "") lines.pop();
+        if (!lines.length) return `${rel}: empty file.`;
+        if (start_line > lines.length)
+          return `${rel}: ${lines.length} lines; start_line is past EOF.`;
+        const selected: string[] = [];
+        let chars = 0;
+        for (let i = start_line - 1; i < Math.min(lines.length, start_line - 1 + line_count); i++) {
+          const line = `${i + 1}: ${lines[i]}`;
+          if (selected.length && chars + line.length + 1 > LIMITS.toolFileReadChars) break;
+          selected.push(truncateOutput(line, LIMITS.toolFileReadChars));
+          chars += line.length + 1;
+        }
+        const end = start_line + selected.length - 1;
+        return (
+          `${rel} (${start_line}-${end} of ${lines.length} lines)\n${selected.join("\n")}` +
+          (end < lines.length ? `\nContinue with start_line=${end + 1}.` : "")
+        );
       },
     }),
     run_command: tool({
       description:
-        "Run a shell command inside the workspace to inspect, test, build, or edit. No sudo. Use timeoutMs for long builds (max 300s). Prefix long servers with nohup ... & to background them.",
+        "Run a workspace shell command; returns exit code and bounded stdout/stderr, including failures. Batch independent inspections in one call. No sudo. Background servers with nohup ... &.",
       inputSchema: z.object({
         command: z.string().describe("Shell command, e.g. 'ls -la && cat package.json'"),
-        timeoutMs: z.number().default(60_000).describe("Timeout 1000-300000ms"),
+        timeoutMs: z.number().int().min(1000).max(300_000).default(60_000),
+        max_output_chars: z.number().int().min(500).max(LIMITS.toolStdoutChars).default(6000),
       }),
-      execute: async ({ command, timeoutMs }: { command: string; timeoutMs?: number }) => {
-        const timeout = Math.max(
-          1000,
-          Math.min(300_000, Math.floor(timeoutMs ?? 60_000) || 60_000),
+      execute: async ({ command, timeoutMs, max_output_chars }) => {
+        const result = await runSandbox(sandbox, command, cwd, timeoutMs);
+        return (
+          `exit=${result.exitCode}` +
+          (result.stdout ? `\nstdout:\n${truncateOutput(result.stdout, max_output_chars)}` : "") +
+          (result.stderr
+            ? `\nstderr:\n${truncateOutput(result.stderr, LIMITS.toolStderrChars)}`
+            : "")
         );
-        const result = await sandbox.commands.run(command, { cwd, timeoutMs: timeout });
-        return `exit=${result.exitCode}\nstdout:\n${result.stdout.slice(0, 12000)}\nstderr:\n${result.stderr.slice(0, 4000)}`;
       },
     }),
     write_file: tool({
@@ -100,53 +163,38 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         "Write or overwrite a text file in the workspace. Path is relative to workspace root.",
       inputSchema: z.object({
         path: z.string().describe("Relative file path"),
-        content: z.string().describe("Full new file content"),
+        content: z.string().max(LIMITS.fileWriteChars).describe("Full new file content"),
       }),
-      execute: async ({ path, content }: { path: string; content: string }) => {
+      execute: async ({ path, content }) => {
         const rel = sanitizeRel(path);
         if (rel === null || rel === "")
           return "Invalid path: must be a workspace-relative file, without '..'.";
-        if (content.length > 200_000) return "Content too large: max 200,000 chars per write.";
         await sandbox.files.write(`${cwd}/${rel}`, content);
         return `Wrote ${rel} (${content.length} chars)`;
       },
     }),
     ask_user: tool({
       description:
-        "Ask the user a clarifying question with fixed options. Use when requirements are ambiguous instead of guessing. The question renders as clickable buttons; the answer arrives as the user's next message.",
+        "Ask a blocking clarification with 2-6 clickable options, then wait for the next user message. Make reasonable assumptions for routine choices.",
       inputSchema: z.object({
         question: z.string().describe("The clarifying question"),
         options: z.array(z.string()).min(2).max(6).describe("2-6 short answer options"),
       }),
-      execute: async ({ question, options }: { question: string; options: string[] }) => {
-        return `Question asked: ${question} Options: ${options.join(" | ")}. Wait for the user's answer in their next message before proceeding.`;
-      },
+      execute: async () => "Question shown. Wait for the user's next message.",
     }),
     edit_file: tool({
       description:
         "Patch a text file with an exact string replacement. Prefer over write_file for small changes. old_string must appear exactly once.",
       inputSchema: z.object({
         path: z.string().describe("Relative file path"),
-        old_string: z.string().describe("Exact text to replace"),
-        new_string: z.string().describe("Replacement text"),
+        old_string: z.string().min(1).max(50_000).describe("Exact text to replace"),
+        new_string: z.string().max(LIMITS.fileWriteChars).describe("Replacement text"),
       }),
-      execute: async ({
-        path,
-        old_string,
-        new_string,
-      }: {
-        path: string;
-        old_string: string;
-        new_string: string;
-      }) => {
+      execute: async ({ path, old_string, new_string }) => {
         const rel = sanitizeRel(path);
         if (rel === null || rel === "")
           return "Invalid path: must be a workspace-relative file, without '..'.";
-        if (!old_string) return "old_string is required.";
-        if (old_string.length > 50_000 || new_string.length > 200_000)
-          return "Replacement too large.";
-        const current = await sandbox.files.read(`${cwd}/${rel}`);
-        const text = typeof current === "string" ? current : "";
+        const text = await sandbox.files.read(`${cwd}/${rel}`);
         const first = text.indexOf(old_string);
         if (first === -1) return "old_string not found in file.";
         if (text.indexOf(old_string, first + 1) !== -1)
@@ -156,36 +204,36 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         return `Patched ${rel} (${old_string.length} -> ${new_string.length} chars)`;
       },
     }),
-    // remove search with grep tools and add glob tool
     search: tool({
       description:
-        "Search text in the workspace with ripgrep (excludes .git/node_modules). Use to find symbols, imports, TODOs before reading files.",
+        "Search workspace text with ripgrep. Use mode=files to locate files cheaply, or content for matching lines. Narrow dir/glob to reduce output. Excludes .git/node_modules.",
       inputSchema: z.object({
-        pattern: z.string().describe("Fixed string or regex, e.g. 'useState'"),
+        pattern: z.string().min(1).max(300).describe("Regex, e.g. 'useState'"),
         dir: z.string().default(".").describe("Relative dir to search"),
+        glob: z.string().min(1).max(200).optional().describe("Filename glob, e.g. '*.tsx'"),
+        mode: z.enum(["content", "files"]).default("content"),
+        limit: z.number().int().min(1).max(200).default(50),
       }),
-      execute: async ({ pattern, dir }: { pattern: string; dir?: string }) => {
-        const rel = sanitizeRel(dir ?? ".");
+      execute: async ({ pattern, dir, glob, mode, limit }) => {
+        const rel = sanitizeRel(dir);
         if (rel === null) return "Invalid dir.";
-        if (!pattern || pattern.length > 300) return "Invalid pattern.";
-        const target = shellQuote(rel === "" ? "." : rel);
+        const target = shellQuote(rel ? `./${rel}` : ".");
         const query = shellQuote(pattern);
-        const out = await runSandbox(
-          sandbox,
-          `if command -v rg >/dev/null 2>&1; then rg --no-heading --line-number --hidden --no-messages --glob '!.git/*' --glob '!node_modules/*' -M 500 -e ${query} ${target} | head -n 100; else grep -rn -I --exclude-dir=.git --exclude-dir=node_modules -- ${query} ${target} | head -n 100; fi`,
-          cwd,
+        const rgGlob = glob ? ` --glob ${shellQuote(glob)}` : "";
+        const grepGlob = glob ? ` --include=${shellQuote(glob)}` : "";
+        return discover(
+          `if command -v rg >/dev/null 2>&1; then rg ${mode === "files" ? "--files-with-matches" : "--no-heading --line-number"} --hidden${rgGlob} --glob '!.git' --glob '!node_modules' -M 500 -e ${query} -- ${target}; else grep -rIE${mode === "files" ? "l" : "n"} --exclude-dir=.git --exclude-dir=node_modules${grepGlob} -- ${query} ${target}; fi`,
+          limit,
         );
-        const text = (out.stdout || "").slice(0, 12000);
-        return text ? `matches:\n${text}` : "No matches.";
       },
     }),
     share_file: tool({
       description:
-        "Share a file from the workspace with the user as a download card in the chat; the card is rendered automatically, so never repeat the file link or name in your reply. Use it when the user asks for a file you created or an existing workspace file. Path is relative to the workspace root.",
+        "Share a workspace file as a download card. Use when the user requests a file. The card appears automatically; do not repeat its link or name in your reply.",
       inputSchema: z.object({
         path: z.string().describe("Relative file path, e.g. 'report.pdf'"),
       }),
-      execute: async ({ path }: { path: string }) => {
+      execute: async ({ path }) => {
         const rel = sanitizeRel(path);
         if (rel === null || rel === "")
           return "Invalid path: must be a workspace-relative file, without '..'.";
@@ -209,28 +257,19 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
     }),
     update_plan: tool({
       description:
-        "Publish the current task plan (2-8 steps) so the user sees progress. Call at start and after each step completes. Statuses: pending|in_progress|done.",
+        "Publish progress for multi-step work. Skip for simple tasks. Statuses: pending|in_progress|done.",
       inputSchema: z.object({
         tasks: z
           .array(
             z.object({
-              title: z.string().describe("Short step title"),
+              title: z.string().trim().min(1).max(200).describe("Short step title"),
               status: z.enum(["pending", "in_progress", "done"]).describe("Step status"),
             }),
           )
           .min(1)
           .max(12),
       }),
-      execute: async ({ tasks }: { tasks: { title: string; status: string }[] }) => {
-        const clean = tasks
-          .slice(0, 12)
-          .map((t) => ({
-            title: String(t.title || "").slice(0, 200),
-            status: t.status === "done" || t.status === "in_progress" ? t.status : "pending",
-          }))
-          .filter((t) => t.title);
-        return `__PLAN__${JSON.stringify(clean)}`;
-      },
+      execute: async ({ tasks }) => `__PLAN__${JSON.stringify(tasks)}`,
     }),
   };
 }
