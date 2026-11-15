@@ -4,16 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import dynamic from "next/dynamic";
-import {
-  IconArrowLeft,
-  IconCopy,
-  IconInfoCircle,
-  IconPlayerStop,
-  IconRefresh,
-  IconTrash,
-  IconLayoutSidebarRight,
-} from "@tabler/icons-react";
-import type { ReactNode } from "react";
+import { IconArrowLeft, IconGitBranch, IconLayoutSidebarRight } from "@tabler/icons-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,7 +15,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -32,6 +22,7 @@ import { SandboxStatus } from "@/components/sandbox-status";
 import { usePanelPrefs } from "./panel-prefs";
 import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
+import SessionInfo from "./session-info";
 import ChatComposer from "@/components/chat/composer";
 import { ContextDetails } from "@/components/chat/context-details";
 import {
@@ -48,199 +39,9 @@ const SessionPanel = dynamic(() => import("./session-panel"), {
   ssr: false,
   loading: () => <aside className="hidden w-[min(30vw,480px)] shrink-0 md:block" />,
 });
-import {
-  API,
-  formatDate,
-  isWorking,
-  type ChatMessage,
-  type SessionDetail,
-  type SessionStatus,
-} from "./lib";
+import { API, isWorking, type ChatMessage, type SessionDetail, type SessionStatus } from "./lib";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Attachment01Icon } from "@hugeicons/core-free-icons";
-
-function InfoRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b border-border/60 py-2.5 last:border-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-right text-xs font-medium">{value || "—"}</dd>
-    </div>
-  );
-}
-
-function CompactValue({ value, onCopy }: { value: string; onCopy: (value: string) => void }) {
-  if (!value) return <span>—</span>;
-  const visible = value.length > 5 ? `${value.slice(0, 5)}…` : value;
-  return (
-    <span className="inline-flex max-w-full items-center justify-end gap-1">
-      <span className="truncate font-mono" title={value}>
-        {visible}
-      </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`Copy ${value}`}
-        onClick={() => onCopy(value)}
-      >
-        <IconCopy />
-      </Button>
-    </span>
-  );
-}
-
-function SessionInfoDialog({
-  sessionId,
-  detail,
-  status,
-  onReconnect,
-  onKill,
-  reconnecting,
-  killing,
-}: {
-  sessionId: string;
-  detail: SessionDetail | null;
-  status: SessionStatus | null;
-  onReconnect: () => void;
-  onKill: () => void;
-  reconnecting: boolean;
-  killing: boolean;
-}) {
-  const sandboxStatus =
-    status?.lifecycle?.provisioning || status?.sandboxStatus || detail?.sandboxStatus || "pending";
-  const agentStatus = status?.lifecycle?.agent || status?.status || detail?.status || "idle";
-  const verification = status?.lifecycle?.verification || "pending";
-  const plan = status?.plan || [];
-  const usage = status?.usage;
-  const createdAt = detail?.createdAt || status?.createdAt;
-  const [copied, setCopied] = useState("");
-  const sandboxId = status?.sandboxId || detail?.sandboxId || "";
-  const canReconnect =
-    sandboxStatus === "error" ||
-    sandboxStatus === "unavailable" ||
-    (status?.sandboxStatus === "ready" && !status?.sandboxAvailable);
-
-  function copyValue(value: string) {
-    void navigator.clipboard.writeText(value).then(() => {
-      setCopied(value);
-      window.setTimeout(() => setCopied(""), 1400);
-    });
-  }
-
-  return (
-    <Dialog>
-      <DialogTrigger
-        render={<Button variant="ghost" size="icon-sm" aria-label="View session information" />}
-      >
-        <IconInfoCircle />
-      </DialogTrigger>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Session information</DialogTitle>
-          <DialogDescription>
-            Runtime details for {detail?.title || "this session"}.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <section className="rounded-lg border bg-muted/20 px-3">
-            <h3 className="border-b border-border/60 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Session
-            </h3>
-            <dl>
-              <InfoRow
-                label="Session ID"
-                value={<CompactValue value={sessionId} onCopy={copyValue} />}
-              />
-              <InfoRow
-                label="Project"
-                value={<CompactValue value={detail?.projectId || ""} onCopy={copyValue} />}
-              />
-              <InfoRow label="Branch" value={status?.branch || detail?.branch || ""} />
-              <InfoRow label="Agent status" value={agentStatus} />
-              <InfoRow label="Result" value={verification} />
-              <InfoRow label="Model" value={status?.model || detail?.model || ""} />
-            </dl>
-          </section>
-          <section className="rounded-lg border bg-muted/20 px-3">
-            <h3 className="border-b border-border/60 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Workspace
-            </h3>
-            <dl>
-              <InfoRow label="Sandbox" value={sandboxStatus} />
-              <InfoRow
-                label="Availability"
-                value={status ? (status.sandboxAvailable ? "Connected" : "Unreachable") : ""}
-              />
-              <InfoRow
-                label="Sandbox ID"
-                value={<CompactValue value={sandboxId} onCopy={copyValue} />}
-              />
-              <InfoRow label="Path" value={status?.workspacePath || detail?.workspacePath || ""} />
-              <InfoRow label="Repository" value={status?.repo || ""} />
-            </dl>
-          </section>
-          <section className="rounded-lg border bg-muted/20 px-3 sm:col-span-2">
-            <h3 className="border-b border-border/60 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Activity
-            </h3>
-            <dl className="grid sm:grid-cols-2 sm:gap-x-6">
-              <InfoRow label="Created" value={createdAt ? formatDate(createdAt) : ""} />
-              <InfoRow
-                label="Updated"
-                value={detail?.updatedAt ? formatDate(detail.updatedAt) : ""}
-              />
-              <InfoRow
-                label="Plan"
-                value={
-                  plan.length
-                    ? `${plan.filter((item) => item.status === "done").length}/${plan.length} complete`
-                    : "No plan"
-                }
-              />
-              <InfoRow
-                label="Tokens"
-                value={usage?.totalTokens ? usage.totalTokens.toLocaleString() : "—"}
-              />
-              <InfoRow
-                label="Last error"
-                value={status?.lastError || detail?.lastError || "None"}
-              />
-            </dl>
-          </section>
-        </div>
-        <div className="flex items-center justify-between gap-2 border-t pt-4">
-          <span className="text-xs text-muted-foreground">
-            {copied ? "Copied full value" : "IDs are shortened for readability"}
-          </span>
-          <div className="flex gap-2">
-            {canReconnect && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onReconnect}
-                disabled={reconnecting}
-              >
-                <IconRefresh /> {reconnecting ? "Reconnecting…" : "Reconnect"}
-              </Button>
-            )}
-            {sandboxId && sandboxStatus !== "error" && sandboxStatus !== "unavailable" && (
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={onKill}
-                disabled={killing}
-              >
-                <IconPlayerStop /> {killing ? "Stopping…" : "Kill sandbox"}
-              </Button>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 type ReconnectConflict = {
   message: string;
@@ -649,11 +450,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Button>
           <div className="flex min-w-0 items-center gap-2 text-sm">
             <h1 className="truncate font-medium">{detail?.title || "Loading session…"}</h1>
-            {detail?.branch && (
-              <span className="hidden shrink-0 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground sm:inline-flex">
-                {detail.branch}
-              </span>
-            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -669,29 +465,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             onOpened={() => setPrefs({ ...prefs, open: true, tab: "preview" })}
             onError={(message) => toast.error(message)}
           />
-          <SessionInfoDialog
-            sessionId={sessionId}
-            detail={detail}
-            status={status}
-            onReconnect={() => void reconnect()}
-            onKill={() => void kill()}
-            reconnecting={reconnecting}
-            killing={killing}
-          />
-          <Tooltip>
-            <TooltipTrigger render={<span className="inline-flex" />}>
-              <Button
-                variant="secondary"
-                size="icon-sm"
-                aria-label="Delete session"
-                onClick={() => void removeSession()}
-                disabled={deleting}
-              >
-                <IconTrash />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Delete this session and its history</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger render={<span className="inline-flex" />}>
               <Button
@@ -699,8 +472,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 size="icon-sm"
                 aria-label={prefs.open ? "Hide workspace panel" : "Show workspace panel"}
                 onClick={() => setPrefs({ ...prefs, open: !prefs.open })}
-                disabled={!ready}
-                title={!ready ? "Workspace panel needs a running sandbox" : undefined}
               >
                 <IconLayoutSidebarRight />
               </Button>
@@ -711,165 +482,195 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Tooltip>
         </div>
       </header>
-      <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-        <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
-            {messages.map((message, index) => {
-              const startedAt = messages
-                .slice(0, index)
-                .reverse()
-                .find((previous) => previous.role === "user")?.createdAt;
-              const elapsedMs = startedAt
-                ? Date.parse(message.createdAt) - Date.parse(startedAt)
-                : NaN;
-              const workDuration = Number.isFinite(elapsedMs)
-                ? Math.max(1, Math.round(elapsedMs / 1000))
-                : undefined;
-              return (
+      <div className="relative flex min-h-0 flex-1">
+        <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+          <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
+              {messages.map((message, index) => {
+                const startedAt = messages
+                  .slice(0, index)
+                  .reverse()
+                  .find((previous) => previous.role === "user")?.createdAt;
+                const elapsedMs = startedAt
+                  ? Date.parse(message.createdAt) - Date.parse(startedAt)
+                  : NaN;
+                const workDuration = Number.isFinite(elapsedMs)
+                  ? Math.max(1, Math.round(elapsedMs / 1000))
+                  : undefined;
+                return (
+                  <ChatMessageRow
+                    key={message.id}
+                    role={message.role === "user" ? "user" : "assistant"}
+                    content={message.content}
+                    workDuration={message.role === "assistant" ? workDuration : undefined}
+                    collapseActivity
+                    presentation="session"
+                    workingLabel="Working"
+                    onAnswer={(text) => void sendMessage(text)}
+                  />
+                );
+              })}
+              {/* Historical and streaming messages have different source shapes. */}
+              {liveMessages.map((message) => (
                 <ChatMessageRow
                   key={message.id}
                   role={message.role === "user" ? "user" : "assistant"}
-                  content={message.content}
-                  workDuration={message.role === "assistant" ? workDuration : undefined}
+                  content={message.parts
+                    .filter((part) => part.type === "text")
+                    .map((part) => part.text)
+                    .join("")}
                   collapseActivity
                   presentation="session"
                   workingLabel="Working"
                   onAnswer={(text) => void sendMessage(text)}
                 />
-              );
-            })}
-            {/* Historical and streaming messages have different source shapes. */}
-            {liveMessages.map((message) => (
-              <ChatMessageRow
-                key={message.id}
-                role={message.role === "user" ? "user" : "assistant"}
-                content={message.parts
-                  .filter((part) => part.type === "text")
-                  .map((part) => part.text)
-                  .join("")}
-                collapseActivity
-                presentation="session"
-                workingLabel="Working"
-                onAnswer={(text) => void sendMessage(text)}
-              />
-            ))}
-            {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
-              <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
-                <p className="font-medium text-destructive">Agent run failed</p>
-                <p className="mt-1 whitespace-pre-wrap">{status?.lastError || detail?.lastError}</p>
-                {messages.at(-1)?.role === "user" && (
-                  <Button
-                    className="mt-3"
-                    size="sm"
-                    variant="outline"
-                    disabled={chatDisabled}
-                    onClick={() => void sendMessage(messages.at(-1)!.content)}
-                  >
-                    Retry last message
-                  </Button>
-                )}
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-        </div>
-        <div className="absolute inset-x-0 bottom-0 z-20 pb-6 px-4 mx-auto w-full max-w-3xl">
-          <ChatComposer
-            value={input}
-            onValueChange={setInput}
-            onSubmit={send}
-            onStop={stop}
-            busy={sending || activeAgent}
-            disabled={chatDisabled}
-            canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
-            placeholder="Tell the agent what to do…"
-            onPasteFiles={(files) => void addFiles(files)}
-            onDropFiles={(files) => void addFiles(files)}
-            attachments={
-              attachments.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-                  {attachments.map((a) => (
-                    <span
-                      key={a.id}
-                      className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+              ))}
+              {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
+                <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
+                  <p className="font-medium text-destructive">Agent run failed</p>
+                  <p className="mt-1 whitespace-pre-wrap">
+                    {status?.lastError || detail?.lastError}
+                  </p>
+                  {messages.at(-1)?.role === "user" && (
+                    <Button
+                      className="mt-3"
+                      size="sm"
+                      variant="outline"
+                      disabled={chatDisabled}
+                      onClick={() => void sendMessage(messages.at(-1)!.content)}
                     >
-                      {a.name} · {(a.content.length / 1024).toFixed(1)}KB
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(a.id)}
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label={`Remove ${a.name}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
+                      Retry last message
+                    </Button>
+                  )}
                 </div>
-              ) : undefined
-            }
-            skills={
-              skills.length > 0 ? <SkillChips skills={skills} onRemove={removeSkill} /> : undefined
-            }
-            notice={
-              (activeAgent || agentQueued) && !sending ? (
-                <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
-                  {agentQueued
-                    ? "The agent is preparing this task. It will be ready for a new message shortly."
-                    : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
-                </p>
-              ) : undefined
-            }
-            actions={
-              <>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  disabled={chatDisabled}
-                  onChange={(e) => {
-                    if (e.target.files) void addFiles(e.target.files);
-                    e.target.value = "";
-                  }}
-                />
-                <SkillsButton selected={skills} onToggle={toggleSkill} disabled={chatDisabled} />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={chatDisabled}
-                  className="px-2 text-[12px]"
-                  aria-label="Attach files"
-                >
-                  <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
-                </Button>
-                <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
-                  {status?.plan && status.plan.length > 0
-                    ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
-                    : ""}
-                </p>
-                <ContextDetails usage={status?.usage} model={status?.model || detail?.model} />
-              </>
-            }
-          />
-        </div>
-      </section>
+              )}
+              <div ref={bottomRef} />
+            </div>
+          </div>
+          <div className="absolute inset-x-0 bottom-0 z-20 pb-6 px-4 mx-auto w-full max-w-3xl">
+            <ChatComposer
+              value={input}
+              onValueChange={setInput}
+              onSubmit={send}
+              onStop={stop}
+              busy={sending || activeAgent}
+              disabled={chatDisabled}
+              canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
+              placeholder="Tell the agent what to do…"
+              onPasteFiles={(files) => void addFiles(files)}
+              onDropFiles={(files) => void addFiles(files)}
+              attachments={
+                attachments.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+                    {attachments.map((a) => (
+                      <span
+                        key={a.id}
+                        className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+                      >
+                        {a.name} · {(a.content.length / 1024).toFixed(1)}KB
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a.id)}
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label={`Remove ${a.name}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : undefined
+              }
+              skills={
+                skills.length > 0 ? (
+                  <SkillChips skills={skills} onRemove={removeSkill} />
+                ) : undefined
+              }
+              notice={
+                (activeAgent || agentQueued) && !sending ? (
+                  <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
+                    {agentQueued
+                      ? "The agent is preparing this task. It will be ready for a new message shortly."
+                      : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
+                  </p>
+                ) : undefined
+              }
+              actions={
+                <>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    disabled={chatDisabled}
+                    onChange={(e) => {
+                      if (e.target.files) void addFiles(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                  <SkillsButton selected={skills} onToggle={toggleSkill} disabled={chatDisabled} />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={chatDisabled}
+                    className="px-2 text-[12px]"
+                    aria-label="Attach files"
+                  >
+                    <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
+                  </Button>
+                  <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
+                    {status?.plan && status.plan.length > 0
+                      ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
+                      : ""}
+                  </p>
+                  <ContextDetails usage={status?.usage} model={status?.model || detail?.model} />
+                  {(status?.branch || detail?.branch) && (
+                    <span
+                      className="flex min-w-0 max-w-28 items-center gap-1 text-xs text-muted-foreground sm:max-w-48"
+                      title={status?.branch || detail?.branch}
+                    >
+                      <IconGitBranch className="size-3.5 shrink-0" />
+                      <span className="truncate">{status?.branch || detail?.branch}</span>
+                    </span>
+                  )}
+                </>
+              }
+            />
+          </div>
+        </section>
 
-      {prefs.open && (
-        <SessionPanel
-          sessionId={sessionId}
-          sandboxId={status?.sandboxId || detail?.sandboxId || ""}
-          sandboxReady={ready}
-          defaultTitle={detail?.title || ""}
-          prefs={prefs}
-          onPrefs={setPrefs}
-          onReconnect={() => void reconnect()}
-          onCommitted={() => void refresh(sessionId, false)}
-            onUseComment={(comment) => setInput((current) => current ? `${current}\n\n${comment}` : comment)}
-          defaultPort={status?.devPort}
-        />
-      )}
+        {prefs.open && (
+          <SessionPanel
+            sessionId={sessionId}
+            sandboxId={status?.sandboxId || detail?.sandboxId || ""}
+            sandboxReady={ready}
+            defaultTitle={detail?.title || ""}
+            prefs={prefs}
+            onPrefs={setPrefs}
+            sessionInfo={
+              <SessionInfo
+                sessionId={sessionId}
+                detail={detail}
+                status={status}
+                onReconnect={() => void reconnect()}
+                onKill={() => void kill()}
+                reconnecting={reconnecting}
+                killing={killing}
+                onDelete={() => void removeSession()}
+                deleting={deleting}
+              />
+            }
+            onReconnect={() => void reconnect()}
+            onCommitted={() => void refresh(sessionId, false)}
+            onUseComment={(comment) =>
+              setInput((current) => (current ? `${current}\n\n${comment}` : comment))
+            }
+            defaultPort={status?.devPort}
+          />
+        )}
+      </div>
       <ReconnectConflictDialog
         conflict={reconnectConflict}
         reconnecting={reconnecting}

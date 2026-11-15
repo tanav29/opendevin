@@ -93,7 +93,7 @@ export default function ChatComposer({
         className="min-h-14 w-full resize-none rounded-2xl scrollbar-none border-0 bg-transparent px-4 py-3 text-md outline-none placeholder:text-muted-foreground focus-visible:ring-0"
       />
       <div className="flex items-center justify-between gap-2 px-2 pb-2">
-        <div className="flex items-center gap-1.5">{actions}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">{actions}</div>
         {busy ? (
           <Button
             type="button"

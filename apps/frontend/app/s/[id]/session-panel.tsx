@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { PanelPrefs, Tab } from "./panel-prefs";
 
@@ -17,6 +17,7 @@ export default function SessionPanel({
   defaultTitle,
   prefs,
   onPrefs,
+  sessionInfo,
   onReconnect,
   onCommitted,
   onUseComment,
@@ -28,6 +29,7 @@ export default function SessionPanel({
   defaultTitle: string;
   prefs: PanelPrefs;
   onPrefs: (next: PanelPrefs) => void;
+  sessionInfo: ReactNode;
   onReconnect: () => void;
   onCommitted?: () => void;
   onUseComment: (comment: string) => void;
@@ -69,23 +71,29 @@ export default function SessionPanel({
     { id: "terminal", label: "Terminal" },
     { id: "changes", label: "Changes" },
     { id: "preview", label: "Preview" },
+    { id: "session", label: "Session" },
   ];
 
   return (
-    <div className="relative hidden h-full shrink-0 md:block" style={{ width: prefs.width }}>
+    <aside
+      aria-label="Workspace panel"
+      className="absolute inset-y-0 right-0 z-30 h-full shrink-0 bg-background md:relative md:max-w-1/2"
+      style={{ width: `min(100%, ${prefs.width}px)` }}
+    >
       <div
         onMouseDown={onDragStart}
-        className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-ring/50"
+        className="absolute inset-y-0 left-0 z-10 hidden w-1 cursor-col-resize hover:bg-ring/50 md:block"
       />
-      <div className="flex h-full flex-col border-l border-t border-border">
+      <div className="flex h-full flex-col border-l border-border">
         <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-          <div className="flex gap-1">
+          <div className="flex min-w-0 flex-wrap gap-1">
             {tabs.map((tab) => (
               <Button
                 key={tab.id}
                 size="xs"
                 onClick={() => selectTab(tab.id)}
                 variant={activeTab === tab.id ? "outline" : "ghost"}
+                aria-pressed={activeTab === tab.id}
               >
                 {tab.label}
               </Button>
@@ -93,6 +101,7 @@ export default function SessionPanel({
           </div>
         </div>
         <div className="min-h-0 flex-1">
+          {activeTab === "session" && sessionInfo}
           {activeTab === "files" && (
             <FilesTab
               key={`files-${sessionId}-${sandboxId}`}
@@ -137,6 +146,6 @@ export default function SessionPanel({
           )}
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

@@ -10,7 +10,7 @@ import {
   File02Icon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
-import { Activity, Check, ChevronDown, CircleDashedIcon, Wrench, XIcon } from "lucide-react";
+import { Check, ChevronDown, CircleDashedIcon, Wrench, XIcon } from "lucide-react";
 
 function ToolCallCard({
   name,
@@ -224,7 +224,7 @@ function parseFile(line: string): { name: string; url: string; size: number } | 
 
 type Block =
   | { kind: "md"; text: string }
-  | { kind: "tool"; name: string; argument: string; failed: boolean; running: boolean }
+  | { kind: "tool"; name: string; argument: string; body: string; failed: boolean; running: boolean }
   | { kind: "question"; question: string; options: string[] }
   | { kind: "plan"; tasks: { title: string; status: string }[] }
   | { kind: "file"; name: string; url: string; size: number }
@@ -288,7 +288,7 @@ function splitBlocks(content: string): Block[] {
         .replace(/&gt;/g, ">")
         .replace(/&lt;/g, "<")
         .replace(/&amp;/g, "&");
-      const inner: string[] = [];
+      const inner: string[] = [line.match(/<\/summary>(.*)$/)?.[1] || ""];
       i += 1;
       let closed = false;
       while (i < lines.length) {
@@ -305,6 +305,7 @@ function splitBlocks(content: string): Block[] {
         kind: "tool",
         name,
         argument,
+        body: joined.trim(),
         failed: joined.includes('data-tool-status="failed"'),
         running: !closed,
       });
@@ -356,6 +357,31 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function activityMarkdown(block: Block): string {
+  switch (block.kind) {
+    case "md":
+      return block.text;
+    case "tool": {
+      const status = block.running ? "working" : block.failed ? "failed" : "done";
+      return [
+        `**${block.name}** (${status})`,
+        block.argument && block.argument.split("\n").map((line) => `    ${line}`).join("\n"),
+        block.body,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    case "question":
+      return `${block.question}\n\n${block.options.map((option) => `- ${option}`).join("\n")}`;
+    case "plan":
+      return block.tasks.map((task) => `- ${task.title} (${task.status})`).join("\n");
+    case "file":
+      return `[${block.name}](${block.url})`;
+    case "error":
+      return `**${block.name}**\n\n${block.body}`;
+  }
+}
+
 // The model sees the presigned URL in the tool result and may echo it in prose.
 // The file card already shows the file, so drop matching links and bare URLs.
 function stripSharedLinks(blocks: Block[]): Block[] {
@@ -397,32 +423,16 @@ function Message({
   bubble?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
-  // Keep everything after the final tool call visible.
-  // Everything before the last tool call will be in collapsable
-  let lastTextIndex = -1;
-  let lastToolIndex = -1;
-  for (let index = parsedBlocks.length - 1; index >= 0; index--) {
-    if (lastTextIndex < 0 && parsedBlocks[index].kind === "md") {
-      lastTextIndex = index;
-    }
-    if (lastToolIndex < 0 && parsedBlocks[index].kind === "tool") lastToolIndex = index;
-  }
-  const activityEnd =
-    lastToolIndex >= 0
-      ? lastToolIndex + 1
-      : lastTextIndex >= 0
-        ? lastTextIndex
-        : parsedBlocks.length;
+  // Collapse through the final tool call; without tools, keep everything visible.
+  const activityEnd = parsedBlocks.findLastIndex((block) => block.kind === "tool") + 1;
+  const activity = collapseActivity && !textOnly ? parsedBlocks.slice(0, activityEnd) : [];
   const blocks = textOnly
     ? parsedBlocks.filter((block) => block.kind === "md" || block.kind === "file")
-    : collapseActivity
-      ? parsedBlocks.filter((_, index) => index >= activityEnd)
-      : parsedBlocks;
-  const activity = collapseActivity ? parsedBlocks.filter((_, index) => index < activityEnd) : [];
+    : parsedBlocks.slice(activity.length);
 
   return (
     <div>
-      {collapseActivity && activity.length > 0 && (
+      {activity.length > 0 && (
         <details className="group mb-4 border-b text-sm text-muted-foreground">
           <summary className="flex w-full cursor-pointer select-none items-center gap-2 py-2 hover:text-foreground">
             <span className="font-medium text-foreground/80">
@@ -430,47 +440,8 @@ function Message({
             </span>
             <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
           </summary>
-          <div className="space-y-1 py-3">
-            {activity.map((block, index) => (
-              <div key={`activity-${index}`} className="min-w-0">
-                {block.kind === "md" && (
-                  <div className="typeset typeset-docs text-sm">
-                    <Markdown>{block.text}</Markdown>
-                  </div>
-                )}
-                {block.kind === "tool" && (
-                  <ToolCallCard
-                    id={`activity-${index}`}
-                    name={block.name}
-                    argument={block.argument}
-                    status={block.running ? "working" : block.failed ? "failed" : "done"}
-                  />
-                )}
-                {block.kind === "question" && (
-                  <QuestionCard
-                    id={`activity-${index}`}
-                    question={block.question}
-                    options={block.options}
-                    onAnswer={onAnswer}
-                  />
-                )}
-                {block.kind === "plan" && <PlanCard id={`activity-${index}`} tasks={block.tasks} />}
-                {block.kind === "file" && (
-                  <FileCard
-                    id={`activity-${index}`}
-                    name={block.name}
-                    url={block.url}
-                    size={block.size}
-                  />
-                )}
-                {block.kind === "error" && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-                    <p className="font-medium">{block.name}</p>
-                    {block.body && <p className="mt-1 whitespace-pre-wrap">{block.body}</p>}
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="typeset typeset-docs min-w-0 py-3 text-sm">
+            <Markdown skipHtml>{activity.map(activityMarkdown).join("\n\n")}</Markdown>
           </div>
         </details>
       )}

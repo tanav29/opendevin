@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export type Tab = "files" | "terminal" | "changes" | "preview";
+export type Tab = "files" | "terminal" | "changes" | "preview" | "session";
 export type PanelPrefs = { open: boolean; tab: Tab; width: number };
 
 const PANEL_KEY = "opendevin:panel";
@@ -13,7 +13,10 @@ function parsePrefs(raw: string | null): PanelPrefs {
   try {
     const parsed = JSON.parse(raw) as Partial<PanelPrefs>;
     const tab: Tab =
-      parsed.tab === "files" || parsed.tab === "changes" || parsed.tab === "preview"
+      parsed.tab === "files" ||
+      parsed.tab === "changes" ||
+      parsed.tab === "preview" ||
+      parsed.tab === "session"
         ? parsed.tab
         : "terminal";
     const width =
