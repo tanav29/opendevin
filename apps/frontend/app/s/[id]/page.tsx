@@ -24,6 +24,7 @@ import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
 import SessionInfo from "./session-info";
 import ChatComposer from "@/components/chat/composer";
+import { parseSuggestions } from "@/components/chat/suggestions";
 import ChatQuestionnaire, { parseQuestion } from "@/components/chat/questionnaire";
 import { Conversation } from "@/components/ai-elements/conversation";
 import { PromptAttachments } from "@/components/ai-elements/attachments";
@@ -404,6 +405,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const latestMessage = messages.at(-1);
   const question =
     latestMessage?.role === "assistant" ? parseQuestion(latestMessage.content) : null;
+  const suggestions =
+    latestMessage?.role === "assistant" ? parseSuggestions(latestMessage.content) : [];
 
   if (loading && !detail && !status) {
     return (
@@ -558,6 +561,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Conversation>
           <div className="z-20 w-full shrink-0 px-4 pb-4 pt-2">
             <ChatComposer
+              suggestions={suggestions}
+              onSuggestion={(suggestion) => void sendMessage(suggestion)}
               questionnaire={
                 question && !question.answered ? (
                   <ChatQuestionnaire

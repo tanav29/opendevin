@@ -155,6 +155,35 @@ export function toolDoneMarker(name: string, partType: string, output: unknown):
   return `\n</details>\n\n`;
 }
 
+function suggestionsMarker(output: unknown): string {
+  try {
+    const value: unknown = typeof output === "string" ? JSON.parse(output) : output;
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("suggestions" in value) ||
+      !Array.isArray(value.suggestions)
+    )
+      return "";
+    const suggestions = [
+      ...new Set(
+        value.suggestions.filter(
+          (suggestion: unknown): suggestion is string =>
+            typeof suggestion === "string" && suggestion.trim().length > 0,
+        ),
+      ),
+    ];
+    const payload = JSON.stringify(suggestions)
+      .replace(/&/g, "\\u0026")
+      .replace(/</g, "\\u003c")
+      .replace(/>/g, "\\u003e")
+      .replace(/'/g, "&#39;");
+    return `\n\n<div data-suggestions='${payload}'>\n\n</div>\n\n`;
+  } catch {
+    return "";
+  }
+}
+
 // Convert SDK events to the chat's text and tool markers.
 export async function drainAgentStream(
   result: {
@@ -203,6 +232,11 @@ export async function drainAgentStream(
       }
       if (name !== "share_file") {
         write(toolDoneMarker(name, p.type, output));
+      }
+      if (p.type === "tool-result") {
+        const marker = suggestionsMarker(output);
+        visibleText += marker;
+        write(marker);
       }
       if (name === "update_plan" && typeof output === "string" && output.startsWith("__PLAN__")) {
         try {

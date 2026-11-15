@@ -114,6 +114,49 @@ test("propagates SDK stream errors", async () => {
   );
 });
 
+test("streams and persists tool suggestions outside the tool details", async () => {
+  const suggestion = 'Check <input> & the user\'s "settings"';
+  const output = { suggestions: [suggestion, "Run tests", suggestion, " ", null, 42] };
+  for (const value of [output, JSON.stringify(output)]) {
+    let streamed = "";
+    const result = await drainAgentStream(
+      stream([
+        { type: "tool-call", toolCallId: "suggest", toolName: "review", input: {} },
+        {
+          type: "tool-result",
+          toolCallId: "suggest",
+          toolName: "review",
+          input: {},
+          output: value,
+        },
+      ]),
+      (chunk) => {
+        streamed += chunk;
+      },
+    );
+    const payload = streamed.match(/<div data-suggestions='(.*)'>/)?.[1];
+    assert.ok(payload);
+    assert.deepEqual(JSON.parse(payload.replace(/&#39;/g, "'")), [suggestion, "Run tests"]);
+    assert.doesNotMatch(payload, /[<>&](?!#39;)/);
+    assert.ok(streamed.indexOf("</details>") < streamed.indexOf("data-suggestions"));
+    assert.match(result.visibleText, /data-suggestions/);
+    assert.equal(result.text, streamed);
+  }
+});
+
+test("ignores unrelated or malformed tool outputs when looking for suggestions", async () => {
+  for (const output of ["plain text", "{", null, {}, { suggestions: "Run tests" }]) {
+    const result = await drainAgentStream(
+      stream([
+        { type: "tool-result", toolCallId: "read", toolName: "read_file", input: {}, output },
+      ]),
+      () => undefined,
+    );
+    assert.doesNotMatch(result.text, /data-suggestions/);
+    assert.equal(result.visibleText, "");
+  }
+});
+
 test("does not persist an aborted stream as a completed reply", async () => {
   await assert.rejects(
     drainAgentStream(

@@ -242,6 +242,13 @@ function splitBlocks(content: string): Block[] {
       i += 1;
       continue;
     }
+    if (line.includes("<div data-suggestions=")) {
+      flushMd();
+      i += 1;
+      while (i < lines.length && lines[i].trim() !== "</div>") i += 1;
+      i += 1;
+      continue;
+    }
     mdBuf.push(line);
     i += 1;
   }

@@ -2,6 +2,7 @@
 
 import { FormEvent, ReactNode } from "react";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -26,6 +27,8 @@ export default function ChatComposer({
   onDropFiles,
   className = "",
   questionnaire,
+  suggestions = [],
+  onSuggestion,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -43,6 +46,8 @@ export default function ChatComposer({
   onDropFiles?: (files: FileList) => void;
   className?: string;
   questionnaire?: ReactNode;
+  suggestions?: string[];
+  onSuggestion?: (suggestion: string) => void;
 }) {
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -66,6 +71,27 @@ export default function ChatComposer({
             onDropFiles(event.dataTransfer.files);
         }}
       >
+        {suggestions.length > 0 && !busy && (
+          <div
+            role="group"
+            aria-label="Suggested prompts"
+            className="scrollbar-none mb-3 flex scroll-fade-x gap-2 overflow-x-auto overscroll-x-contain"
+          >
+            {suggestions.map((suggestion) => (
+              <Button
+                key={suggestion}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                disabled={disabled || !onSuggestion}
+                onClick={() => onSuggestion?.(suggestion)}
+              >
+                {suggestion}
+              </Button>
+            ))}
+          </div>
+        )}
         <InputGroup className="rounded-2xl bg-card dark:bg-card">
           {(attachments || skills || notice) && (
             <InputGroupAddon
