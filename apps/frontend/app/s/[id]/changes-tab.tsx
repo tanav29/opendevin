@@ -2,7 +2,7 @@
 
 import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
-import { Download, GitBranch, RefreshCw } from "lucide-react";
+import { Download, GitBranch, Pencil, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -38,11 +38,15 @@ export default function ChangesTab({
   const [loading, setLoading] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [committing, setCommitting] = useState(false);
+  const [editingBranch, setEditingBranch] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [reverting, setReverting] = useState("");
   const [git, setGit] = useState<{
     branch: string;
     files: { path: string; staged: string; unstaged: string }[];
     commits: { hash: string; subject: string }[];
+    commitsError: string;
     workspaceError: string;
     pullRequests: {
       number: number;
@@ -81,10 +85,10 @@ export default function ChangesTab({
     try {
       const payload = await api<DiffPayload>(`/api/sessions/${sessionId}/diff`, undefined, 60_000);
       return { ok: true, payload };
-    } catch {
+    } catch (error) {
       return {
         ok: false,
-        payload: { error: "Changes unavailable: could not reach the server. Retry." },
+        payload: { error: error instanceof Error ? error.message : "Changes unavailable. Retry." },
       };
     }
   }, [sessionId]);
@@ -136,6 +140,24 @@ export default function ChangesTab({
     void readGit();
   }
 
+  async function renameBranch(event: React.FormEvent) {
+    event.preventDefault();
+    setRenaming(true);
+    try {
+      await api(`/api/sessions/${sessionId}/branch`, {
+        method: "POST",
+        body: JSON.stringify({ branch: branchName }),
+      });
+      setEditingBranch(false);
+      refresh();
+      toast.success("Branch renamed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not rename branch.");
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   const diffOptions = useMemo<FileDiffOptions<undefined, undefined>>(
     () => ({
       theme: { dark: "pierre-dark", light: "pierre-light" },
@@ -150,11 +172,11 @@ export default function ChangesTab({
   const parsedFiles = useMemo<FileDiffMetadata[]>(() => {
     if (!diff) return [];
     try {
-      return parsePatchFiles(diff, `session-${sessionId}`).flatMap((patch) => patch.files);
+      return parsePatchFiles(diff).flatMap((patch) => patch.files);
     } catch {
       return [];
     }
-  }, [diff, sessionId]);
+  }, [diff]);
 
   async function downloadPatch(content = diff, suffix = "") {
     if (!content) return;
@@ -196,7 +218,7 @@ export default function ChangesTab({
     (file) => !selectedFiles.length || selectedFiles.includes(file.path),
   );
   async function commit() {
-    if (committing || !includedFiles.length || !available) return;
+    if (committing || !available) return;
     setCommitting(true);
     try {
       const data = await api<{
@@ -226,6 +248,7 @@ export default function ChangesTab({
     } catch (err) {
       const message = err instanceof Error ? err.message : "Commit failed.";
       toast.error(message);
+      refresh();
     } finally {
       setCommitting(false);
     }
@@ -235,12 +258,52 @@ export default function ChangesTab({
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span
-          className="min-w-0 flex-1 truncate text-xs font-medium"
-          title={git?.branch || "Unknown branch"}
-        >
-          {git?.branch || "Git"}
-        </span>
+        {editingBranch ? (
+          <form onSubmit={renameBranch} className="flex min-w-0 flex-1 items-center gap-1">
+            <input
+              aria-label="Branch name"
+              value={branchName}
+              onChange={(event) => setBranchName(event.target.value)}
+              autoFocus
+              className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs"
+            />
+            <Button type="submit" size="xs" disabled={renaming || !branchName.trim()}>
+              Save
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => setEditingBranch(false)}
+              disabled={renaming}
+            >
+              Cancel
+            </Button>
+          </form>
+        ) : (
+          <>
+            <span
+              className="min-w-0 flex-1 truncate text-xs font-medium"
+              title={git?.branch || "Unknown branch"}
+            >
+              {git?.branch || "Git"}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              disabled={!available || !git?.branch}
+              aria-label="Rename branch"
+              title="Rename branch"
+              onClick={() => {
+                setBranchName(git?.branch || "");
+                setEditingBranch(true);
+              }}
+            >
+              <Pencil className="size-3.5" aria-hidden="true" />
+            </Button>
+          </>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -265,12 +328,8 @@ export default function ChangesTab({
         >
           <Download className="size-3.5" aria-hidden="true" />
         </Button>
-        <Button
-          size="xs"
-          onClick={() => void commit()}
-          disabled={!git?.files.length || !available || committing}
-        >
-          {committing ? "Pushing?" : "Commit & push"}
+        <Button size="xs" onClick={() => void commit()} disabled={!git || !available || committing}>
+          {committing ? "Pushing…" : "Commit & push"}
         </Button>
       </div>
       {recoveryPatch && (
@@ -436,9 +495,12 @@ export default function ChangesTab({
               </section>
               <details className="border-t border-border py-2.5">
                 <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
-                  Commits <span className="text-muted-foreground">{git.commits.length}</span>
+                  Commits not in main{" "}
+                  <span className="text-muted-foreground">{git.commits.length}</span>
                 </summary>
-                {git.commits.length ? (
+                {git.commitsError ? (
+                  <p className="mt-1 text-danger">{git.commitsError}</p>
+                ) : git.commits.length ? (
                   <ul className="mt-1 space-y-1">
                     {git.commits.map((commit) => (
                       <li key={commit.hash} className="flex gap-2">
@@ -450,17 +512,13 @@ export default function ChangesTab({
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-1 text-muted-foreground">No commits available.</p>
+                  <p className="mt-1 text-muted-foreground">No commits unique to this branch.</p>
                 )}
-                <p className="mt-1 text-muted-foreground">
-                  History available in this workspace; shallow clones may have older commits
-                  omitted.
-                </p>
               </details>
             </>
           )}
         </div>
-        <details className="mx-3 border-t border-border py-2.5 text-xs">
+        <details open className="mx-3 border-t border-border py-2.5 text-xs">
           <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
             Diff{" "}
             <span className="text-muted-foreground">
@@ -492,7 +550,7 @@ export default function ChangesTab({
           )}
           <div className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
             {parsedFiles.map((fileDiff, index) => (
-              <details key={`${fileDiff.name}-${index}`}>
+              <details open key={`${fileDiff.name}-${index}`}>
                 <summary
                   className="cursor-pointer truncate px-2.5 py-2 font-mono hover:bg-muted/60"
                   title={fileDiff.name}
