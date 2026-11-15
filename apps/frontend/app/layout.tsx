@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { QueryProvider } from "@/components/query-provider";
 import { AppShell } from "@/components/layout/app-shell";
 import { Toaster } from "sonner";
 
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
   title: "OpenDevin",
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={cn("dark", "font-sans", geist.variable)}>
+    <html lang="en" className={cn("dark", "font-sans", geist.variable, geistMono.variable)}>
       <body className="bg-background text-foreground antialiased">
         <QueryProvider>
           <AppShell>{children}</AppShell>

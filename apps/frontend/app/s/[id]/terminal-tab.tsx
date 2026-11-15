@@ -32,11 +32,12 @@ export default function TerminalTab({
         const [{ Terminal }, { FitAddon }] = await Promise.all([
           import("@xterm/xterm"),
           import("@xterm/addon-fit"),
+          document.fonts.ready,
         ]);
         if (disposed || !containerRef.current) return;
         const terminal = new Terminal({
           cursorBlink: true,
-          fontFamily: "monospace",
+          fontFamily: getComputedStyle(element).getPropertyValue("--font-geist-mono"),
         });
         term = terminal;
         const fit = new FitAddon();

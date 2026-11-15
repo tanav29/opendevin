@@ -14,8 +14,8 @@
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
   --font-serif: var(--font-serif);
 
   --color-surface-1: var(--surface-1);
@@ -85,6 +85,8 @@
 }
 
 :root {
+  --diffs-font-family: var(--font-geist-mono);
+  --diffs-header-font-family: var(--font-geist-mono);
   --surface-1: #ffffff;
   --surface-2: #f7f6f3;
   --surface-3: #fbfbfa;
@@ -210,8 +212,8 @@
 }
 
 .typeset-docs {
-  --typeset-font-body: var(--font-geist);
-  --typeset-font-heading: var(--font-geist);
+  --typeset-font-body: var(--font-geist-sans);
+  --typeset-font-heading: var(--font-geist-sans);
   --typeset-font-mono: var(--font-geist-mono);
   --typeset-size: 15px;
   --typeset-leading: 1.75;
