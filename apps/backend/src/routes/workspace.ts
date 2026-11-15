@@ -31,6 +31,123 @@ import {
 
 export function registerWorkspaceRoutes(app: Express): void {
   app.get(
+    "/api/sessions/:id/git",
+    asyncRoute(async (req, res) => {
+      const found = await ownedSession(req, routeParam(req, "id"));
+      if (!found.auth) return res.status(401).json({ error: "Sign in required" });
+      if (!found.owner) return res.status(404).json({ error: "Session not found" });
+      const owner = found.owner;
+      let branch = owner.branch;
+      let files: { path: string; staged: string; unstaged: string }[] = [];
+      let commits: { hash: string; subject: string }[] = [];
+      let workspaceError = "";
+      if (owner.sandboxId) {
+        try {
+          const sandbox = await Sandbox.connect(owner.sandboxId);
+          const run = (command: string) =>
+            runSandbox(sandbox, command, owner.workspacePath || WORKSPACE_PATH, 30_000);
+          const [current, status, log] = await Promise.all([
+            run("git branch --show-current"),
+            run("git status --porcelain=v1 -z -uall"),
+            run("git log --format='%h%x00%s%x00'"),
+          ]);
+          if (current.exitCode !== 0 || status.exitCode !== 0)
+            throw new Error("Git workspace is unavailable.");
+          branch = current.stdout.trim() || branch;
+          const entries = status.stdout.split("\0");
+          for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            if (!entry) continue;
+            files.push({
+              path: entry.slice(3),
+              staged: entry[0] === "?" ? "" : entry[0].trim(),
+              unstaged: entry[1] === "?" ? "?" : entry[1].trim(),
+            });
+            if (/[RC]/.test(entry.slice(0, 2))) i++;
+          }
+          if (log.exitCode === 0) {
+            const parts = log.stdout.replace(/\n/g, "").split("\0");
+            for (let i = 0; i + 1 < parts.length; i += 2) {
+              if (parts[i]) commits.push({ hash: parts[i], subject: parts[i + 1] });
+            }
+          }
+        } catch {
+          workspaceError = "Could not read the Git workspace. Reconnect and refresh.";
+        }
+      } else workspaceError = "Workspace is unavailable. Reconnect to see changes and commits.";
+
+      const repo = parseGitHubRepo(owner.project.repo || "");
+      const token = await githubTokenForUser(owner.project.userId);
+      let pullRequests: {
+        number: number;
+        title: string;
+        url: string;
+        state: string;
+        comments: { id: string; author: string; body: string; path?: string; url: string }[];
+      }[] = [];
+      let pullRequestError = "";
+      if (repo && token && branch) {
+        const root = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
+        const headers = githubHeaders(token);
+        try {
+          const getPages = async (url: string): Promise<any[]> => {
+            const items: any[] = [];
+            let next = url;
+            while (next) {
+              const response = await fetch(next, { headers });
+              if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+              items.push(...((await response.json()) as any[]));
+              next = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1] || "";
+            }
+            return items;
+          };
+          const pulls = await getPages(
+            `${root}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${branch}`)}&per_page=100`,
+          );
+          pullRequests = await Promise.all(
+            pulls.map(async (pr) => {
+              const [issueComments, reviewComments, reviews] = await Promise.all([
+                getPages(`${root}/issues/${pr.number}/comments?per_page=100`),
+                getPages(`${root}/pulls/${pr.number}/comments?per_page=100`),
+                getPages(`${root}/pulls/${pr.number}/reviews?per_page=100`),
+              ]);
+              return {
+                number: pr.number,
+                title: pr.title,
+                url: pr.html_url,
+                state: pr.merged_at ? "merged" : pr.state,
+                comments: [
+                  ...issueComments,
+                  ...reviewComments,
+                  ...reviews
+                    .filter((review) => review.body?.trim())
+                    .map((review) => ({
+                      ...review,
+                      created_at: review.submitted_at,
+                      reviewSummary: true,
+                    })),
+                ]
+                  .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
+                  .map((comment) => ({
+                    id: `${comment.reviewSummary ? "summary" : comment.path ? "review" : "issue"}-${comment.id}`,
+                    author: comment.user?.login || "Unknown",
+                    body: comment.body || "",
+                    path: comment.path,
+                    url: comment.html_url,
+                  })),
+              };
+            }),
+          );
+        } catch {
+          pullRequestError = "Could not load pull requests or comments from GitHub.";
+        }
+      } else
+        pullRequestError =
+          "A GitHub repository, access token, and branch are needed to load pull requests.";
+      return res.json({ branch, files, commits, workspaceError, pullRequests, pullRequestError });
+    }),
+  );
+  app.get(
     "/api/sessions/:id/diff",
     asyncRoute(async (req, res) => {
       const found = await ownedSession(req, routeParam(req, "id"));

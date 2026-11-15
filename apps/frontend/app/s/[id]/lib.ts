@@ -24,6 +24,7 @@ export type SessionDetail = {
   status: string;
   sandboxId: string;
   sandboxStatus: string;
+  sandboxExpiresAt: string | null;
   workspacePath: string;
   branch: string;
   model: string;
@@ -37,6 +38,7 @@ export type SessionDetail = {
 
 export type SessionStatus = {
   sandboxStatus: string;
+  sandboxExpiresAt: string | null;
   sandboxAvailable: boolean;
   sandboxId: string;
   workspacePath: string;

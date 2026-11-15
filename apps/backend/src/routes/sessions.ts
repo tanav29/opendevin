@@ -129,6 +129,7 @@ export function registerSessionRoutes(app: Express): void {
         sandboxStatus: found.owner.sandboxStatus,
         sandboxAvailable,
         sandboxId: found.owner.sandboxId,
+        sandboxExpiresAt: found.owner.sandboxExpiresAt,
         workspacePath: found.owner.workspacePath,
         lastError: found.owner.lastError,
         status: found.owner.status,
@@ -188,7 +189,13 @@ export function registerSessionRoutes(app: Express): void {
       await killSandbox(found.owner.sandboxId);
       await prisma.projectSession.update({
         where: { id: found.owner.id },
-        data: { sandboxId: "", sandboxStatus: "creating", status: "queued", lastError: null },
+        data: {
+          sandboxId: "",
+          sandboxStatus: "creating",
+          sandboxExpiresAt: null,
+          status: "queued",
+          lastError: null,
+        },
       });
       scheduleBackgroundTask(
         provisionSandbox(found.owner.id)
@@ -243,6 +250,7 @@ export function registerSessionRoutes(app: Express): void {
         where: { id: found.owner.id },
         data: {
           sandboxId: "",
+          sandboxExpiresAt: null,
           sandboxStatus: "error",
           status: "stopped",
           lastError: "Sandbox killed by user. Reconnect to start a new one.",

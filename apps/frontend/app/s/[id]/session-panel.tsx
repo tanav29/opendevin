@@ -19,6 +19,7 @@ export default function SessionPanel({
   onPrefs,
   onReconnect,
   onCommitted,
+  onUseComment,
   defaultPort,
 }: {
   sessionId: string;
@@ -29,6 +30,7 @@ export default function SessionPanel({
   onPrefs: (next: PanelPrefs) => void;
   onReconnect: () => void;
   onCommitted?: () => void;
+  onUseComment: (comment: string) => void;
   defaultPort?: number;
 }) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -121,6 +123,7 @@ export default function SessionPanel({
               defaultTitle={defaultTitle}
               onReconnect={onReconnect}
               onCommitted={onCommitted}
+              onUseComment={onUseComment}
             />
           )}
           {activeTab === "preview" && (

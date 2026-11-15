@@ -18,6 +18,7 @@ import {
 } from "@tabler/icons-react";
 import { useAttachments } from "@/components/chat/use-attachments";
 import ChatComposer from "@/components/chat/composer";
+import { ContextDetails } from "@/components/chat/context-details";
 import ChatMessageRow from "@/components/chat/message-row";
 import { Button } from "@/components/ui/button";
 
@@ -521,6 +522,7 @@ export default function SessionChatPreview({
               >
                 <IconPaperclip size={17} />
               </Button>
+              <ContextDetails />
             </>
           }
         />

@@ -28,10 +28,12 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SandboxStatus } from "@/components/sandbox-status";
 import { usePanelPrefs } from "./panel-prefs";
 import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
 import ChatComposer from "@/components/chat/composer";
+import { ContextDetails } from "@/components/chat/context-details";
 import {
   MAX_MESSAGE_CHARS,
   serializeAttachments,
@@ -655,6 +657,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <SandboxStatus
+            status={provisioningPhase}
+            expiresAt={status?.sandboxExpiresAt ?? detail?.sandboxExpiresAt}
+          />
           <DevRunButton
             sessionId={sessionId}
             sandboxReady={ready}
@@ -705,172 +711,165 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Tooltip>
         </div>
       </header>
-        <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-          <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
-              {messages.map((message, index) => {
-                const startedAt = messages
-                  .slice(0, index)
-                  .reverse()
-                  .find((previous) => previous.role === "user")?.createdAt;
-                const elapsedMs = startedAt
-                  ? Date.parse(message.createdAt) - Date.parse(startedAt)
-                  : NaN;
-                const workDuration = Number.isFinite(elapsedMs)
-                  ? Math.max(1, Math.round(elapsedMs / 1000))
-                  : undefined;
-                return (
-                  <ChatMessageRow
-                    key={message.id}
-                    role={message.role === "user" ? "user" : "assistant"}
-                    content={message.content}
-                    workDuration={message.role === "assistant" ? workDuration : undefined}
-                    collapseActivity
-                    presentation="session"
-                    workingLabel="Working"
-                    onAnswer={(text) => void sendMessage(text)}
-                  />
-                );
-              })}
-              {/* Historical and streaming messages have different source shapes. */}
-              {liveMessages.map((message) => (
+      <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+        <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
+            {messages.map((message, index) => {
+              const startedAt = messages
+                .slice(0, index)
+                .reverse()
+                .find((previous) => previous.role === "user")?.createdAt;
+              const elapsedMs = startedAt
+                ? Date.parse(message.createdAt) - Date.parse(startedAt)
+                : NaN;
+              const workDuration = Number.isFinite(elapsedMs)
+                ? Math.max(1, Math.round(elapsedMs / 1000))
+                : undefined;
+              return (
                 <ChatMessageRow
                   key={message.id}
                   role={message.role === "user" ? "user" : "assistant"}
-                  content={message.parts
-                    .filter((part) => part.type === "text")
-                    .map((part) => part.text)
-                    .join("")}
+                  content={message.content}
+                  workDuration={message.role === "assistant" ? workDuration : undefined}
                   collapseActivity
                   presentation="session"
                   workingLabel="Working"
                   onAnswer={(text) => void sendMessage(text)}
                 />
-              ))}
-              {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
-                <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
-                  <p className="font-medium text-destructive">Agent run failed</p>
-                  <p className="mt-1 whitespace-pre-wrap">{status?.lastError || detail?.lastError}</p>
-                  {messages.at(-1)?.role === "user" && (
-                    <Button
-                      className="mt-3"
-                      size="sm"
-                      variant="outline"
-                      disabled={chatDisabled}
-                      onClick={() => void sendMessage(messages.at(-1)!.content)}
-                    >
-                      Retry last message
-                    </Button>
-                  )}
-                </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-          </div>
-          <div className="absolute inset-x-0 bottom-0 z-20 pb-6 px-4 mx-auto w-full max-w-3xl">
-              <ChatComposer
-                value={input}
-                onValueChange={setInput}
-                onSubmit={send}
-                onStop={stop}
-                busy={sending || activeAgent}
-                disabled={chatDisabled}
-                canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
-                placeholder="Tell the agent what to do…"
-                onPasteFiles={(files) => void addFiles(files)}
-                onDropFiles={(files) => void addFiles(files)}
-                attachments={
-                  attachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-                      {attachments.map((a) => (
-                        <span
-                          key={a.id}
-                          className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
-                        >
-                          {a.name} · {(a.content.length / 1024).toFixed(1)}KB
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(a.id)}
-                            className="text-muted-foreground hover:text-foreground"
-                            aria-label={`Remove ${a.name}`}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : undefined
-                }
-                skills={
-                  skills.length > 0 ? (
-                    <SkillChips skills={skills} onRemove={removeSkill} />
-                  ) : undefined
-                }
-                notice={
-                  (activeAgent || agentQueued) && !sending ? (
-                    <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
-                      {agentQueued
-                        ? "The agent is preparing this task. It will be ready for a new message shortly."
-                        : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
-                    </p>
-                  ) : undefined
-                }
-                actions={
-                  <>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      disabled={chatDisabled}
-                      onChange={(e) => {
-                        if (e.target.files) void addFiles(e.target.files);
-                        e.target.value = "";
-                      }}
-                    />
-                    <SkillsButton
-                      selected={skills}
-                      onToggle={toggleSkill}
-                      disabled={chatDisabled}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => fileRef.current?.click()}
-                      disabled={chatDisabled}
-                      className="px-2 text-[12px]"
-                      aria-label="Attach files"
-                    >
-                      <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
-                    </Button>
-                    <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
-                      {status?.plan && status.plan.length > 0
-                        ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
-                        : ""}
-                      {status?.usage?.totalTokens
-                        ? `Context: ${(Number(status.usage.totalTokens) / 1000).toFixed(1)}k tok`
-                        : ""}
-                    </p>
-                  </>
-                }
+              );
+            })}
+            {/* Historical and streaming messages have different source shapes. */}
+            {liveMessages.map((message) => (
+              <ChatMessageRow
+                key={message.id}
+                role={message.role === "user" ? "user" : "assistant"}
+                content={message.parts
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("")}
+                collapseActivity
+                presentation="session"
+                workingLabel="Working"
+                onAnswer={(text) => void sendMessage(text)}
               />
+            ))}
+            {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
+              <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
+                <p className="font-medium text-destructive">Agent run failed</p>
+                <p className="mt-1 whitespace-pre-wrap">{status?.lastError || detail?.lastError}</p>
+                {messages.at(-1)?.role === "user" && (
+                  <Button
+                    className="mt-3"
+                    size="sm"
+                    variant="outline"
+                    disabled={chatDisabled}
+                    onClick={() => void sendMessage(messages.at(-1)!.content)}
+                  >
+                    Retry last message
+                  </Button>
+                )}
+              </div>
+            )}
+            <div ref={bottomRef} />
           </div>
-        </section>
-
-        {prefs.open && (
-          <SessionPanel
-            sessionId={sessionId}
-            sandboxId={status?.sandboxId || detail?.sandboxId || ""}
-            sandboxReady={ready}
-            defaultTitle={detail?.title || ""}
-            prefs={prefs}
-            onPrefs={setPrefs}
-            onReconnect={() => void reconnect()}
-            onCommitted={() => void refresh(sessionId, false)}
-            defaultPort={status?.devPort}
+        </div>
+        <div className="absolute inset-x-0 bottom-0 z-20 pb-6 px-4 mx-auto w-full max-w-3xl">
+          <ChatComposer
+            value={input}
+            onValueChange={setInput}
+            onSubmit={send}
+            onStop={stop}
+            busy={sending || activeAgent}
+            disabled={chatDisabled}
+            canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
+            placeholder="Tell the agent what to do…"
+            onPasteFiles={(files) => void addFiles(files)}
+            onDropFiles={(files) => void addFiles(files)}
+            attachments={
+              attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+                  {attachments.map((a) => (
+                    <span
+                      key={a.id}
+                      className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
+                    >
+                      {a.name} · {(a.content.length / 1024).toFixed(1)}KB
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(a.id)}
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={`Remove ${a.name}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : undefined
+            }
+            skills={
+              skills.length > 0 ? <SkillChips skills={skills} onRemove={removeSkill} /> : undefined
+            }
+            notice={
+              (activeAgent || agentQueued) && !sending ? (
+                <p className="px-4 pt-3 text-xs text-muted-foreground" role="status">
+                  {agentQueued
+                    ? "The agent is preparing this task. It will be ready for a new message shortly."
+                    : "An agent turn is running, possibly in another tab. Stop it before sending a new message."}
+                </p>
+              ) : undefined
+            }
+            actions={
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  disabled={chatDisabled}
+                  onChange={(e) => {
+                    if (e.target.files) void addFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <SkillsButton selected={skills} onToggle={toggleSkill} disabled={chatDisabled} />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={chatDisabled}
+                  className="px-2 text-[12px]"
+                  aria-label="Attach files"
+                >
+                  <HugeiconsIcon icon={Attachment01Icon} size={18} strokeWidth={1.8} />
+                </Button>
+                <p className="hidden px-1 text-[11px] text-muted-foreground lg:block">
+                  {status?.plan && status.plan.length > 0
+                    ? `Plan ${status.plan.filter((t) => t.status === "done").length}/${status.plan.length}`
+                    : ""}
+                </p>
+                <ContextDetails usage={status?.usage} model={status?.model || detail?.model} />
+              </>
+            }
           />
-        )}
+        </div>
+      </section>
+
+      {prefs.open && (
+        <SessionPanel
+          sessionId={sessionId}
+          sandboxId={status?.sandboxId || detail?.sandboxId || ""}
+          sandboxReady={ready}
+          defaultTitle={detail?.title || ""}
+          prefs={prefs}
+          onPrefs={setPrefs}
+          onReconnect={() => void reconnect()}
+          onCommitted={() => void refresh(sessionId, false)}
+            onUseComment={(comment) => setInput((current) => current ? `${current}\n\n${comment}` : comment)}
+          defaultPort={status?.devPort}
+        />
+      )}
       <ReconnectConflictDialog
         conflict={reconnectConflict}
         reconnecting={reconnecting}

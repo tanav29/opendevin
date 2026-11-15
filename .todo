@@ -1,7 +1,0 @@
-[ ] ui need lot of net
-[ ] add context component from shadcn to the input box for context details see docs here https://ui.shadcn.com/docs/ai-elements/base/context
-
-[feature] Durable background tasks: resume after disconnect, request approvals, send completion notifications
-[feature partial] Create draft PRs after pushing; sync CI/reviews and agent follow-up remain
-[feature] Project memory and reusable skills; add MCP and web/docs tools
-[feature] Browser verification with screenshots and console/network errors

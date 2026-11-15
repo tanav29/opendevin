@@ -35,6 +35,7 @@ import { statusLabel } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
 import { CircleX, Code2, Loader } from "lucide-react";
+import { SandboxStatus } from "@/components/sandbox-status";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -42,6 +43,7 @@ type Session = {
   title: string;
   status: string;
   sandboxStatus: string;
+  sandboxExpiresAt?: string | null;
   branch: string;
   updatedAt: string;
   projectId: string;
@@ -252,12 +254,11 @@ export function AppSidebar() {
                                   )}
 
                                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                                  {/*<span
-                                    role="img"
-                                    aria-label={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
-                                    title={`Sandbox ${sandboxLabel(s.sandboxStatus)}`}
-                                    className={`size-1.5 shrink-0 rounded-full ${sandboxTone(s.sandboxStatus)}`}
-                                  />*/}
+                                  <SandboxStatus
+                                    status={s.sandboxStatus}
+                                    expiresAt={s.sandboxExpiresAt}
+                                    compact
+                                  />
                                 </SidebarMenuButton>
                               </SidebarMenuItem>
                             );
@@ -304,7 +305,9 @@ export function AppSidebar() {
                                 >
                                   <IconFolder className="shrink-0 text-muted-foreground" />
                                   <span className="min-w-0 flex-1 truncate">
-                                    {p.repo ? p.repo.split("/").slice(-2).join("/") : "Empty sandbox"}
+                                    {p.repo
+                                      ? p.repo.split("/").slice(-2).join("/")
+                                      : "Empty sandbox"}
                                   </span>
                                 </SidebarMenuButton>
                                 {count > 0 && <SidebarMenuBadge>{count}</SidebarMenuBadge>}

@@ -24,6 +24,7 @@ export default function ChangesTab({
   defaultTitle,
   onReconnect,
   onCommitted,
+  onUseComment,
 }: {
   sessionId: string;
   sandboxId: string;
@@ -32,6 +33,7 @@ export default function ChangesTab({
   defaultTitle: string;
   onReconnect: () => void;
   onCommitted?: () => void;
+  onUseComment: (comment: string) => void;
 }) {
   const confirm = useConfirm();
   const [diff, setDiff] = useState<string | null>(null);
@@ -42,7 +44,6 @@ export default function ChangesTab({
     capturedAt: string | null;
   } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [commitOpen, setCommitOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [committing, setCommitting] = useState(false);
@@ -65,6 +66,34 @@ export default function ChangesTab({
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflightError, setPreflightError] = useState("");
   const [confirmUntracked, setConfirmUntracked] = useState(false);
+  const [git, setGit] = useState<{
+    branch: string;
+    files: { path: string; staged: string; unstaged: string }[];
+    commits: { hash: string; subject: string }[];
+    workspaceError: string;
+    pullRequests: {
+      number: number;
+      title: string;
+      url: string;
+      state: string;
+      comments: { id: string; author: string; body: string; path?: string; url: string }[];
+    }[];
+    pullRequestError: string;
+  } | null>(null);
+  const [gitError, setGitError] = useState("");
+  const readGit = useCallback(async () => {
+    try {
+      const data = await api<NonNullable<typeof git>>(
+        `/api/sessions/${sessionId}/git`,
+        undefined,
+        60_000,
+      );
+      setGit(data);
+      setGitError("");
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : "Could not load Git details.");
+    }
+  }, [sessionId]);
 
   type DiffPayload = {
     diff?: string;
@@ -131,7 +160,6 @@ export default function ChangesTab({
       setTruncated(Boolean(payload.truncated));
       setPersisted(Boolean(payload.persisted));
       setRecoveryPatch(payload.recoveryPatch ?? null);
-      setError("");
     }
     setLoading(false);
   }, []);
@@ -160,10 +188,14 @@ export default function ChangesTab({
     };
   }, [sessionId, active, available, sandboxId, readDiff, applyDiff]);
 
+  useEffect(() => {
+    if (active) void readGit();
+  }, [active, sandboxId, readGit]);
+
   function refresh() {
     setLoading(true);
-    setError("");
     void readDiff().then(applyDiff);
+    void readGit();
   }
 
   const diffOptions = useMemo<FileDiffOptions<undefined, undefined>>(
@@ -291,6 +323,7 @@ export default function ChangesTab({
         60_000,
       );
       setPullRequest(result);
+      void readGit();
     } catch (error) {
       setPullRequestError(
         error instanceof Error ? error.message : "Could not create pull request.",
@@ -298,23 +331,6 @@ export default function ChangesTab({
     } finally {
       setCreatingPullRequest(false);
     }
-  }
-
-  if (!available && !diff && !loading && !error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-sm font-medium">Changes unavailable</p>
-        <p className="max-w-60 text-[13px] text-muted-foreground">
-          The sandbox is not running, so there is no workspace to diff.
-        </p>
-        <button
-          onClick={onReconnect}
-          className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background"
-        >
-          Reconnect sandbox
-        </button>
-      </div>
-    );
   }
 
   return (
@@ -409,6 +425,135 @@ export default function ChangesTab({
         </p>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto py-2">
+        <div className="space-y-4 border-b border-border px-3 pb-4 text-xs">
+          {gitError && <p className="text-danger">{gitError}</p>}
+          {!git && !gitError && <p className="text-muted-foreground">Loading Git details…</p>}
+          {git && (
+            <>
+              <div>
+                <span className="text-muted-foreground">Branch </span>
+                <span className="font-mono break-all">{git.branch || "Unknown"}</span>
+              </div>
+              {git.workspaceError && (
+                <p className="text-muted-foreground">
+                  {git.workspaceError}{" "}
+                  <button onClick={onReconnect} className="underline">
+                    Reconnect
+                  </button>
+                </p>
+              )}
+              {(
+                [
+                  ["Staged", "staged"],
+                  ["Unstaged", "unstaged"],
+                ] as const
+              ).map(([label, key]) => {
+                const files = git.files.filter((file) => file[key]);
+                return (
+                  <section key={key}>
+                    <h3 className="font-medium">
+                      {label} <span className="text-muted-foreground">{files.length}</span>
+                    </h3>
+                    {files.length ? (
+                      <ul className="mt-1 space-y-1">
+                        {files.map((file) => (
+                          <li key={file.path} className="flex gap-2 font-mono">
+                            <span
+                              className="w-3 shrink-0 text-muted-foreground"
+                              title={file[key] === "?" ? "Untracked" : file[key]}
+                            >
+                              {file[key]}
+                            </span>
+                            <span className="break-all">{file.path}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1 text-muted-foreground">
+                        No {label.toLowerCase()} changes.
+                      </p>
+                    )}
+                  </section>
+                );
+              })}
+              <section>
+                <h3 className="font-medium">Pull requests</h3>
+                {git.pullRequestError ? (
+                  <p className="mt-1 text-muted-foreground">{git.pullRequestError}</p>
+                ) : git.pullRequests.length === 0 ? (
+                  <p className="mt-1 text-muted-foreground">No pull requests for this branch.</p>
+                ) : (
+                  git.pullRequests.map((pr) => (
+                    <div key={pr.number} className="mt-2 space-y-2">
+                      <a
+                        href={pr.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium underline break-words"
+                      >
+                        #{pr.number} {pr.title}
+                      </a>{" "}
+                      <span className="text-muted-foreground">{pr.state}</span>
+                      {pr.comments.length === 0 ? (
+                        <p className="text-muted-foreground">No comments.</p>
+                      ) : (
+                        pr.comments.map((comment) => (
+                          <button
+                            key={comment.id}
+                            type="button"
+                            onClick={() =>
+                              onUseComment(
+                                `PR #${pr.number} comment by @${comment.author}${comment.path ? ` on ${comment.path}` : ""}:\n${comment.body}\n${comment.url}`,
+                              )
+                            }
+                            className="block w-full rounded-md border border-border p-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                            title="Add comment to chat input"
+                          >
+                            <span className="font-medium">@{comment.author}</span>
+                            {comment.path && (
+                              <span className="ml-2 text-muted-foreground break-all">
+                                {comment.path}
+                              </span>
+                            )}
+                            <span className="mt-1 block whitespace-pre-wrap break-words">
+                              {comment.body}
+                            </span>
+                            <span className="mt-1 block text-muted-foreground">
+                              Click to add to chat
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ))
+                )}
+              </section>
+              <section>
+                <h3 className="font-medium">
+                  Commits <span className="text-muted-foreground">{git.commits.length}</span>
+                </h3>
+                {git.commits.length ? (
+                  <ul className="mt-1 space-y-1">
+                    {git.commits.map((commit) => (
+                      <li key={commit.hash} className="flex gap-2">
+                        <span className="shrink-0 font-mono text-muted-foreground">
+                          {commit.hash}
+                        </span>
+                        <span className="break-words">{commit.subject}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-muted-foreground">No commits available.</p>
+                )}
+                <p className="mt-1 text-muted-foreground">
+                  History available in this workspace; shallow clones may have older commits
+                  omitted.
+                </p>
+              </section>
+            </>
+          )}
+        </div>
         {diff === null && !loading && (
           <p className="px-3 py-6 text-[13px] text-muted-foreground">
             Open this tab to load the workspace diff.
