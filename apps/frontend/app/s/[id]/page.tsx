@@ -637,35 +637,33 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </section>
 
-        {prefs.open && (
-          <SessionPanel
-            sessionId={sessionId}
-            sandboxId={status?.sandboxId || detail?.sandboxId || ""}
-            sandboxReady={ready}
-            defaultTitle={detail?.title || ""}
-            prefs={prefs}
-            onPrefs={setPrefs}
-            sessionInfo={
-              <SessionInfo
-                sessionId={sessionId}
-                detail={detail}
-                status={status}
-                onReconnect={() => void reconnect()}
-                onKill={() => void kill()}
-                reconnecting={reconnecting}
-                killing={killing}
-                onDelete={() => void removeSession()}
-                deleting={deleting}
-              />
-            }
-            onReconnect={() => void reconnect()}
-            onCommitted={() => void refresh(sessionId, false)}
-            onUseComment={(comment) =>
-              setInput((current) => (current ? `${current}\n\n${comment}` : comment))
-            }
-            defaultPort={status?.devPort}
-          />
-        )}
+        <SessionPanel
+          sessionId={sessionId}
+          sandboxId={status?.sandboxId || detail?.sandboxId || ""}
+          sandboxReady={ready}
+          defaultTitle={detail?.title || ""}
+          prefs={prefs}
+          onPrefs={setPrefs}
+          sessionInfo={
+            <SessionInfo
+              sessionId={sessionId}
+              detail={detail}
+              status={status}
+              onReconnect={() => void reconnect()}
+              onKill={() => void kill()}
+              reconnecting={reconnecting}
+              killing={killing}
+              onDelete={() => void removeSession()}
+              deleting={deleting}
+            />
+          }
+          onReconnect={() => void reconnect()}
+          onCommitted={() => void refresh(sessionId, false)}
+          onUseComment={(comment) =>
+            setInput((current) => (current ? `${current}\n\n${comment}` : comment))
+          }
+          defaultPort={status?.devPort}
+        />
       </div>
       <ReconnectConflictDialog
         conflict={reconnectConflict}

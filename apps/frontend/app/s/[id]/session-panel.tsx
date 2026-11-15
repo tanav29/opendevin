@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { PanelPrefs, Tab } from "./panel-prefs";
 
@@ -41,6 +41,16 @@ export default function SessionPanel({
     prefsRef.current = prefs;
   }, [prefs]);
   const activeTab = prefs.tab;
+  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(
+    () => new Set(prefs.open ? [activeTab] : []),
+  );
+
+  useEffect(() => {
+    if (!prefs.open) return;
+    setVisitedTabs((visited) =>
+      visited.has(activeTab) ? visited : new Set(visited).add(activeTab),
+    );
+  }, [activeTab, prefs.open]);
 
   function selectTab(tab: Tab) {
     onPrefs({ ...prefsRef.current, tab });
@@ -76,6 +86,7 @@ export default function SessionPanel({
 
   return (
     <aside
+      hidden={!prefs.open}
       aria-label="Workspace panel"
       className="absolute inset-y-0 right-0 z-30 h-full shrink-0 bg-background md:relative md:max-w-1/2"
       style={{ width: `min(100%, ${prefs.width}px)` }}
@@ -85,64 +96,70 @@ export default function SessionPanel({
         className="absolute inset-y-0 left-0 z-10 hidden w-1 cursor-col-resize hover:bg-ring/50 md:block"
       />
       <div className="flex h-full flex-col border-l border-border">
-        <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-          <div className="flex min-w-0 flex-wrap gap-1">
-            {tabs.map((tab) => (
-              <Button
-                key={tab.id}
-                size="xs"
-                onClick={() => selectTab(tab.id)}
-                variant={activeTab === tab.id ? "outline" : "ghost"}
-                aria-pressed={activeTab === tab.id}
-              >
-                {tab.label}
-              </Button>
-            ))}
-          </div>
+        <div className="flex items-center border-b border-border px-2 py-1.5 gap-1 overflow-x-scroll overflow-y-hidden">
+          {tabs.map((tab) => (
+            <Button
+              key={tab.id}
+              size="xs"
+              onClick={() => selectTab(tab.id)}
+              variant={activeTab === tab.id ? "outline" : "ghost"}
+              aria-pressed={activeTab === tab.id}
+            >
+              {tab.label}
+            </Button>
+          ))}
         </div>
         <div className="min-h-0 flex-1">
-          {activeTab === "session" && sessionInfo}
-          {activeTab === "files" && (
-            <FilesTab
-              key={`files-${sessionId}-${sandboxId}`}
-              sessionId={sessionId}
-              sandboxId={sandboxId}
-              available={sandboxReady}
-              active={activeTab === "files"}
-              onReconnect={onReconnect}
-            />
+          <div hidden={activeTab !== "session"} className="h-full">
+            {sessionInfo}
+          </div>
+          {(visitedTabs.has("files") || (prefs.open && activeTab === "files")) && (
+            <div hidden={activeTab !== "files"} className="h-full">
+              <FilesTab
+                key={`files-${sessionId}-${sandboxId}`}
+                sessionId={sessionId}
+                sandboxId={sandboxId}
+                available={sandboxReady}
+                onReconnect={onReconnect}
+              />
+            </div>
           )}
-          {activeTab === "terminal" && (
-            <TerminalTab
-              key={`term-${sessionId}-${sandboxId}`}
-              sessionId={sessionId}
-              sandboxId={sandboxId}
-              available={sandboxReady}
-              active={activeTab === "terminal"}
-              onReconnect={onReconnect}
-            />
+          {(visitedTabs.has("terminal") || (prefs.open && activeTab === "terminal")) && (
+            <div hidden={activeTab !== "terminal"} className="h-full">
+              <TerminalTab
+                key={`term-${sessionId}-${sandboxId}`}
+                sessionId={sessionId}
+                sandboxId={sandboxId}
+                available={sandboxReady}
+                onReconnect={onReconnect}
+              />
+            </div>
           )}
-          {activeTab === "changes" && (
-            <ChangesTab
-              key={`diff-${sessionId}-${sandboxId}`}
-              sessionId={sessionId}
-              sandboxId={sandboxId}
-              available={sandboxReady}
-              active={activeTab === "changes"}
-              defaultTitle={defaultTitle}
-              onReconnect={onReconnect}
-              onCommitted={onCommitted}
-              onUseComment={onUseComment}
-            />
+          {(visitedTabs.has("changes") || (prefs.open && activeTab === "changes")) && (
+            <div hidden={activeTab !== "changes"} className="h-full">
+              <ChangesTab
+                key={`diff-${sessionId}-${sandboxId}`}
+                sessionId={sessionId}
+                sandboxId={sandboxId}
+                available={sandboxReady}
+                active={activeTab === "changes"}
+                defaultTitle={defaultTitle}
+                onReconnect={onReconnect}
+                onCommitted={onCommitted}
+                onUseComment={onUseComment}
+              />
+            </div>
           )}
-          {activeTab === "preview" && (
-            <PreviewTab
-              key={`preview-${sessionId}-${sandboxId}`}
-              sessionId={sessionId}
-              available={sandboxReady}
-              onReconnect={onReconnect}
-              defaultPort={defaultPort}
-            />
+          {(visitedTabs.has("preview") || (prefs.open && activeTab === "preview")) && (
+            <div hidden={activeTab !== "preview"} className="h-full">
+              <PreviewTab
+                key={`preview-${sessionId}-${sandboxId}`}
+                sessionId={sessionId}
+                available={sandboxReady}
+                onReconnect={onReconnect}
+                defaultPort={defaultPort}
+              />
+            </div>
           )}
         </div>
       </div>

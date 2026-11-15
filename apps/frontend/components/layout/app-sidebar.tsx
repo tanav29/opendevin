@@ -11,8 +11,6 @@ import {
   IconSettings,
   IconSparkles,
 } from "@tabler/icons-react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Chat } from "@hugeicons/core-free-icons";
 
 import {
   Sidebar,
@@ -34,7 +32,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { statusLabel } from "@/components/ui/status-dot";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import { CircleX, Code2, Loader } from "lucide-react";
+import { Code2 } from "lucide-react";
 
 type Project = { id: string; repo: string; updatedAt?: string };
 type Session = {
@@ -90,11 +88,11 @@ export function AppSidebar() {
   }, [projects, query]);
 
   const filteredSessions = useMemo(() => {
-    if (!query.trim()) return sessions.slice(0, 8);
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
     return sessions
+      .filter((s) => s.status !== "running" && s.status !== "queued")
       .filter((s) => s.title.toLowerCase().includes(q) || s.project.repo.toLowerCase().includes(q))
-      .slice(0, 8);
+      .slice(0, 10);
   }, [sessions, query]);
 
   const sessionCountByProject = useMemo(() => {
@@ -158,21 +156,17 @@ export function AppSidebar() {
                 </div>
               </div>
 
-              <Collapsible defaultOpen className="group/collapsible">
-                <SidebarGroup>
-                  <SidebarGroupLabel render={<CollapsibleTrigger />}>
-                    Running tasks
-                    <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
-                  </SidebarGroupLabel>
-                  <CollapsibleContent>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {runningSessions.length === 0 ? (
-                          <p className="px-2 py-2 text-[12px] text-muted-foreground group-data-[collapsible=icon]:hidden">
-                            No running tasks.
-                          </p>
-                        ) : (
-                          runningSessions.map((s) => (
+              {runningSessions.length > 0 && (
+                <Collapsible defaultOpen className="group/collapsible">
+                  <SidebarGroup>
+                    <SidebarGroupLabel render={<CollapsibleTrigger />}>
+                      Running tasks
+                      <IconChevronDown className="ml-auto size-4 transition-transform group-data-open/collapsible:rotate-180" />
+                    </SidebarGroupLabel>
+                    <CollapsibleContent>
+                      <SidebarGroupContent>
+                        <SidebarMenu>
+                          {runningSessions.map((s) => (
                             <SidebarMenuItem key={s.id}>
                               <SidebarMenuButton
                                 size="sm"
@@ -180,17 +174,16 @@ export function AppSidebar() {
                                 tooltip={s.title}
                                 render={<Link href={`/s/${s.id}`} prefetch />}
                               >
-                                <Loader className="h-3 text-muted-foreground" />
                                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
                               </SidebarMenuButton>
                             </SidebarMenuItem>
-                          ))
-                        )}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </CollapsibleContent>
-                </SidebarGroup>
-              </Collapsible>
+                          ))}
+                        </SidebarMenu>
+                      </SidebarGroupContent>
+                    </CollapsibleContent>
+                  </SidebarGroup>
+                </Collapsible>
+              )}
 
               <Collapsible defaultOpen className="group/collapsible">
                 <SidebarGroup>
@@ -225,14 +218,6 @@ export function AppSidebar() {
                                   tooltip={`${s.title} · Agent ${s.status === "queued" ? "waiting" : statusLabel(s.status)} · Sandbox ${sandboxLabel(s.sandboxStatus)}`}
                                   render={<Link href={`/s/${s.id}`} prefetch />}
                                 >
-                                  {s.status == "running" || s.status == "queued" ? (
-                                    <Loader className="h-3 text-muted-foreground" />
-                                  ) : s.status == "failed" ? (
-                                    <CircleX className="h-3 text-muted-foreground" />
-                                  ) : (
-                                    <HugeiconsIcon icon={Chat} className="text-muted-foreground" />
-                                  )}
-
                                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
                                 </SidebarMenuButton>
                               </SidebarMenuItem>

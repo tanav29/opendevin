@@ -2,12 +2,7 @@
 
 import { File as CodeFile } from "@pierre/diffs/react";
 import { useCallback, useEffect, useState } from "react";
-import {
-  FileTree,
-  useFileTree,
-  useFileTreeSearch,
-  useFileTreeSelection,
-} from "@pierre/trees/react";
+import { FileTree, useFileTree, useFileTreeSelection } from "@pierre/trees/react";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,13 +14,11 @@ export default function FilesTab({
   sessionId,
   sandboxId,
   available,
-  active,
   onReconnect,
 }: {
   sessionId: string;
   sandboxId: string;
   available: boolean;
-  active: boolean;
   onReconnect: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -33,7 +26,6 @@ export default function FilesTab({
   const [paths, setPaths] = useState<string[]>([]);
   const [pathsTruncated, setPathsTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
   const [pathInput, setPathInput] = useState("");
   const [loadedPath, setLoadedPath] = useState("");
   const [fileContent, setFileContent] = useState("");
@@ -45,7 +37,6 @@ export default function FilesTab({
   const dirty = Boolean(loadedPath) && fileContent !== savedContent;
   const pathMismatch = Boolean(loadedPath) && pathInput !== loadedPath;
   const { model } = useFileTree({ paths: [], search: true });
-  const search = useFileTreeSearch(model);
   const selection = useFileTreeSelection(model);
 
   useEffect(() => {
@@ -96,10 +87,10 @@ export default function FilesTab({
   }, [sessionId]);
 
   useEffect(() => {
-    if (!active || !available) return;
+    if (!available) return;
     const timer = window.setTimeout(() => void readPaths(), 0);
     return () => window.clearTimeout(timer);
-  }, [active, available, sandboxId, readPaths]);
+  }, [available, sandboxId, readPaths]);
 
   const openFile = useCallback(
     async (path: string) => {
@@ -194,26 +185,13 @@ export default function FilesTab({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border p-2">
-        <Input
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value);
-            try {
-              search.setValue(e.target.value || null);
-            } catch {}
-          }}
-          placeholder="Filter files…"
-          className="h-7 text-[12px]"
-        />
-      </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {loading ? (
           <p className="px-3 py-4 text-[13px] text-muted-foreground">Listing files…</p>
         ) : paths.length === 0 ? (
           <p className="px-3 py-4 text-[13px] text-muted-foreground">No files found.</p>
         ) : (
-          <FileTree model={model} className="px-1 py-2" />
+          <FileTree model={model} className="app-file-tree px-1 py-2" />
         )}
       </div>
       <Dialog

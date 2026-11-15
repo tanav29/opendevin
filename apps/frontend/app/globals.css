@@ -1102,3 +1102,17 @@
 .squircle {
   corner-shape: squircle;
 }
+
+.app-file-tree {
+  --trees-bg-override: var(--background);
+  --trees-bg-muted-override: var(--accent);
+  --trees-fg-override: var(--foreground);
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-selected-bg-override: var(--accent);
+  --trees-selected-fg-override: var(--accent-foreground);
+  --trees-border-color-override: var(--border);
+  --trees-focus-ring-color-override: var(--ring);
+  --trees-selected-focused-border-color-override: var(--ring);
+  --trees-file-icon-color: var(--muted-foreground);
+  --trees-font-family-override: var(--font-sans);
+}

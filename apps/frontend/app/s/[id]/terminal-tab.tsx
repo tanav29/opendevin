@@ -8,19 +8,17 @@ export default function TerminalTab({
   sessionId,
   sandboxId,
   available,
-  active,
   onReconnect,
 }: {
   sessionId: string;
   sandboxId: string;
   available: boolean;
-  active?: boolean;
   onReconnect: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connectError, setConnectError] = useState("");
   useEffect(() => {
-    if (!available || active === false) return;
+    if (!available) return;
     let disposed = false;
     let term: { destroy(): void } | null = null;
     let socket: Socket | null = null;
@@ -99,7 +97,7 @@ export default function TerminalTab({
         // Terminal already gone.
       }
     };
-  }, [sessionId, sandboxId, available, active]);
+  }, [sessionId, sandboxId, available]);
 
   if (!available) {
     return (
