@@ -24,6 +24,7 @@ import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
 import SessionInfo from "./session-info";
 import ChatComposer from "@/components/chat/composer";
+import ChatQuestionnaire, { parseQuestion } from "@/components/chat/questionnaire";
 import { Conversation } from "@/components/ai-elements/conversation";
 import { PromptAttachments } from "@/components/ai-elements/attachments";
 import { Reasoning } from "@/components/ai-elements/activity";
@@ -139,7 +140,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       new DefaultChatTransport<UIMessage>({
         api: `${API}/api/sessions/${sessionId}/chat`,
         credentials: "include",
-        prepareSendMessagesRequest: ({ messages: outgoing }) => ({
+        prepareSendMessagesRequest: ({ messages: outgoing, body }) => ({
           body: {
             message:
               outgoing
@@ -147,6 +148,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 ?.parts.filter((part) => part.type === "text")
                 .map((part) => part.text)
                 .join("") ?? "",
+            ...body,
           },
         }),
       }),
@@ -157,7 +159,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     sendMessage: streamMessage,
     stop: stopStreaming,
     setMessages: setLiveMessages,
-  } = useChat({ id: sessionId, transport: chatTransport });
+  } = useChat({
+    id: sessionId,
+    transport: chatTransport,
+    onError: (error) => toast.error(error.message),
+  });
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
 
@@ -292,7 +298,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   }
 
-  async function sendMessage(text: string) {
+  async function sendMessage(text: string, questionMessageId?: string) {
     const trimmed = text.trim();
     if (
       (!trimmed && attachments.length === 0 && skills.length === 0) ||
@@ -302,7 +308,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       !ready
     )
       return;
-    const blocks = [serializeAttachments(attachments), serializeSkills(skills)]
+    const blocks = (
+      questionMessageId ? [] : [serializeAttachments(attachments), serializeSkills(skills)]
+    )
       .filter(Boolean)
       .join("\n\n");
     const full = trimmed ? (blocks ? `${trimmed}\n\n${blocks}` : trimmed) : blocks;
@@ -310,12 +318,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       toast.error(`Message exceeds the ${MAX_MESSAGE_CHARS.toLocaleString()}-character limit.`);
       return;
     }
-    setInput("");
-    resetAttachments();
-    resetSkills();
+    if (!questionMessageId) {
+      setInput("");
+      resetAttachments();
+      resetSkills();
+    }
     setSending(true);
     try {
-      await streamMessage({ text: full });
+      if (questionMessageId) {
+        await streamMessage(undefined, {
+          body: { message: full, questionAnswer: { messageId: questionMessageId } },
+        });
+      } else {
+        await streamMessage({ text: full });
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         toast.info("Stopped. The server run was cancelled.");
@@ -323,9 +339,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         toast.error(err instanceof Error ? err.message : "Couldn't reach the agent. Try again.");
       }
     } finally {
-      setSending(false);
       await refresh(sessionId, true);
       setLiveMessages([]);
+      setSending(false);
     }
   }
 
@@ -385,6 +401,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const ready = provisioningPhase === "ready" && (status?.sandboxAvailable ?? false);
   const chatDisabled = !ready || sending || agentBusy;
   const sessionNotFound = isNotFoundError(loadError);
+  const latestMessage = messages.at(-1);
+  const question =
+    latestMessage?.role === "assistant" ? parseQuestion(latestMessage.content) : null;
 
   if (loading && !detail && !status) {
     return (
@@ -492,7 +511,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 <ChatMessageRow
                   role={message.role === "user" ? "user" : "assistant"}
                   content={message.content}
-                  onAnswer={chatDisabled ? undefined : (text) => void sendMessage(text)}
                 />
               </MessageScrollerItem>
             ))}
@@ -507,7 +525,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                   role={message.role === "user" ? "user" : "assistant"}
                   parts={message.parts}
                   isStreaming={sending && message === liveMessages.at(-1)}
-                  onAnswer={chatDisabled ? undefined : (text) => void sendMessage(text)}
                 />
               </MessageScrollerItem>
             ))}
@@ -541,6 +558,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Conversation>
           <div className="z-20 w-full shrink-0 px-4 pb-4 pt-2">
             <ChatComposer
+              questionnaire={
+                question && !question.answered ? (
+                  <ChatQuestionnaire
+                    key={latestMessage!.id}
+                    question={question}
+                    disabled={chatDisabled}
+                    onSubmit={(answer) => void sendMessage(answer, latestMessage!.id)}
+                  />
+                ) : undefined
+              }
               value={input}
               onValueChange={setInput}
               onSubmit={send}

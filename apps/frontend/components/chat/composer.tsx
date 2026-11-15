@@ -25,6 +25,7 @@ export default function ChatComposer({
   onPasteFiles,
   onDropFiles,
   className = "",
+  questionnaire,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -41,6 +42,7 @@ export default function ChatComposer({
   onPasteFiles?: (files: FileList) => void;
   onDropFiles?: (files: FileList) => void;
   className?: string;
+  questionnaire?: ReactNode;
 }) {
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -48,77 +50,82 @@ export default function ChatComposer({
   }
 
   return (
-    <form
-      onSubmit={submit}
-      className={`mx-auto w-full max-w-3xl ${className}`}
-      onDragOver={(event) => {
-        if (onDropFiles) event.preventDefault();
-      }}
-      onDrop={(event) => {
-        if (!onDropFiles) return;
-        event.preventDefault();
-        if (!disabled && event.dataTransfer.files.length > 0) onDropFiles(event.dataTransfer.files);
-      }}
-    >
-      <InputGroup className="rounded-2xl bg-card dark:bg-card">
-        {(attachments || skills || notice) && (
-          <InputGroupAddon
-            align="block-start"
-            className="flex-col items-stretch p-0 text-foreground font-normal select-text"
-          >
-            {attachments}
-            {skills}
-            {notice}
-          </InputGroupAddon>
-        )}
-        <InputGroupTextarea
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onValueChange(event.target.value)}
-          onPaste={(event) => {
-            if (onPasteFiles && event.clipboardData.files.length > 0)
-              onPasteFiles(event.clipboardData.files);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              if (!busy && !disabled && canSend) event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          rows={1}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          className="min-h-14 max-h-48 px-4 py-3 text-sm"
-        />
-        <InputGroupAddon align="block-end" className="justify-between gap-2 px-2 pb-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">{actions}</div>
-          {busy ? (
-            <InputGroupButton
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              onClick={(event) => {
-                event.preventDefault();
-                onStop?.();
-              }}
-              disabled={!onStop}
-              aria-label="Stop generation"
+    <>
+      {questionnaire && <div hidden={busy}>{questionnaire}</div>}
+      <form
+        hidden={Boolean(questionnaire) && !busy}
+        onSubmit={submit}
+        className={`mx-auto w-full max-w-3xl ${className}`}
+        onDragOver={(event) => {
+          if (onDropFiles) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!onDropFiles) return;
+          event.preventDefault();
+          if (!disabled && event.dataTransfer.files.length > 0)
+            onDropFiles(event.dataTransfer.files);
+        }}
+      >
+        <InputGroup className="rounded-2xl bg-card dark:bg-card">
+          {(attachments || skills || notice) && (
+            <InputGroupAddon
+              align="block-start"
+              className="flex-col items-stretch p-0 text-foreground font-normal select-text"
             >
-              <SquareIcon />
-            </InputGroupButton>
-          ) : (
-            <InputGroupButton
-              type="submit"
-              variant="default"
-              size="icon-sm"
-              disabled={disabled || !canSend}
-              aria-label="Send message"
-            >
-              <ArrowUpIcon />
-            </InputGroupButton>
+              {attachments}
+              {skills}
+              {notice}
+            </InputGroupAddon>
           )}
-        </InputGroupAddon>
-      </InputGroup>
-    </form>
+          <InputGroupTextarea
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onValueChange(event.target.value)}
+            onPaste={(event) => {
+              if (onPasteFiles && event.clipboardData.files.length > 0)
+                onPasteFiles(event.clipboardData.files);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                if (!busy && !disabled && canSend) event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            rows={1}
+            placeholder={placeholder}
+            aria-label={placeholder}
+            className="min-h-14 max-h-48 px-4 py-3 text-sm"
+          />
+          <InputGroupAddon align="block-end" className="justify-between gap-2 px-2 pb-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">{actions}</div>
+            {busy ? (
+              <InputGroupButton
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onStop?.();
+                }}
+                disabled={!onStop}
+                aria-label="Stop generation"
+              >
+                <SquareIcon />
+              </InputGroupButton>
+            ) : (
+              <InputGroupButton
+                type="submit"
+                variant="default"
+                size="icon-sm"
+                disabled={disabled || !canSend}
+                aria-label="Send message"
+              >
+                <ArrowUpIcon />
+              </InputGroupButton>
+            )}
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
+    </>
   );
 }

@@ -151,12 +151,12 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
     }),
     ask_user: tool({
       description:
-        "Ask a blocking clarification with 2-6 clickable options, then wait for the next user message. Make reasonable assumptions for routine choices.",
+        "Ask a blocking clarification in a questionnaire with 2-6 options and a custom answer field. Wait for submission; the answer will be returned as this tool's result. Make reasonable assumptions for routine choices.",
       inputSchema: z.object({
         question: z.string().describe("The clarifying question"),
         options: z.array(z.string()).min(2).max(6).describe("2-6 short answer options"),
       }),
-      execute: async () => "Question shown. Wait for the user's next message.",
+      execute: async () => "Questionnaire shown. Waiting for the user to submit an answer.",
     }),
     edit_file: tool({
       description:

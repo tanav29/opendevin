@@ -19,12 +19,17 @@ import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "../config.js";
 import { ownedSession, routeParam } from "../http.js";
 import { loadToolLog, parseSkillsBlock } from "../agent.js";
 import { connectSandboxTools } from "../tools.js";
+import { answerQuestionnaire } from "../questionnaire.js";
 
 const router = Router();
 
 router.post("/api/sessions/:id/chat", async (req, res) => {
   const owner = await ownedSession(req, routeParam(req, "id"));
   const prompt = typeof req.body?.message === "string" ? req.body?.message.trim() : "";
+  const questionAnswer = req.body?.questionAnswer;
+  if (questionAnswer && typeof questionAnswer.messageId !== "string") {
+    return res.status(400).json({ error: "A questionnaire message ID is required." });
+  }
   if (!prompt) return res.status(400).json({ error: "A message is required" });
   if (prompt.length > LIMITS.messageChars) {
     return res.status(413).json({
@@ -67,9 +72,35 @@ router.post("/api/sessions/:id/chat", async (req, res) => {
   }
 
   try {
+    let modelHistory = await loadToolLog(owner.id);
+    if (questionAnswer) {
+      const latest = await prisma.message.findFirst({
+        where: { sessionId: owner.id },
+        orderBy: { createdAt: "desc" },
+      });
+      const answered =
+        latest && latest.id === questionAnswer.messageId && latest.role === "assistant"
+          ? answerQuestionnaire(latest.content, modelHistory, prompt)
+          : null;
+      if (!answered) {
+        return res
+          .status(409)
+          .json({ error: "This questionnaire is no longer waiting for an answer." });
+      }
+      modelHistory = answered.modelHistory;
+      await prisma.$transaction([
+        prisma.message.update({ where: { id: latest!.id }, data: { content: answered.content } }),
+        prisma.projectSession.update({
+          where: { id: owner.id },
+          data: { toolLog: JSON.stringify(modelHistory) },
+        }),
+      ]);
+    } else {
+      modelHistory.push({ role: "user", content: prompt });
+      await prisma.message.create({ data: { sessionId: owner.id, role: "user", content: prompt } });
+    }
     // Persist the user's message and mark the turn running before any network
     // work, so a hung sandbox connect can't swallow the prompt.
-    await prisma.message.create({ data: { sessionId: owner.id, role: "user", content: prompt } });
     await prisma.projectSession.update({
       where: { id: owner.id },
       data: {
@@ -93,7 +124,7 @@ router.post("/api/sessions/:id/chat", async (req, res) => {
     }
     const { tools, projectInstructions, sandbox } = connected;
     controller.signal.throwIfAborted();
-    const selectedSkills = parseSkillsBlock(prompt);
+    const selectedSkills = questionAnswer ? [] : parseSkillsBlock(prompt);
     if (selectedSkills.length > 0) {
       // Keep skills.sh files out of version control from the moment the
       // agent starts installing them.
@@ -105,9 +136,6 @@ router.post("/api/sessions/:id/chat", async (req, res) => {
     // Model history comes from toolLog (user/assistant/tool messages, including
     // prior tool calls so the agent keeps working state across turns). The
     // Message table is only the plain-text timeline for the UI.
-    const modelHistory = await loadToolLog(owner.id);
-    modelHistory.push({ role: "user", content: prompt });
-
     const { result } = startAgentTurn(
       owner.id,
       {

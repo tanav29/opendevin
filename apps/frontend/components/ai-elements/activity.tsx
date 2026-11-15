@@ -34,7 +34,7 @@ export function Tool({
   name: string;
   argument?: string;
   output?: string;
-  state: "running" | "complete" | "error" | "interrupted";
+  state: "running" | "complete" | "error" | "interrupted" | "waiting";
 }) {
   const running = state === "running";
   const failed = state === "error";
@@ -56,7 +56,15 @@ export function Tool({
         {argument ? ` · ${argument}` : ""}
       </TraceTitle>
       <TraceDescription className="text-xs">
-        {running ? "Running" : failed ? "Failed" : state === "interrupted" ? "Interrupted" : "Done"}
+        {running
+          ? "Running"
+          : failed
+            ? "Failed"
+            : state === "waiting"
+              ? "Waiting for answer"
+              : state === "interrupted"
+                ? "Interrupted"
+                : "Done"}
       </TraceDescription>
     </TraceLine>
   );

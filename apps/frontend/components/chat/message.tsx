@@ -6,6 +6,7 @@ import { Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Plan, Tool } from "@/components/ai-elements/activity";
 import { Response } from "@/components/ai-elements/response";
+import { parseQuestion, type Question } from "./questionnaire";
 import {
   Attachment,
   AttachmentActions,
@@ -14,43 +15,6 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment";
-
-function QuestionCard({
-  question,
-  options,
-  onAnswer,
-  id,
-}: {
-  question: string;
-  options: string[];
-  onAnswer?: (text: string) => void;
-  id: string;
-}) {
-  return (
-    <div key={id} className="rounded-lg border bg-card p-3.5">
-      <p className="text-[13px] font-medium leading-5">{question}</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {options.map((opt) => (
-          <Button
-            type="button"
-            className="h-auto min-h-8 whitespace-normal text-left"
-            key={opt}
-            disabled={!onAnswer}
-            onClick={() => onAnswer?.(opt)}
-            variant={"outline"}
-          >
-            {opt}
-          </Button>
-        ))}
-      </div>
-      {!onAnswer && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Reply with your choice to continue.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function formatBytes(size: number) {
   if (!Number.isFinite(size) || size <= 0) return "";
@@ -120,24 +84,6 @@ export function FileCard({
   );
 }
 
-function parseQuestion(line: string): { question: string; options: string[] } | null {
-  const m = line.match(/<div data-question='(.*)'>/);
-  if (!m) return null;
-  try {
-    const parsed = JSON.parse(m[1].replace(/&#39;/g, "'")) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const rec = parsed as Record<string, unknown>;
-      return {
-        question: typeof rec.question === "string" ? rec.question : "Question",
-        options: Array.isArray(rec.options)
-          ? rec.options.filter((o): o is string => typeof o === "string")
-          : [],
-      };
-    }
-  } catch {}
-  return null;
-}
-
 function parsePlan(line: string): { title: string; status: string }[] | null {
   const m = line.match(/<div data-plan='(.*)'>/);
   if (!m) return null;
@@ -182,7 +128,7 @@ type Block =
       failed: boolean;
       running: boolean;
     }
-  | { kind: "question"; question: string; options: string[] }
+  | ({ kind: "question" } & Question)
   | { kind: "plan"; tasks: { title: string; status: string }[] }
   | { kind: "file"; name: string; url: string; size: number }
   | { kind: "error"; name: string; body: string };
@@ -334,13 +280,11 @@ function stripSharedLinks(blocks: Block[]): Block[] {
 
 function Message({
   content,
-  onAnswer,
   textOnly = false,
   bubble = true,
   isStreaming = false,
 }: {
   content: string;
-  onAnswer?: (text: string) => void;
   textOnly?: boolean;
   bubble?: boolean;
   isStreaming?: boolean;
@@ -384,13 +328,7 @@ function Message({
         }
         if (b.kind === "question") {
           return (
-            <QuestionCard
-              key={`b-${k}`}
-              id={`b-${k}`}
-              question={b.question}
-              options={b.options}
-              onAnswer={onAnswer}
-            />
+            <Tool key={`b-${k}`} name="Questionnaire" state={b.answered ? "complete" : "waiting"} />
           );
         }
         if (b.kind === "plan") {

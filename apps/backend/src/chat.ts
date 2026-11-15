@@ -69,7 +69,7 @@ export async function pipeAgentUIMessageStream(
   await pipeUIMessageStreamToResponse({ response: res, stream });
 }
 
-function questionPayload(input: unknown): string {
+function questionPayload(input: unknown, toolCallId?: string): string {
   let question = "Question";
   let options: string[] = [];
   if (input && typeof input === "object") {
@@ -82,7 +82,7 @@ function questionPayload(input: unknown): string {
         .slice(0, 6)
         .map((o) => o.slice(0, 200));
   }
-  return JSON.stringify({ question, options }).replace(/'/g, "&#39;");
+  return JSON.stringify({ question, options, toolCallId }).replace(/'/g, "&#39;");
 }
 
 function planPayload(input: unknown): string {
@@ -132,8 +132,9 @@ function toolArgument(name: string, input: unknown): string {
   return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
 }
 
-export function toolCallMarker(name: string, input: unknown): string {
-  if (name === "ask_user") return `\n\n<div data-question='${questionPayload(input)}'>\n\n`;
+export function toolCallMarker(name: string, input: unknown, toolCallId?: string): string {
+  if (name === "ask_user")
+    return `\n\n<div data-question='${questionPayload(input, toolCallId)}'>\n\n`;
   if (name === "update_plan") return `\n\n<div data-plan='${planPayload(input)}'>\n\n`;
   if (name === "share_file") return "";
   const argument = escapeMarkerAttribute(toolArgument(name, input));
@@ -183,7 +184,7 @@ export async function drainAgentStream(
     } else if (p.type === "tool-call") {
       const name = p.toolName;
       if (name !== "share_file") {
-        const marker = toolCallMarker(name, p.input);
+        const marker = toolCallMarker(name, p.input, p.toolCallId);
         if (name === "ask_user" || name === "update_plan") visibleText += marker;
         write(marker);
       }

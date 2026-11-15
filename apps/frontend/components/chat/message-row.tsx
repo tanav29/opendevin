@@ -26,13 +26,11 @@ export default function ChatMessageRow({
   content = "",
   parts,
   isStreaming = false,
-  onAnswer,
 }: {
   role: "user" | "assistant";
   content?: string;
   parts?: UIMessage["parts"];
   isStreaming?: boolean;
-  onAnswer?: (text: string) => void;
 }) {
   const text = parts
     ? parts
@@ -67,7 +65,6 @@ export default function ChatMessageRow({
                 <LegacyMessage
                   key={index}
                   content={part.text}
-                  onAnswer={onAnswer}
                   bubble={false}
                   isStreaming={isStreaming}
                 />
@@ -81,17 +78,20 @@ export default function ChatMessageRow({
                 />
               );
             if (isToolOrDynamicToolUIPart(part)) {
+              const questionnaire = getToolOrDynamicToolName(part) === "ask_user";
               return (
                 <Tool
                   key={part.toolCallId}
-                  name={getToolOrDynamicToolName(part)}
-                  argument={formatValue(part.input)}
+                  name={questionnaire ? "Questionnaire" : getToolOrDynamicToolName(part)}
+                  argument={questionnaire ? undefined : formatValue(part.input)}
                   output={
-                    part.state === "output-error"
-                      ? part.errorText
-                      : part.state === "output-available"
-                        ? formatValue(part.output)
-                        : undefined
+                    questionnaire
+                      ? undefined
+                      : part.state === "output-error"
+                        ? part.errorText
+                        : part.state === "output-available"
+                          ? formatValue(part.output)
+                          : undefined
                   }
                   state={
                     part.state === "output-error"
@@ -119,12 +119,7 @@ export default function ChatMessageRow({
             return null;
           })
         ) : text ? (
-          <LegacyMessage
-            content={text}
-            onAnswer={onAnswer}
-            bubble={false}
-            isStreaming={isStreaming}
-          />
+          <LegacyMessage content={text} bubble={false} isStreaming={isStreaming} />
         ) : null}
         {!hasContent && isStreaming && <Reasoning running />}
         {uniqueSources.length > 0 && (

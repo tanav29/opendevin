@@ -18,6 +18,7 @@ import {
 } from "@tabler/icons-react";
 import { useAttachments } from "@/components/chat/use-attachments";
 import ChatComposer from "@/components/chat/composer";
+import ChatQuestionnaire, { parseQuestion } from "@/components/chat/questionnaire";
 import { Conversation } from "@/components/ai-elements/conversation";
 import { PromptAttachments } from "@/components/ai-elements/attachments";
 import { MessageScrollerItem } from "@/components/ui/message-scroller";
@@ -111,6 +112,8 @@ function mockReply(prompt: string) {
     lower.includes("choose") || lower.includes("direction")
       ? `<div data-question='{"question":"Which direction should I explore first?","options":["Keep the current layout","Make the controls more compact","Give the workspace more room"]}'>\n</div>\n\n`
       : "";
+  if (question)
+    return `I need your direction before continuing.\n\n${activity}\n\n${plan}${question}`;
   const opening =
     lower.includes("bug") || lower.includes("checkout")
       ? "I traced the checkout interaction from the submit handler through the confirmation state. The main risk is duplicate work while a request is pending, so I’m checking both the button state and the route transition before settling on a fix."
@@ -183,6 +186,9 @@ export default function SessionChatPreview({
   const nextId = useRef(1);
   const replyTimer = useRef<number | null>(null);
   const streamToken = useRef(0);
+  const latestMessage = messages.at(-1);
+  const question =
+    latestMessage?.role === "assistant" ? parseQuestion(latestMessage.content) : null;
 
   useEffect(
     () => () => {
@@ -191,24 +197,38 @@ export default function SessionChatPreview({
     [],
   );
 
-  function send(text = input) {
+  function send(text = input, questionAnswer = false) {
     const prompt = text.trim();
     const fullPrompt = [
       prompt,
-      ...attachments.map((attachment) => `[Attached: ${attachment.name}]`),
+      ...(questionAnswer ? [] : attachments.map((attachment) => `[Attached: ${attachment.name}]`)),
     ]
       .filter(Boolean)
       .join("\n\n");
     if (!fullPrompt || busy) return;
-    setInput("");
-    resetAttachments();
+    if (!questionAnswer) {
+      setInput("");
+      resetAttachments();
+    }
     const assistantId = nextId.current++;
     const response = mockReply(fullPrompt);
     const chunks = streamChunks(response);
     const token = ++streamToken.current;
     setMessages((current) => [
-      ...current,
-      { id: nextId.current++, role: "user", content: fullPrompt },
+      ...current.map((message) =>
+        questionAnswer && message.id === latestMessage?.id
+          ? {
+              ...message,
+              content: message.content.replace(
+                /<div data-question='.*'>/,
+                `<div data-question='${JSON.stringify({ ...question, answered: true }).replace(/'/g, "&#39;")}'>`,
+              ),
+            }
+          : message,
+      ),
+      ...(questionAnswer
+        ? []
+        : [{ id: nextId.current++, role: "user" as const, content: fullPrompt }]),
       { id: assistantId, role: "assistant", content: "" },
     ]);
     setBusy(true);
@@ -372,7 +392,6 @@ export default function SessionChatPreview({
                     role={message.role}
                     content={message.content}
                     isStreaming={busy && message === messages.at(-1)}
-                    onAnswer={busy ? undefined : (answer) => send(answer)}
                   />
                 </MessageScrollerItem>
               ))}
@@ -381,6 +400,15 @@ export default function SessionChatPreview({
         </Conversation>
         <div className="shrink-0 px-4 pb-4 pt-2">
           <ChatComposer
+            questionnaire={
+              question && !question.answered ? (
+                <ChatQuestionnaire
+                  key={latestMessage!.id}
+                  question={question}
+                  onSubmit={(answer) => send(answer, true)}
+                />
+              ) : undefined
+            }
             value={input}
             onValueChange={setInput}
             onSubmit={() => send()}
