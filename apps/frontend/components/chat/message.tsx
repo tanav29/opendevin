@@ -1,61 +1,19 @@
 "use client";
 
 import { memo, useState } from "react";
-import Markdown from "react-markdown";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  CircleCheckFreeIcons,
-  CircleFreeIcons,
-  Download01Icon,
-  File02Icon,
-} from "@hugeicons/core-free-icons";
+import { Download01Icon, File02Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
-import { Check, CircleDashedIcon, Wrench, XIcon } from "lucide-react";
-
-function ToolCallCard({
-  name,
-  argument,
-  body,
-  status,
-  id,
-}: {
-  name: string;
-  argument: string;
-  body: string;
-  status: "working" | "done" | "failed";
-  id: string;
-}) {
-  return (
-    <div key={id} className="min-w-0 py-2 text-sm">
-      <div className="flex min-w-0 items-start gap-2 font-mono">
-        <span
-          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-          aria-label={status}
-        >
-          {status === "working" ? (
-            <CircleDashedIcon className="animate-spin" />
-          ) : status === "done" ? (
-            <Check />
-          ) : (
-            <XIcon />
-          )}
-        </span>
-        <Wrench className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="shrink-0 font-medium text-foreground">{name}</span>
-        {argument && (
-          <span className="min-w-0 whitespace-pre-wrap break-words text-muted-foreground">
-            {argument}
-          </span>
-        )}
-      </div>
-      {body && (
-        <div className="typeset typeset-docs min-w-0 pt-2">
-          <Markdown skipHtml>{body}</Markdown>
-        </div>
-      )}
-    </div>
-  );
-}
+import { Plan, Tool } from "@/components/ai-elements/activity";
+import { Response } from "@/components/ai-elements/response";
+import {
+  Attachment,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
 
 function QuestionCard({
   question,
@@ -69,11 +27,13 @@ function QuestionCard({
   id: string;
 }) {
   return (
-    <div key={id} className="rounded-xl border bg-warning-muted/40 p-3.5">
+    <div key={id} className="rounded-lg border bg-card p-3.5">
       <p className="text-[13px] font-medium leading-5">{question}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {options.map((opt) => (
           <Button
+            type="button"
+            className="h-auto min-h-8 whitespace-normal text-left"
             key={opt}
             disabled={!onAnswer}
             onClick={() => onAnswer?.(opt)}
@@ -92,27 +52,6 @@ function QuestionCard({
   );
 }
 
-function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; id: string }) {
-  return (
-    <div key={id} className="rounded-xl border border-border bg-card p-3">
-      <ul className="space-y-1.5">
-        {tasks.map((t, i) => (
-          <li key={`${i}-${t.title}`} className="flex items-center gap-2 text-xs">
-            <span className={t.status === "done" ? "" : "text-muted-foreground"}>
-              {t.status === "done" ? (
-                <HugeiconsIcon className="w-4 h-4" icon={CircleCheckFreeIcons} />
-              ) : (
-                <HugeiconsIcon className="w-4 h-4" icon={CircleFreeIcons} />
-              )}
-            </span>
-            <span className={t.status === "done" ? "" : "text-muted-foreground"}>{t.title}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function formatBytes(size: number) {
   if (!Number.isFinite(size) || size <= 0) return "";
   if (size < 1024) return `${size} B`;
@@ -120,7 +59,7 @@ function formatBytes(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileCard({
+export function FileCard({
   name,
   url,
   size,
@@ -157,30 +96,27 @@ function FileCard({
   }
 
   return (
-    <div
-      key={id}
-      className="flex min-w-0 items-center gap-2.5 rounded-xl border border-border bg-card p-2.5 shadow-sm"
-    >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+    <Attachment key={id} className="w-full">
+      <AttachmentMedia>
         <HugeiconsIcon icon={File02Icon} size={16} strokeWidth={1.8} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium" title={name}>
-          {name}
-        </p>
-        <p className="text-[11px] text-muted-foreground">{formatBytes(size) || "Sandbox file"}</p>
-      </div>
-      <Button
-        size="xs"
-        variant="outline"
-        onClick={() => void download()}
-        disabled={downloading}
-        aria-label={`Download ${name}`}
-      >
-        <HugeiconsIcon icon={Download01Icon} size={16} strokeWidth={1.8} />{" "}
-        {downloading ? "Downloading…" : "Download"}
-      </Button>
-    </div>
+      </AttachmentMedia>
+      <AttachmentContent>
+        <AttachmentTitle title={name}>{name}</AttachmentTitle>
+        <AttachmentDescription>{formatBytes(size) || "Sandbox file"}</AttachmentDescription>
+      </AttachmentContent>
+      <AttachmentActions>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => void download()}
+          disabled={downloading}
+          aria-label={`Download ${name}`}
+        >
+          <HugeiconsIcon icon={Download01Icon} size={16} strokeWidth={1.8} />{" "}
+          {downloading ? "Downloading…" : "Download"}
+        </Button>
+      </AttachmentActions>
+    </Attachment>
   );
 }
 
@@ -255,6 +191,7 @@ function splitBlocks(content: string): Block[] {
   const blocks: Block[] = [];
   const lines = content.split("\n");
   let i = 0;
+  let fence = "";
   let mdBuf: string[] = [];
   const flushMd = () => {
     const text = mdBuf.join("\n").trim();
@@ -264,6 +201,21 @@ function splitBlocks(content: string): Block[] {
 
   while (i < lines.length) {
     const line = lines[i];
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fence || fenceMatch) {
+      mdBuf.push(line);
+      if (fenceMatch) {
+        if (!fence) fence = fenceMatch[1];
+        else if (
+          fenceMatch[1][0] === fence[0] &&
+          fenceMatch[1].length >= fence.length &&
+          !line.slice(fenceMatch[0].length).trim()
+        )
+          fence = "";
+      }
+      i += 1;
+      continue;
+    }
     if (line.includes('<details data-tool="error">')) {
       flushMd();
       const name = line.replace(/.*<summary>(.*)<\/summary>.*/, "$1") || "⚠️ Agent run failed";
@@ -375,7 +327,7 @@ function stripSharedLinks(blocks: Block[]): Block[] {
       if (block.kind !== "md") return block;
       let text = block.text.replace(linkPattern, "");
       for (const url of urls) text = text.split(url).join("");
-      return { ...block, text: text.replace(/`\s*`/g, "").trim() };
+      return { ...block, text: text.replace(/(?<!`)`[ \t]*`(?!`)/g, "").trim() };
     })
     .filter((block) => block.kind !== "md" || block.text.length > 0);
 }
@@ -385,11 +337,13 @@ function Message({
   onAnswer,
   textOnly = false,
   bubble = true,
+  isStreaming = false,
 }: {
   content: string;
   onAnswer?: (text: string) => void;
   textOnly?: boolean;
   bubble?: boolean;
+  isStreaming?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
   const blocks = textOnly
@@ -397,27 +351,34 @@ function Message({
     : parsedBlocks;
 
   return (
-    <div>
+    <div className="min-w-0 space-y-3">
       {blocks.map((b, k) => {
         if (b.kind === "md") {
           return (
             <div
               key={`b-${k}`}
-              className={`typeset typeset-docs text-md ${textOnly ? "" : bubble ? "squircle rounded-2xl rounded-tl-md bg-muted px-4 py-2.5" : "py-1"}`}
+              className={bubble && !textOnly ? "rounded-xl bg-muted px-4 py-2.5" : ""}
             >
-              <Markdown>{b.text}</Markdown>
+              <Response>{b.text}</Response>
             </div>
           );
         }
         if (b.kind === "tool") {
           return (
-            <ToolCallCard
+            <Tool
               key={`b-${k}`}
-              id={`b-${k}`}
               name={b.name}
               argument={b.argument}
-              body={b.body}
-              status={b.running ? "working" : b.failed ? "failed" : "done"}
+              output={b.body.replace(/<\/?(?:span|div)\b[^>]*>/g, "").trim()}
+              state={
+                b.failed
+                  ? "error"
+                  : b.running
+                    ? isStreaming
+                      ? "running"
+                      : "interrupted"
+                    : "complete"
+              }
             />
           );
         }
@@ -433,7 +394,7 @@ function Message({
           );
         }
         if (b.kind === "plan") {
-          return <PlanCard key={`b-${k}`} id={`b-${k}`} tasks={b.tasks} />;
+          return <Plan key={`b-${k}`} tasks={b.tasks} streaming={isStreaming} />;
         }
         if (b.kind === "file") {
           return <FileCard key={`b-${k}`} id={`b-${k}`} name={b.name} url={b.url} size={b.size} />;
@@ -441,6 +402,7 @@ function Message({
         return (
           <div
             key={`b-${k}`}
+            role="alert"
             className="rounded-xl border border-destructive/30 bg-destructive/10 p-3.5 text-[13px]"
           >
             <p className="font-medium text-destructive">{b.name}</p>

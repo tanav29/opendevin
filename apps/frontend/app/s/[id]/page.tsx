@@ -24,6 +24,10 @@ import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
 import SessionInfo from "./session-info";
 import ChatComposer from "@/components/chat/composer";
+import { Conversation } from "@/components/ai-elements/conversation";
+import { PromptAttachments } from "@/components/ai-elements/attachments";
+import { Reasoning } from "@/components/ai-elements/activity";
+import { MessageScrollerItem } from "@/components/ui/message-scroller";
 import { ContextDetails } from "@/components/chat/context-details";
 import {
   MAX_MESSAGE_CHARS,
@@ -154,12 +158,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     stop: stopStreaming,
     setMessages: setLiveMessages,
   } = useChat({ id: sessionId, transport: chatTransport });
-  const latestLiveText = liveMessages
-    .at(-1)
-    ?.parts.filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("");
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
 
@@ -191,11 +189,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       if (showLoading) setLoading(false);
     }
   }, []);
-
-  // Keep the latest turn visible while streaming or after history loads.
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, sending, liveMessages.length, latestLiveText]);
 
   useEffect(() => {
     void params.then(({ id }) => {
@@ -453,10 +446,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <SandboxStatus
-            status={provisioningPhase}
-            expiresAt={status?.sandboxExpiresAt ?? detail?.sandboxExpiresAt}
-          />
+          <span className="hidden sm:inline-flex">
+            <SandboxStatus
+              status={provisioningPhase}
+              expiresAt={status?.sandboxExpiresAt ?? detail?.sandboxExpiresAt}
+            />
+          </span>
           <DevRunButton
             sessionId={sessionId}
             sandboxReady={ready}
@@ -483,52 +478,68 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         </div>
       </header>
       <div className="relative flex min-h-0 flex-1">
-        <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-          <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
-              {messages.map((message) => (
+        <section
+          aria-label="Agent conversation"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+        >
+          <Conversation className="flex-1">
+            {messages.map((message) => (
+              <MessageScrollerItem
+                key={message.id}
+                messageId={message.id}
+                scrollAnchor={message.role === "user"}
+              >
                 <ChatMessageRow
-                  key={message.id}
                   role={message.role === "user" ? "user" : "assistant"}
                   content={message.content}
-                  onAnswer={(text) => void sendMessage(text)}
+                  onAnswer={chatDisabled ? undefined : (text) => void sendMessage(text)}
                 />
-              ))}
-              {/* Historical and streaming messages have different source shapes. */}
-              {liveMessages.map((message) => (
+              </MessageScrollerItem>
+            ))}
+            {/* Historical and streaming messages have different source shapes. */}
+            {liveMessages.map((message) => (
+              <MessageScrollerItem
+                key={message.id}
+                messageId={message.id}
+                scrollAnchor={message.role === "user"}
+              >
                 <ChatMessageRow
-                  key={message.id}
                   role={message.role === "user" ? "user" : "assistant"}
-                  content={message.parts
-                    .filter((part) => part.type === "text")
-                    .map((part) => part.text)
-                    .join("")}
-                  onAnswer={(text) => void sendMessage(text)}
+                  parts={message.parts}
+                  isStreaming={sending && message === liveMessages.at(-1)}
+                  onAnswer={chatDisabled ? undefined : (text) => void sendMessage(text)}
                 />
-              ))}
-              {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
-                <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
-                  <p className="font-medium text-destructive">Agent run failed</p>
-                  <p className="mt-1 whitespace-pre-wrap">
-                    {status?.lastError || detail?.lastError}
-                  </p>
-                  {messages.at(-1)?.role === "user" && (
-                    <Button
-                      className="mt-3"
-                      size="sm"
-                      variant="outline"
-                      disabled={chatDisabled}
-                      onClick={() => void sendMessage(messages.at(-1)!.content)}
-                    >
-                      Retry last message
-                    </Button>
-                  )}
-                </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-          </div>
-          <div className="absolute inset-x-0 bottom-0 z-20 pb-6 px-4 mx-auto w-full max-w-3xl">
+              </MessageScrollerItem>
+            ))}
+            {agentStatus === "failed" && (status?.lastError || detail?.lastError) && (
+              <div role="alert" className="rounded-md border border-destructive/40 p-4 text-sm">
+                <p className="font-medium text-destructive">Agent run failed</p>
+                <p className="mt-1 whitespace-pre-wrap">{status?.lastError || detail?.lastError}</p>
+                {messages.at(-1)?.role === "user" && (
+                  <Button
+                    className="mt-3"
+                    size="sm"
+                    variant="outline"
+                    disabled={chatDisabled}
+                    onClick={() => void sendMessage(messages.at(-1)!.content)}
+                  >
+                    Retry last message
+                  </Button>
+                )}
+              </div>
+            )}
+            {(activeAgent || sending) && liveMessages.at(-1)?.role !== "assistant" && (
+              <Reasoning running />
+            )}
+            {messages.length === 0 && liveMessages.length === 0 && !activeAgent && !sending && (
+              <p className="my-auto py-12 text-center text-sm text-muted-foreground">
+                {ready
+                  ? "Send a message to start working with the agent."
+                  : "Your workspace is being prepared. Chat will be available when it is ready."}
+              </p>
+            )}
+          </Conversation>
+          <div className="z-20 w-full shrink-0 px-4 pb-4 pt-2">
             <ChatComposer
               value={input}
               onValueChange={setInput}
@@ -540,28 +551,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               placeholder="Tell the agent what to do…"
               onPasteFiles={(files) => void addFiles(files)}
               onDropFiles={(files) => void addFiles(files)}
-              attachments={
-                attachments.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-                    {attachments.map((a) => (
-                      <span
-                        key={a.id}
-                        className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px]"
-                      >
-                        {a.name} · {(a.content.length / 1024).toFixed(1)}KB
-                        <button
-                          type="button"
-                          onClick={() => removeAttachment(a.id)}
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label={`Remove ${a.name}`}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : undefined
-              }
+              attachments={<PromptAttachments files={attachments} onRemove={removeAttachment} />}
               skills={
                 skills.length > 0 ? (
                   <SkillChips skills={skills} onRemove={removeSkill} />

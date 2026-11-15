@@ -18,6 +18,9 @@ import {
 } from "@tabler/icons-react";
 import { useAttachments } from "@/components/chat/use-attachments";
 import ChatComposer from "@/components/chat/composer";
+import { Conversation } from "@/components/ai-elements/conversation";
+import { PromptAttachments } from "@/components/ai-elements/attachments";
+import { MessageScrollerItem } from "@/components/ui/message-scroller";
 import { ContextDetails } from "@/components/chat/context-details";
 import ChatMessageRow from "@/components/chat/message-row";
 import { Button } from "@/components/ui/button";
@@ -178,13 +181,9 @@ export default function SessionChatPreview({
   const [panelOpen, setPanelOpen] = useState(false);
   const { attachments, addFiles, removeAttachment, resetAttachments } = useAttachments();
   const nextId = useRef(1);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const replyTimer = useRef<number | null>(null);
   const streamToken = useRef(0);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
   useEffect(
     () => () => {
       if (replyTimer.current !== null) window.clearTimeout(replyTimer.current);
@@ -326,56 +325,102 @@ export default function SessionChatPreview({
 
       <section
         aria-label="Session chat preview"
-        className={`absolute inset-x-0 top-0 flex h-full flex-col gap-4 overflow-y-auto px-4 pb-36 pt-16 scrollbar-none sm:px-8 ${panelOpen ? "lg:right-[min(36vw,480px)] lg:pr-8" : ""}`}
+        className={`absolute inset-x-0 top-12 bottom-0 flex min-h-0 flex-col ${panelOpen ? "lg:right-[min(36vw,480px)]" : ""}`}
       >
-        {messages.length === 0 ? (
-          <div className="flex flex-1 flex-col justify-center pb-8">
-            <div className="mb-5 flex size-11 items-center justify-center rounded-2xl border bg-card text-muted-foreground shadow-sm">
-              <IconMessageChatbot size={21} stroke={1.7} />
-            </div>
-            <h1 className="max-w-xl text-3xl font-medium leading-tight tracking-tight sm:text-[2.5rem]">
-              Shape the session chat.
-            </h1>
-            <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
-              Try the composer, sample replies, and message layout. This preview stays in your
-              browser and never calls an AI service.
-            </p>
+        <Conversation className="flex-1">
+          {messages.length === 0 ? (
+            <div className="flex flex-1 flex-col justify-center pb-8">
+              <div className="mb-5 flex size-11 items-center justify-center rounded-2xl border bg-card text-muted-foreground shadow-sm">
+                <IconMessageChatbot size={21} stroke={1.7} />
+              </div>
+              <h1 className="max-w-xl text-3xl font-medium leading-tight tracking-tight sm:text-[2.5rem]">
+                Shape the session chat.
+              </h1>
+              <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+                Try the composer, sample replies, and message layout. This preview stays in your
+                browser and never calls an AI service.
+              </p>
 
-            <div className="mt-8">
-              <p className="mb-3 text-xs font-medium text-muted-foreground">Try a sample</p>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {starters.map(({ label, prompt }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => send(prompt)}
-                    className="group min-h-24 rounded-xl border bg-card p-3.5 text-left transition-colors hover:border-border-strong hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground group-hover:text-foreground">
-                      <IconSparkles size={14} /> {label}
-                    </span>
-                    <span className="mt-2 block text-sm leading-5">{prompt}</span>
-                  </button>
-                ))}
+              <div className="mt-8">
+                <p className="mb-3 text-xs font-medium text-muted-foreground">Try a sample</p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {starters.map(({ label, prompt }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => send(prompt)}
+                      className="group min-h-24 rounded-xl border bg-card p-3.5 text-left transition-colors hover:border-border-strong hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground group-hover:text-foreground">
+                        <IconSparkles size={14} /> {label}
+                      </span>
+                      <span className="mt-2 block text-sm leading-5">{prompt}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <>
-            {messages.map((message) => (
-              <ChatMessageRow
-                key={message.id}
-                role={message.role}
-                content={message.content}
-                onAnswer={(answer) => send(answer)}
-              />
-            ))}
-            {busy && messages.at(-1)?.role === "assistant" && !messages.at(-1)?.content && (
-              <ChatMessageRow role="assistant" content="" />
-            )}
-            <div ref={bottomRef} />
-          </>
-        )}
+          ) : (
+            <>
+              {messages.map((message) => (
+                <MessageScrollerItem
+                  key={message.id}
+                  messageId={String(message.id)}
+                  scrollAnchor={message.role === "user"}
+                >
+                  <ChatMessageRow
+                    role={message.role}
+                    content={message.content}
+                    isStreaming={busy && message === messages.at(-1)}
+                    onAnswer={busy ? undefined : (answer) => send(answer)}
+                  />
+                </MessageScrollerItem>
+              ))}
+            </>
+          )}
+        </Conversation>
+        <div className="shrink-0 px-4 pb-4 pt-2">
+          <ChatComposer
+            value={input}
+            onValueChange={setInput}
+            onSubmit={() => send()}
+            onStop={stopReply}
+            busy={busy}
+            canSend={Boolean(input.trim()) || attachments.length > 0}
+            placeholder="Tell the agent what to do..."
+            onPasteFiles={(files) => void addFiles(files)}
+            onDropFiles={(files) => void addFiles(files)}
+            attachments={<PromptAttachments files={attachments} onRemove={removeAttachment} />}
+            actions={
+              <>
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  id="session-preview-files"
+                  onChange={(event) => {
+                    if (event.target.files) void addFiles(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Attach files"
+                  onClick={() => document.getElementById("session-preview-files")?.click()}
+                >
+                  <IconPaperclip size={17} />
+                </Button>
+                <ContextDetails />
+              </>
+            }
+          />
+          <p className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+            <IconCheck size={13} className="text-success" />
+            {modeLabel} · randomized text and tool streaming · no inference costs
+          </p>
+        </div>
       </section>
 
       {panelOpen && (
@@ -447,69 +492,6 @@ export default function SessionChatPreview({
           </div>
         </aside>
       )}
-
-      <div className="absolute bottom-0 left-0 right-0 z-10 shrink-0 px-3 pb-4 sm:mx-8">
-        <ChatComposer
-          value={input}
-          onValueChange={setInput}
-          onSubmit={() => send()}
-          onStop={stopReply}
-          busy={busy}
-          canSend={Boolean(input.trim()) || attachments.length > 0}
-          placeholder="Tell the agent what to do..."
-          onPasteFiles={(files) => void addFiles(files)}
-          onDropFiles={(files) => void addFiles(files)}
-          attachments={
-            attachments.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 px-3 pt-2">
-                {attachments.map((attachment) => (
-                  <span
-                    key={attachment.id}
-                    className="flex items-center gap-1.5 rounded-md border bg-muted px-2 py-0.5 font-mono text-[11px]"
-                  >
-                    {attachment.name}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${attachment.name}`}
-                      onClick={() => removeAttachment(attachment.id)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : undefined
-          }
-          actions={
-            <>
-              <input
-                type="file"
-                multiple
-                className="hidden"
-                id="session-preview-files"
-                onChange={(event) => {
-                  if (event.target.files) void addFiles(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Attach files"
-                onClick={() => document.getElementById("session-preview-files")?.click()}
-              >
-                <IconPaperclip size={17} />
-              </Button>
-              <ContextDetails />
-            </>
-          }
-        />
-        <p className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
-          <IconCheck size={13} className="text-success" />
-          {modeLabel} · randomized text and tool streaming · no inference costs
-        </p>
-      </div>
     </main>
   );
 }
