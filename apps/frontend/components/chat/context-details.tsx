@@ -11,7 +11,7 @@ export function ContextDetails({ usage, model }: { usage?: Usage; model?: string
 
   return (
     <Popover.Root>
-      <Popover.Trigger render={<Button type="button" variant="outline" size="sm" />}>
+      <Popover.Trigger render={<Button type="button" variant="ghost" size="sm" />}>
         {total == null ? "Context" : `${format(total)} tokens`}
       </Popover.Trigger>
       <Popover.Portal>

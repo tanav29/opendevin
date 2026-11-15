@@ -26,7 +26,6 @@ type Message = {
   id: number;
   role: "user" | "assistant";
   content: string;
-  workDuration?: number;
 };
 
 const starters = [
@@ -78,7 +77,7 @@ function mockReply(prompt: string) {
     [
       "src/components/chat/message-row.tsx",
       "Review message states",
-      "Session messages use a plain assistant surface with activity that can collapse after a turn.",
+      "Session messages keep assistant text and tool activity visible throughout the turn.",
     ],
     [
       "src/app/s/[id]/session-panel.tsx",
@@ -118,11 +117,11 @@ function mockReply(prompt: string) {
   const analysis = [
     "The useful boundary is between the conversation and the workspace. The conversation should keep its rhythm while tools are running, and the workspace controls should remain available without competing with the current turn.",
     "There are a few states worth treating separately: before the first response, while text is arriving, while a tool is active, after the final response, and when a check fails. Keeping those states visible makes the interface feel responsive without adding noise.",
-    "For smaller screens, the main tradeoff is width. Message text needs a comfortable line length, but long file paths and tool arguments should truncate safely instead of pushing the layout sideways.",
+    "For smaller screens, the main tradeoff is width. Message text needs a comfortable line length, but long file paths and tool arguments should wrap safely instead of pushing the layout sideways.",
   ];
   const implementation = [
-    "I’d keep the assistant response in the normal message flow and use a compact activity row for the work. That lets the final answer stay readable, while the supporting detail remains one click away after the turn finishes.",
-    "The interaction should have a clear start and finish: show a brief working state immediately, stream the assistant text as it arrives, mark each tool complete as its result lands, then fold the activity away when the response is done.",
+    "I’d keep the assistant response in the normal message flow and use a compact activity row for the work. That keeps the final answer and supporting detail readable in the same thread.",
+    "The interaction should have a clear start and finish: show a brief working state immediately, stream the assistant text as it arrives, mark each tool complete as its result lands, then keep the activity visible when the response is done.",
     "Controls should keep the same location and behavior throughout the turn. Stop replaces Send while work is active; once the turn completes, the composer returns to its ready state and the user can continue without hunting for the input.",
   ];
   const answer = `${opening}\n\n### What I found\n\n${analysis
@@ -133,7 +132,7 @@ function mockReply(prompt: string) {
     .slice(0, 2)
     .join(
       "\n\n",
-    )}\n\n\`\`\`tsx\nconst canSend = !isStreaming && message.trim().length > 0;\n\nreturn isStreaming ? <StopButton onClick={stop} /> : <SendButton disabled={!canSend} />;\n\`\`\`\n\n### Checks\n\nI’d check the empty state, a long response, multiple sequential tool calls, a failed check, and a follow-up question. I’d also verify Enter to send, Shift+Enter for a new line, Stop during an active tool, and the composer at a narrow viewport.\n\nThe important detail is when the activity folds: keep the tool list and earlier progress visible during generation, then collapse that work after the final answer arrives so the completed response is the first thing the user sees.`;
+    )}\n\n\`\`\`tsx\nconst canSend = !isStreaming && message.trim().length > 0;\n\nreturn isStreaming ? <StopButton onClick={stop} /> : <SendButton disabled={!canSend} />;\n\`\`\`\n\n### Checks\n\nI’d check the empty state, a long response, multiple sequential tool calls, a failed check, and a follow-up question. I’d also verify Enter to send, Shift+Enter for a new line, Stop during an active tool, and the composer at a narrow viewport.\n\nKeep the tool list, earlier progress, and final answer visible in order, both during generation and after the turn completes.`;
   return `I’ll trace the current flow, then work through the relevant components and checks.\n\n${activity}\n\n${plan}${question}${answer}`;
 }
 
@@ -205,7 +204,6 @@ export default function SessionChatPreview({
     setInput("");
     resetAttachments();
     const assistantId = nextId.current++;
-    const startedAt = Date.now();
     const response = mockReply(fullPrompt);
     const chunks = streamChunks(response);
     const token = ++streamToken.current;
@@ -219,16 +217,6 @@ export default function SessionChatPreview({
     function streamNext() {
       if (token !== streamToken.current) return;
       if (chunkIndex >= chunks.length) {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId
-              ? {
-                  ...message,
-                  workDuration: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
-                }
-              : message,
-          ),
-        );
         setBusy(false);
         replyTimer.current = null;
         return;
@@ -380,8 +368,6 @@ export default function SessionChatPreview({
                 role={message.role}
                 content={message.content}
                 presentation="session"
-                workDuration={message.workDuration}
-                collapseActivity={message.workDuration !== undefined}
                 workingLabel="Working"
                 onAnswer={(answer) => send(answer)}
               />

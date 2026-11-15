@@ -66,19 +66,6 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
   const cwd = workspacePath || WORKSPACE_PATH;
   return {
     ...webTools(),
-    list_files: tool({
-      description:
-        "List files in the cloned repo workspace. Use path relative to workspace root, e.g. '.' or 'src'.",
-      inputSchema: z.object({
-        path: z.string().default(".").describe("Relative path inside workspace"),
-      }),
-      execute: async ({ path }: { path: string }) => {
-        const rel = sanitizeRel(path);
-        if (rel === null) return "Invalid path: must be workspace-relative, without '..'.";
-        const entries = await sandbox.files.list(`${cwd}/${rel}`);
-        return entries.map((e) => ({ name: e.name, type: e.type, path: e.path })).slice(0, 200);
-      },
-    }),
     read_file: tool({
       description: "Read a text file from the workspace. Path is relative to workspace root.",
       inputSchema: z.object({
@@ -169,28 +156,7 @@ export function sandboxTools(sandbox: Sandbox, workspacePath: string) {
         return `Patched ${rel} (${old_string.length} -> ${new_string.length} chars)`;
       },
     }),
-    delete_file: tool({
-      description: "Delete a file or empty directory in the workspace.",
-      inputSchema: z.object({
-        path: z.string().describe("Relative file path"),
-      }),
-      execute: async ({ path }: { path: string }) => {
-        const rel = sanitizeRel(path);
-        if (rel === null || rel === "")
-          return "Invalid path: must be a workspace-relative file, without '..'.";
-        // Do not recursively remove directory contents: only delete files or
-        // empty directories so a mistaken tool call cannot wipe a workspace tree.
-        const quoted = shellQuote(rel);
-        const out = await runSandbox(
-          sandbox,
-          `if [ -d ${quoted} ]; then rmdir -- ${quoted}; else rm -f -- ${quoted}; fi`,
-          cwd,
-        );
-        return out.exitCode === 0
-          ? `Deleted ${rel}`
-          : `Delete failed: ${(out.stderr || out.stdout).slice(0, 500)}`;
-      },
-    }),
+    // remove search with grep tools and add glob tool
     search: tool({
       description:
         "Search text in the workspace with ripgrep (excludes .git/node_modules). Use to find symbols, imports, TODOs before reading files.",

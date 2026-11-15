@@ -10,36 +10,49 @@ import {
   File02Icon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
-import { Check, ChevronDown, CircleDashedIcon, Wrench, XIcon } from "lucide-react";
+import { Check, CircleDashedIcon, Wrench, XIcon } from "lucide-react";
 
 function ToolCallCard({
   name,
   argument,
+  body,
   status,
   id,
 }: {
   name: string;
   argument: string;
+  body: string;
   status: "working" | "done" | "failed";
   id: string;
 }) {
   return (
-    <div key={id} className="flex min-w-0 items-center gap-2 font-mono text-sm">
-      <span
-        className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-        aria-label={status}
-      >
-        {status === "working" ? (
-          <CircleDashedIcon className="animate-spin" />
-        ) : status === "done" ? (
-          <Check />
-        ) : (
-          <XIcon />
+    <div key={id} className="min-w-0 py-2 text-sm">
+      <div className="flex min-w-0 items-start gap-2 font-mono">
+        <span
+          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+          aria-label={status}
+        >
+          {status === "working" ? (
+            <CircleDashedIcon className="animate-spin" />
+          ) : status === "done" ? (
+            <Check />
+          ) : (
+            <XIcon />
+          )}
+        </span>
+        <Wrench className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="shrink-0 font-medium text-foreground">{name}</span>
+        {argument && (
+          <span className="min-w-0 whitespace-pre-wrap break-words text-muted-foreground">
+            {argument}
+          </span>
         )}
-      </span>
-      <Wrench className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="shrink-0 font-medium text-foreground">{name}</span>
-      {argument && <span className="truncate text-muted-foreground">{argument}</span>}
+      </div>
+      {body && (
+        <div className="typeset typeset-docs min-w-0 pt-2">
+          <Markdown skipHtml>{body}</Markdown>
+        </div>
+      )}
     </div>
   );
 }
@@ -86,10 +99,11 @@ function PlanCard({ tasks, id }: { tasks: { title: string; status: string }[]; i
         {tasks.map((t, i) => (
           <li key={`${i}-${t.title}`} className="flex items-center gap-2 text-xs">
             <span className={t.status === "done" ? "" : "text-muted-foreground"}>
-              {t.status === "done" ? <HugeiconsIcon className="w-4 h-4" icon={CircleCheckFreeIcons} /> : <HugeiconsIcon className="w-4 h-4" icon={CircleFreeIcons} />}
-            </span>
-            <span className={t.status === "done" ? "" : "text-muted-foreground"}>
-              {t.title}
+              {t.status === "done" ? (
+                <HugeiconsIcon className="w-4 h-4" icon={CircleCheckFreeIcons} />
+              ) : (
+                <HugeiconsIcon className="w-4 h-4" icon={CircleFreeIcons} />
+              )}
             </span>
             <span className={t.status === "done" ? "" : "text-muted-foreground"}>{t.title}</span>
           </li>
@@ -224,34 +238,18 @@ function parseFile(line: string): { name: string; url: string; size: number } | 
 
 type Block =
   | { kind: "md"; text: string }
-  | { kind: "tool"; name: string; argument: string; body: string; failed: boolean; running: boolean }
+  | {
+      kind: "tool";
+      name: string;
+      argument: string;
+      body: string;
+      failed: boolean;
+      running: boolean;
+    }
   | { kind: "question"; question: string; options: string[] }
   | { kind: "plan"; tasks: { title: string; status: string }[] }
   | { kind: "file"; name: string; url: string; size: number }
   | { kind: "error"; name: string; body: string };
-
-// Split prose into standalone sections so each paragraph renders as its own
-// bubble. Fenced code blocks stay intact even when they contain blank lines.
-function splitSections(text: string): string[] {
-  const sections: string[] = [];
-  let buffer: string[] = [];
-  let fenced = false;
-  const flush = () => {
-    const section = buffer.join("\n").trim();
-    buffer = [];
-    if (section) sections.push(section);
-  };
-  for (const line of text.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    if (!fenced && line.trim() === "") {
-      flush();
-      continue;
-    }
-    buffer.push(line);
-  }
-  flush();
-  return sections;
-}
 
 function splitBlocks(content: string): Block[] {
   const blocks: Block[] = [];
@@ -259,9 +257,9 @@ function splitBlocks(content: string): Block[] {
   let i = 0;
   let mdBuf: string[] = [];
   const flushMd = () => {
-    const text = mdBuf.join("\n");
+    const text = mdBuf.join("\n").trim();
     mdBuf = [];
-    for (const section of splitSections(text)) blocks.push({ kind: "md", text: section });
+    if (text) blocks.push({ kind: "md", text });
   };
 
   while (i < lines.length) {
@@ -357,31 +355,6 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function activityMarkdown(block: Block): string {
-  switch (block.kind) {
-    case "md":
-      return block.text;
-    case "tool": {
-      const status = block.running ? "working" : block.failed ? "failed" : "done";
-      return [
-        `**${block.name}** (${status})`,
-        block.argument && block.argument.split("\n").map((line) => `    ${line}`).join("\n"),
-        block.body,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-    }
-    case "question":
-      return `${block.question}\n\n${block.options.map((option) => `- ${option}`).join("\n")}`;
-    case "plan":
-      return block.tasks.map((task) => `- ${task.title} (${task.status})`).join("\n");
-    case "file":
-      return `[${block.name}](${block.url})`;
-    case "error":
-      return `**${block.name}**\n\n${block.body}`;
-  }
-}
-
 // The model sees the presigned URL in the tool result and may echo it in prose.
 // The file card already shows the file, so drop matching links and bare URLs.
 function stripSharedLinks(blocks: Block[]): Block[] {
@@ -411,40 +384,20 @@ function Message({
   content,
   onAnswer,
   textOnly = false,
-  collapseActivity = false,
-  workDuration,
   bubble = true,
 }: {
   content: string;
   onAnswer?: (text: string) => void;
   textOnly?: boolean;
-  collapseActivity?: boolean;
-  workDuration?: number;
   bubble?: boolean;
 }) {
   const parsedBlocks = stripSharedLinks(splitBlocks(content));
-  // Collapse through the final tool call; without tools, keep everything visible.
-  const activityEnd = parsedBlocks.findLastIndex((block) => block.kind === "tool") + 1;
-  const activity = collapseActivity && !textOnly ? parsedBlocks.slice(0, activityEnd) : [];
   const blocks = textOnly
     ? parsedBlocks.filter((block) => block.kind === "md" || block.kind === "file")
-    : parsedBlocks.slice(activity.length);
+    : parsedBlocks;
 
   return (
     <div>
-      {activity.length > 0 && (
-        <details className="group mb-4 border-b text-sm text-muted-foreground">
-          <summary className="flex w-full cursor-pointer select-none items-center gap-2 py-2 hover:text-foreground">
-            <span className="font-medium text-foreground/80">
-              {workDuration === undefined ? "Work in progress" : `Worked for ${workDuration}s`}
-            </span>
-            <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="typeset typeset-docs min-w-0 py-3 text-sm">
-            <Markdown skipHtml>{activity.map(activityMarkdown).join("\n\n")}</Markdown>
-          </div>
-        </details>
-      )}
       {blocks.map((b, k) => {
         if (b.kind === "md") {
           return (
@@ -463,6 +416,7 @@ function Message({
               id={`b-${k}`}
               name={b.name}
               argument={b.argument}
+              body={b.body}
               status={b.running ? "working" : b.failed ? "failed" : "done"}
             />
           );

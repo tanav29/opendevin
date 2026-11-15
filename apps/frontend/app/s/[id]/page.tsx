@@ -486,30 +486,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         <section className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
           <div className="scrollbar-none min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-36 sm:px-6">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-6">
-              {messages.map((message, index) => {
-                const startedAt = messages
-                  .slice(0, index)
-                  .reverse()
-                  .find((previous) => previous.role === "user")?.createdAt;
-                const elapsedMs = startedAt
-                  ? Date.parse(message.createdAt) - Date.parse(startedAt)
-                  : NaN;
-                const workDuration = Number.isFinite(elapsedMs)
-                  ? Math.max(1, Math.round(elapsedMs / 1000))
-                  : undefined;
-                return (
-                  <ChatMessageRow
-                    key={message.id}
-                    role={message.role === "user" ? "user" : "assistant"}
-                    content={message.content}
-                    workDuration={message.role === "assistant" ? workDuration : undefined}
-                    collapseActivity
-                    presentation="session"
-                    workingLabel="Working"
-                    onAnswer={(text) => void sendMessage(text)}
-                  />
-                );
-              })}
+              {messages.map((message) => (
+                <ChatMessageRow
+                  key={message.id}
+                  role={message.role === "user" ? "user" : "assistant"}
+                  content={message.content}
+                  presentation="session"
+                  workingLabel="Working"
+                  onAnswer={(text) => void sendMessage(text)}
+                />
+              ))}
               {/* Historical and streaming messages have different source shapes. */}
               {liveMessages.map((message) => (
                 <ChatMessageRow
@@ -519,7 +505,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     .filter((part) => part.type === "text")
                     .map((part) => part.text)
                     .join("")}
-                  collapseActivity
                   presentation="session"
                   workingLabel="Working"
                   onAnswer={(text) => void sendMessage(text)}
