@@ -171,9 +171,19 @@ The chat endpoint streams responses. The terminal uses Socket.IO events for inpu
 - PostgreSQL stores users, Better Auth accounts and sessions, projects, project sessions, and chat messages.
 - Each API operation checks that the authenticated user owns the project or session being accessed.
 - GitHub access tokens are kept server-side and used for private clones and GitHub pushes. Never log, commit, or expose them to the frontend.
-- E2B sandboxes are temporary cloud workspaces with a one-hour timeout. They can expire or become unavailable; use Reconnect sandbox to provision a replacement.
+- E2B sandboxes are temporary cloud workspaces with a one-hour timeout. Reconnect reattaches to a live sandbox or restores the latest durable checkpoint into a new one. Without a checkpoint, creating a fresh clone requires confirmation and keeps the saved review-only patch.
 - Project environment variables are passed into setup and development commands inside the sandbox. Do not put secrets in repository files or prompts.
 - Never commit `.env` files, API keys, OAuth secrets, or tokens.
+
+### Workspace checkpoints
+
+Use **Checkpoints** in the session header to capture a named checkpoint, inspect its source commit and branch, restore it, or **Fork from here** into a new session. Restore requires confirmation because it replaces the current workspace. The replacement becomes active only after restoration succeeds; failure retains the old sandbox, checkpoints, and recovery patch. Forks get their own durable checkpoint copy.
+
+Checkpoints live in PostgreSQL, independently of E2B sandbox lifetime. Apply the additive migration with `pnpm --filter @opendevin/backend exec prisma migrate deploy` before deploying this feature. Python 3 and Git must be available in the sandbox. Automatic recovery checkpoints are captured after provisioning and whenever the workspace diff is snapshotted (including completed agent turns, commits, and sandbox shutdown). The latest 10 automatic checkpoints and up to 20 manual checkpoints are kept per session. Manual checkpoints can be deleted explicitly.
+
+The current HEAD and its reachable history (including unpushed commits and shallow history), index, staged/unstaged changes, deletions, executable modes, and nonignored untracked regular files are preserved, including binary contents. Checkpoints cover only `/home/user/workspace`. They do not include other branches, ignored files, dependencies, running processes, Git configuration, hooks, remotes, credentials, or environment settings. Restore configures the project's clean HTTP(S) origin URL; reinstall dependencies and restart development processes afterward.
+
+Capture is bounded to 20 MiB of encoded data, 20 MiB of Git objects, 50,000 Git objects, 2,000 changed/untracked files, and 5 MiB per changed file. Symlinks, submodules, linked worktrees, unresolved merges, SHA-256 repositories, and Git LFS object storage are unsupported. Capture refuses private files in Git history/index, common credential patterns, and configured project environment values in file/object contents. Private untracked paths such as `.env*`, `.npmrc`, SSH keys, and credential directories are excluded and listed in the inspector. This detection cannot identify every possible embedded secret: keep credentials out of source files and history. Stop terminal commands and other external writers before capture; detected concurrent edits fail capture instead of truncating it. Changes made after the selected checkpoint are not recovered on reconnect. Automatic capture failures are visible in the checkpoint dialog and never erase previous checkpoints.
 
 ## Development notes
 

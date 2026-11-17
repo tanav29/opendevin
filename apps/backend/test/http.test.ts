@@ -21,7 +21,12 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
         updates.push(data);
         return owner;
       },
+      updateMany: async () => ({ count: 1 }),
+      create: async () => ({ id: "candidate" }),
+      findUniqueOrThrow: async () => ({ sandboxId: "" }),
+      delete: async () => ({}),
     },
+    workspaceCheckpoint: { findFirst: async () => null },
     project: { findFirst: async () => null },
   };
   const globals = globalThis as unknown as { prisma?: unknown };
@@ -114,6 +119,8 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
     sandboxId: "sandbox",
     sandboxStatus: "ready",
     status: "running",
+    updatedAt: new Date(),
+    projectId: "project",
     lastDiff: "diff --git a/file b/file",
     lastDiffAt: new Date("2026-09-25"),
   };
@@ -155,14 +162,14 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
     }
   });
   await t.test(
-    "replaces a confirmed workspace despite stale persisted running status",
+    "retains the old sandbox and recovery data when confirmed fresh provisioning fails",
     async () => {
       const response = await reconnect(true);
-      assert.equal(response.status, 202);
-      assert.equal(response.body.continuity, "fresh-clone");
-      assert.equal(killed, 1);
-      assert.ok(
-        updates.some((data) => (data as { sandboxStatus?: string }).sandboxStatus === "creating"),
+      assert.equal(response.status, 503);
+      assert.equal(killed, 0);
+      assert.equal(
+        updates.some((data) => (data as { sandboxId?: string }).sandboxId === ""),
+        false,
       );
     },
   );

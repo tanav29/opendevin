@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import type { NextFunction, Request, Response } from "express";
 import { auth } from "./auth/auth.js";
 import { prisma } from "./db/prisma.js";
+import { workspaceLocked, workspaceOperations } from "./lifecycle.js";
 
 export function scheduleBackgroundTask(task: Promise<unknown>): void {
   if (process.env.VERCEL) waitUntil(task);
@@ -35,6 +36,9 @@ export async function ownedSession(req: Request, id: string) {
     include: { project: true },
   });
   if (!owner) throw new HttpError(404, "Session not found");
+  if (req.method !== "GET" && (workspaceLocked(owner) || workspaceOperations.has(owner.id))) {
+    throw new HttpError(409, "A checkpoint operation is in progress. Wait for it to finish.");
+  }
   return owner;
 }
 

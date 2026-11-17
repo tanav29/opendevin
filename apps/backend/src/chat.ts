@@ -27,12 +27,13 @@ import {
   withContinuityWarning,
 } from "./workspace.js";
 import type { TurnKind } from "./lifecycle.js";
+import { workspaceOperations } from "./lifecycle.js";
 
 export type ActiveTurn = { controller: AbortController; kind: TurnKind };
 export const activeTurns = new Map<string, ActiveTurn>();
 
 export function claimAgentTurn(sessionId: string, kind: TurnKind): AbortController | null {
-  if (activeTurns.has(sessionId)) return null;
+  if (activeTurns.has(sessionId) || workspaceOperations.has(sessionId)) return null;
   const controller = new AbortController();
   activeTurns.set(sessionId, { controller, kind });
   return controller;
