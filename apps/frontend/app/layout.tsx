@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { QueryProvider } from "@/components/query-provider";
 import { AppShell } from "@/components/layout/app-shell";
 import { Toaster } from "sonner";
+import { SessionNotifications } from "@/components/session-notifications";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={cn("dark", "font-sans", geist.variable, geistMono.variable)}>
       <body className="bg-background text-foreground antialiased">
         <QueryProvider>
+          <SessionNotifications />
           <AppShell>{children}</AppShell>
           <Toaster richColors position="bottom-right" />
         </QueryProvider>
