@@ -3,7 +3,7 @@
 import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
 import { ArrowUpRight, Download, GitBranch, GitPullRequest, Pencil, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,13 @@ export default function ChangesTab({
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
+  const [prTitle, setPrTitle] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [base, setBase] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [metadataError, setMetadataError] = useState("");
+  const edited = useRef({ message: false, title: false, body: false, base: false });
   const [committing, setCommitting] = useState(false);
   const [creatingPr, setCreatingPr] = useState(false);
   const [createdPr, setCreatedPr] = useState<{ url: string; number: number } | null>(null);
@@ -214,6 +221,35 @@ export default function ChangesTab({
   const includedFiles = (git?.files || []).filter(
     (file) => !selectedFiles.length || selectedFiles.includes(file.path),
   );
+  useEffect(() => {
+    void api<{ base: string }>(`/api/sessions/${sessionId}/publish-base`)
+      .then((result) => {
+        if (!edited.current.base) setBase(result.base);
+      })
+      .catch(() => setMetadataError("Could not load the default branch. Enter a target branch."));
+  }, [sessionId]);
+
+  async function generateMetadata() {
+    setGenerating(true);
+    setMetadataError("");
+    try {
+      const result = await api<{ message: string; title: string; body: string }>(
+        `/api/sessions/${sessionId}/publish-metadata`,
+        { method: "POST" },
+        180_000,
+      );
+      if (!edited.current.message) setMessage(result.message);
+      if (!edited.current.title) setPrTitle(result.title);
+      if (!edited.current.body) setPrBody(result.body);
+    } catch (error) {
+      setMetadataError(
+        error instanceof Error ? error.message : "Generation failed. Enter details manually.",
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function commit() {
     if (committing || !available) return;
     setCommitting(true);
@@ -232,6 +268,7 @@ export default function ChangesTab({
           body: JSON.stringify({
             files: selectedFiles,
             confirmUntracked: true,
+            message,
           }),
         },
         180_000,
@@ -264,6 +301,8 @@ export default function ChangesTab({
               files: selectedFiles,
               confirmUntracked: true,
               forPullRequest: true,
+              base,
+              message: message || prTitle,
             }),
           },
           180_000,
@@ -277,6 +316,7 @@ export default function ChangesTab({
         `/api/sessions/${sessionId}/pull-request`,
         {
           method: "POST",
+          body: JSON.stringify({ title: prTitle, body: prBody, base }),
         },
       );
       setCreatedPr(result);
@@ -371,7 +411,8 @@ export default function ChangesTab({
             !git.files.length ||
             !available ||
             committing ||
-            creatingPr
+            creatingPr ||
+            !message.trim()
           }
         >
           {committing ? "Pushing…" : "Commit & push"}
@@ -486,6 +527,73 @@ export default function ChangesTab({
                   <p className="mt-2 text-muted-foreground">Working tree is clean.</p>
                 ) : null}
               </section>
+              <section className="space-y-3 border-t border-border py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-medium">Publishing details</h3>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    onClick={() => void generateMetadata()}
+                    disabled={generating || !available}
+                  >
+                    {generating ? "Generating?" : "Generate details"}
+                  </Button>
+                </div>
+                {metadataError && (
+                  <p role="alert" className="text-danger">
+                    {metadataError}
+                  </p>
+                )}
+                <label className="block space-y-1">
+                  <span>Commit message</span>
+                  <input
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5"
+                    value={message}
+                    maxLength={200}
+                    onChange={(e) => {
+                      edited.current.message = true;
+                      setMessage(e.target.value);
+                    }}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span>PR title</span>
+                  <input
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5"
+                    value={prTitle}
+                    maxLength={250}
+                    onChange={(e) => {
+                      edited.current.title = true;
+                      setPrTitle(e.target.value);
+                    }}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span>PR body</span>
+                  <textarea
+                    className="min-h-24 w-full rounded-md border border-input bg-background px-2 py-1.5"
+                    value={prBody}
+                    maxLength={60000}
+                    onChange={(e) => {
+                      edited.current.body = true;
+                      setPrBody(e.target.value);
+                    }}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span>Target base branch</span>
+                  <input
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5"
+                    value={base}
+                    maxLength={200}
+                    onChange={(e) => {
+                      edited.current.base = true;
+                      setBase(e.target.value);
+                    }}
+                  />
+                </label>
+              </section>
               <section className="border-t border-border py-3">
                 <div className="flex items-center gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
                   <GitPullRequest
@@ -516,7 +624,15 @@ export default function ChangesTab({
                       <Button
                         type="submit"
                         size="xs"
-                        disabled={creatingPr || committing || !available || !!git.workspaceError}
+                        disabled={
+                          creatingPr ||
+                          committing ||
+                          !available ||
+                          !!git.workspaceError ||
+                          !prTitle.trim() ||
+                          !base.trim() ||
+                          (!!git.files.length && !message.trim())
+                        }
                       >
                         {creatingPr ? "Creating?" : "Create PR"}
                       </Button>
