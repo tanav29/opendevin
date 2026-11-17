@@ -554,6 +554,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Conversation>
           <div className="z-20 w-full shrink-0 px-4 pb-4 pt-2">
             <ChatComposer
+              sessionId={sessionId}
               suggestions={suggestions}
               onSuggestion={(suggestion) => void sendMessage(suggestion)}
               questionnaire={
