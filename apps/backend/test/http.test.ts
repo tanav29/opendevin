@@ -30,7 +30,21 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
   t.after(() => {
     globals.prisma = originalPrisma;
   });
-  const { createApp } = await import("../src/application.js");
+  const originalFrontendUrl = process.env.FRONTEND_URL;
+  const originalFrontendOrigins = process.env.FRONTEND_ORIGINS;
+  process.env.FRONTEND_URL = "https://frontend.example/";
+  process.env.FRONTEND_ORIGINS = "https://other.example";
+  t.after(() => {
+    if (originalFrontendUrl === undefined) delete process.env.FRONTEND_URL;
+    else process.env.FRONTEND_URL = originalFrontendUrl;
+    if (originalFrontendOrigins === undefined) delete process.env.FRONTEND_ORIGINS;
+    else process.env.FRONTEND_ORIGINS = originalFrontendOrigins;
+  });
+  const originalVercel = process.env.VERCEL;
+  process.env.VERCEL = "1";
+  const { default: app } = await import("../src/index.js");
+  if (originalVercel === undefined) delete process.env.VERCEL;
+  else process.env.VERCEL = originalVercel;
   const { auth } = await import("../src/auth/auth.js");
   const { claimAgentTurn, releaseAgentTurn } = await import("../src/chat.js");
   const apiDescriptor = Object.getOwnPropertyDescriptor(auth, "api")!;
@@ -47,7 +61,7 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
     killed++;
   });
 
-  const server = createApp().listen(0, "127.0.0.1");
+  const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(
     () =>
@@ -66,6 +80,13 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ confirmReplace }),
     });
+
+  await t.test("accepts both configured frontend origins", async () => {
+    for (const origin of ["https://frontend.example", "https://other.example"]) {
+      const response = await fetch(`${base}/api/health`, { headers: { origin } });
+      assert.equal(response.headers.get("access-control-allow-origin"), origin);
+    }
+  });
 
   await t.test("keeps health public and removes the Bot API", async () => {
     assert.deepEqual(await request("/api/health"), { status: 200, body: { ok: true } });
