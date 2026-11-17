@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { useComposerDraft } from "@/hooks/use-composer-draft";
 
 export type TaskFormProject = { id: string; repo: string };
 const EMPTY_SANDBOX = "__empty_sandbox__";
@@ -63,7 +64,9 @@ export default function TaskForm({
   const [selectedRepo, setSelectedRepo] = useState<GithubRepo | null>(null);
   const [resolvedProjectId, setResolvedProjectId] = useState(initialProjectId || "");
   const [resolving, setResolving] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt, draftReady] = useComposerDraft(
+    initialProjectId ? `new-task:${initialProjectId}` : "new-task",
+  );
   const [branch, setBranch] = useState("");
   const [branchSearch, setBranchSearch] = useState("");
   const [issueSearch, setIssueSearch] = useState("");
@@ -78,7 +81,10 @@ export default function TaskForm({
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects],
   );
-  const repositoryLabel = selectedRepo?.fullName || activeProject?.repo || (activeProjectId ? "Empty sandbox" : "Select repository");
+  const repositoryLabel =
+    selectedRepo?.fullName ||
+    activeProject?.repo ||
+    (activeProjectId ? "Empty sandbox" : "Select repository");
   const sourceBranchLabel = branch || "Choose a branch";
 
   const reposQuery = useQuery({
@@ -260,6 +266,7 @@ export default function TaskForm({
       <div className="relative">
         <Textarea
           value={prompt}
+          disabled={!draftReady || creating}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={placeholder}
           rows={4}
@@ -274,7 +281,13 @@ export default function TaskForm({
         <div className="flex min-w-0 flex-1 items-center">
           {!isLockedToProject && (
             <Select
-              value={selectedRepo ? String(selectedRepo.id) : activeProjectId && !activeProject?.repo.trim() ? EMPTY_SANDBOX : ""}
+              value={
+                selectedRepo
+                  ? String(selectedRepo.id)
+                  : activeProjectId && !activeProject?.repo.trim()
+                    ? EMPTY_SANDBOX
+                    : ""
+              }
               onValueChange={(v: string | null) => {
                 if (v === EMPTY_SANDBOX) {
                   void handleEmptySandboxSelect();
@@ -286,7 +299,9 @@ export default function TaskForm({
             >
               <SelectTrigger className="text-xs w-auto border-0 bg-transparent!">
                 <IconBrandGithub className="size-3.5 shrink-0 text-muted-foreground" />
-                <SelectValue placeholder="Select repo">{activeProjectId ? repositoryLabel : undefined}</SelectValue>
+                <SelectValue placeholder="Select repo">
+                  {activeProjectId ? repositoryLabel : undefined}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={EMPTY_SANDBOX}>Empty sandbox</SelectItem>

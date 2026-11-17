@@ -19,6 +19,7 @@ import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "../config.js";
 import { ownedSession, routeParam } from "../http.js";
 import { loadToolLog, parseSkillsBlock } from "../agent.js";
 import { connectSandboxTools } from "../tools.js";
+import { projectEnvVars } from "../sanitize.js";
 import { answerQuestionnaire } from "../questionnaire.js";
 
 const router = Router();
@@ -165,6 +166,7 @@ router.post("/api/sessions/:id/chat", async (req, res) => {
           toolMessages: messages,
           planJson: latestPlan,
           usage,
+          secrets: Object.values(projectEnvVars(owner.project.envVars)),
         });
       },
       (planJson) => {
@@ -173,6 +175,7 @@ router.post("/api/sessions/:id/chat", async (req, res) => {
       async (error) => {
         await failAgentTurn(owner.id, error, controller.signal, owner.lastError);
       },
+      Object.values(projectEnvVars(owner.project.envVars)),
     );
     return;
   } catch (error) {

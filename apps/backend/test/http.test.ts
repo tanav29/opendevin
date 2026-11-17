@@ -23,6 +23,7 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
       },
     },
     project: { findFirst: async () => null },
+    account: { findFirst: async () => ({ accessToken: "test-token" }) },
   };
   const globals = globalThis as unknown as { prisma?: unknown };
   const originalPrisma = globals.prisma;
@@ -30,7 +31,21 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
   t.after(() => {
     globals.prisma = originalPrisma;
   });
-  const { createApp } = await import("../src/application.js");
+  const originalFrontendUrl = process.env.FRONTEND_URL;
+  const originalFrontendOrigins = process.env.FRONTEND_ORIGINS;
+  process.env.FRONTEND_URL = "https://frontend.example/";
+  process.env.FRONTEND_ORIGINS = "https://other.example";
+  t.after(() => {
+    if (originalFrontendUrl === undefined) delete process.env.FRONTEND_URL;
+    else process.env.FRONTEND_URL = originalFrontendUrl;
+    if (originalFrontendOrigins === undefined) delete process.env.FRONTEND_ORIGINS;
+    else process.env.FRONTEND_ORIGINS = originalFrontendOrigins;
+  });
+  const originalVercel = process.env.VERCEL;
+  process.env.VERCEL = "1";
+  const { default: app } = await import("../src/index.js");
+  if (originalVercel === undefined) delete process.env.VERCEL;
+  else process.env.VERCEL = originalVercel;
   const { auth } = await import("../src/auth/auth.js");
   const { claimAgentTurn, releaseAgentTurn } = await import("../src/chat.js");
   const apiDescriptor = Object.getOwnPropertyDescriptor(auth, "api")!;
@@ -47,7 +62,7 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
     killed++;
   });
 
-  const server = createApp().listen(0, "127.0.0.1");
+  const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(
     () =>
@@ -66,6 +81,13 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ confirmReplace }),
     });
+
+  await t.test("accepts both configured frontend origins", async () => {
+    for (const origin of ["https://frontend.example", "https://other.example"]) {
+      const response = await fetch(`${base}/api/health`, { headers: { origin } });
+      assert.equal(response.headers.get("access-control-allow-origin"), origin);
+    }
+  });
 
   await t.test("keeps health public and removes the Bot API", async () => {
     assert.deepEqual(await request("/api/health"), { status: 200, body: { ok: true } });
@@ -117,6 +139,55 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
     lastDiff: "diff --git a/file b/file",
     lastDiffAt: new Date("2026-09-25"),
   };
+  await t.test("reports unavailable generation without preventing manual entry", async () => {
+    const key = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    try {
+      const response = await request("/api/sessions/session/publish-metadata", { method: "POST" });
+      assert.equal(response.status, 503);
+      assert.match(response.body.error, /manually/);
+    } finally {
+      if (key !== undefined) process.env.OPENROUTER_API_KEY = key;
+    }
+  });
+  await t.test(
+    "publishes manual pull request details to the chosen base without a model",
+    async () => {
+      owner!.project = { repo: "https://github.com/example/repo", userId: "user" };
+      owner!.branch = "feature";
+      const originalFetch = globalThis.fetch;
+      let posted: any;
+      const fetchMock = t.mock.method(globalThis, "fetch", async (input, init) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.github.com/")) return originalFetch(input, init);
+        if (init?.method === "POST") {
+          posted = JSON.parse(String(init.body));
+          return Response.json(
+            { html_url: "https://github.com/example/repo/pull/1", number: 1 },
+            { status: 201 },
+          );
+        }
+        assert.match(url, /base=release%2Fnext/);
+        return Response.json([]);
+      });
+      const post = (body: unknown) =>
+        request("/api/sessions/session/pull-request", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      assert.equal(
+        (await post({ title: "Manual title", body: "Manual body", base: "release/next" })).status,
+        201,
+      );
+      assert.equal(posted.title, "Manual title");
+      assert.match(posted.body, /^Manual body/);
+      assert.equal(posted.base, "release/next");
+      assert.equal((await post({ title: "x", body: "", base: "bad..branch" })).status, 400);
+      assert.equal((await post({ title: "x\ny", body: "", base: "main" })).status, 400);
+      fetchMock.mock.restore();
+    },
+  );
   await t.test(
     "requires confirmation before replacing a workspace with a saved patch",
     async () => {

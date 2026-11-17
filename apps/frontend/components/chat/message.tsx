@@ -197,11 +197,21 @@ function splitBlocks(content: string): Block[] {
         i += 1;
       }
       const joined = inner.join("\n");
+      const outputMatch = joined.match(/<div data-tool-output='(.*)'><\/div>/);
+      let body = joined.replace(/<\/?(?:span|div)\b[^>]*>/g, "").trim();
+      if (outputMatch) {
+        try {
+          const value: unknown = JSON.parse(outputMatch[1].replace(/&#39;/g, "'"));
+          body = typeof value === "string" ? value : "";
+        } catch {
+          body = "";
+        }
+      }
       blocks.push({
         kind: "tool",
         name,
         argument,
-        body: joined.trim(),
+        body,
         failed: joined.includes('data-tool-status="failed"'),
         running: !closed,
       });
@@ -320,7 +330,7 @@ function Message({
               key={`b-${k}`}
               name={b.name}
               argument={b.argument}
-              output={b.body.replace(/<\/?(?:span|div)\b[^>]*>/g, "").trim()}
+              output={b.body}
               state={
                 b.failed
                   ? "error"

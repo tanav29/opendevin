@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
 import Link from "next/link";
+import { ExpandedSettings } from "@/components/expanded-settings";
 
 export default function Settings() {
   const auth = useSession();
@@ -108,6 +109,7 @@ export default function Settings() {
             )}
           </CardContent>
         </Card>
+        {auth.status === "signed-in" && me && <ExpandedSettings userId={me.user.id} />}
       </PageContainer>
     </PageShell>
   );
