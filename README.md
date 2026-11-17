@@ -23,17 +23,17 @@ This is a pnpm workspace managed with Turborepo:
 
 ```text
 apps/frontend   Next.js 16 + React 19 application     http://localhost:3000
-apps/backend    Express 5 API + WebSocket server      http://localhost:3001
+apps/backend    Express 5 API + Socket.IO server      http://localhost:3001
                 Better Auth + Prisma + PostgreSQL
                 OpenRouter AI SDK + E2B sandboxes
 docs/           Design and implementation notes
 ```
 
-The frontend calls the backend over HTTP and uses a WebSocket for the terminal. The backend owns authentication, persistence, project and session APIs, sandbox lifecycle, agent execution, terminal access, diffs, previews, and GitHub publishing.
+The frontend calls the backend over HTTP and uses Socket.IO for the terminal. The backend owns authentication, persistence, project and session APIs, sandbox lifecycle, agent execution, terminal access, diffs, previews, and GitHub publishing.
 
 Important backend modules:
 
-- `apps/backend/src/index.ts` — starts the API and WebSocket server
+- `apps/backend/src/index.ts` — starts the API and Socket.IO server
 - `apps/backend/src/application.ts` — Express app, CORS, Better Auth, routes, and errors
 - `apps/backend/src/routes/` — project, session, chat, workspace, GitHub, and health routes
 - `apps/backend/src/auth/auth.ts` — Better Auth configuration
@@ -72,6 +72,7 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
 BETTER_AUTH_SECRET="replace-with-a-long-random-secret"
 BETTER_AUTH_URL="http://localhost:3001"
 PORT="3001"
+FRONTEND_URL="http://localhost:3000"
 
 GITHUB_CLIENT_ID="your-github-client-id"
 GITHUB_CLIENT_SECRET="your-github-client-secret"
@@ -83,7 +84,7 @@ E2B_API_KEY="your-e2b-api-key"
 
 `MODEL` may be a full OpenRouter model ID such as `anthropic/claude-sonnet-4`; a model without a provider prefix is automatically treated as an OpenAI model. The backend currently reads `OPENROUTER_API_KEY` and does not use a separate `OPENAI_API_KEY`.
 
-The frontend uses `http://localhost:3001` in development and `https://od-backend.vercel.app` in production. The backend allows the frontend origins `http://localhost:3000` and `https://opendevin.vercel.app`.
+The frontend API URL can be configured with `NEXT_PUBLIC_API_URL`; see `apps/frontend/.env.example`. Set `FRONTEND_URL` to the frontend origin for authentication and CORS. Optionally set `EXA_API_KEY` to enable agent web search.
 
 Do not commit either environment file.
 
@@ -161,9 +162,9 @@ All application routes are under `/api` and require the Better Auth session unle
 | Sessions | `/api/sessions`, `/api/sessions/:id`, and related session actions |
 | Chat | `POST /api/sessions/:id/chat`, `POST /api/sessions/:id/stop` |
 | Workspace | Diff, files, revert, preview, dev server, commit, and draft pull-request routes under `/api/sessions/:id/*` |
-| Terminal | WebSocket `/api/sessions/:id/pty` |
+| Terminal | Socket.IO at `/api/socket.io` |
 
-The chat endpoint streams plain text. The terminal WebSocket accepts JSON `input` and `resize` messages and returns terminal data, replay, readiness, and error messages.
+The chat endpoint streams responses. The terminal uses Socket.IO events for input, resize, output, replay, readiness, and errors.
 
 ## Data, sandboxes, and security
 

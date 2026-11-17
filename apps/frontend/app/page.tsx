@@ -70,23 +70,23 @@ function SignedOut() {
       <section className="landing-hero">
         <div className="hero-copy">
           <div className="landing-eyebrow">
-            <span className="eyebrow-dot" /> YOUR NEXT PAIR PROGRAMMER
+            <span className="eyebrow-dot" /> A workspace for coding with an agent
           </div>
           <h1>
-            Make your repo
+            From task to
             <br />
-            the <em>starting point.</em>
+            <em>working code.</em>
           </h1>
           <p className="hero-description">
-            Give an agent a task. OpenDevin gets to know your code, makes the change, and runs it in
-            a real development environment.
+            Bring your repository, describe what you want to build, and work alongside an agent in an
+            isolated development environment.
           </p>
           <div className="hero-actions">
             <Link href="/login" className="primary-cta">
               <IconBrandGithub size={17} /> Get started with GitHub <IconArrowUpRight size={16} />
             </Link>
             <a href="#workflow" className="text-cta">
-              Take a look around <span>↓</span>
+              See how it works <span>↓</span>
             </a>
           </div>
           <div className="hero-note">
@@ -195,7 +195,7 @@ function SignedOut() {
             </div>
           </div>
           <div className="preview-caption">
-            <span className="caption-line" /> A real workspace, from first prompt to passing tests
+            <span className="caption-line" /> An example session, from prompt to review
           </div>
         </div>
       </section>
@@ -246,7 +246,7 @@ function SignedOut() {
             opendevin<span className="brand-period">.</span>
           </span>
         </Link>
-        <span>Built for the messy middle of making software.</span>
+        <span>Your repository. Your workflow. Your next change.</span>
         <Link href="/login">
           Start a session <IconArrowUpRight size={14} />
         </Link>

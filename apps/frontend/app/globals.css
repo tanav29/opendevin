@@ -1118,3 +1118,16 @@
   --trees-file-icon-color: var(--muted-foreground);
   --trees-font-family-override: var(--font-sans);
 }
+
+/* Landing refinements */
+.landing {
+  --landing-paper: #f5f7fa;
+  --landing-line: #dfe5ec;
+}
+.landing-grid {
+  opacity: 0.22;
+  background-image: linear-gradient(#d6e0ea 1px, transparent 1px), linear-gradient(90deg, #d6e0ea 1px, transparent 1px);
+}
+.hero-copy h1 { letter-spacing: -0.065em; }
+.workspace-window { box-shadow: 0 24px 70px rgba(36, 50, 68, 0.14); }
+.landing-eyebrow { text-transform: none; letter-spacing: 0.02em; font-size: 11px; }
