@@ -1,6 +1,7 @@
 import { hasToolCall, pruneMessages, stepCountIs, type ModelMessage } from "ai";
 import { prisma } from "./db/prisma.js";
-import { TOOL_LOG_MAX_MESSAGES } from "./config.js";
+import { redactToolOutput, truncateOutput } from "./tool-output.js";
+import { LIMITS, TOOL_LOG_MAX_MESSAGES } from "./config.js";
 
 export const AGENT_STOP = [stepCountIs(25), hasToolCall("ask_user")];
 
@@ -19,10 +20,42 @@ export async function loadToolLog(sessionId: string): Promise<ModelMessage[]> {
   }
 }
 
-export async function saveToolLog(sessionId: string, messages: ModelMessage[]) {
+export function sanitizeToolHistory(messages: ModelMessage[], secrets: string[]): ModelMessage[] {
+  const clean = (value: unknown, bound: boolean, key = ""): unknown => {
+    if (typeof value === "string") {
+      if (/(?:password|secret|token|api[_-]?key|credential)/i.test(key)) return "[redacted]";
+      const safe = redactToolOutput(value, secrets);
+      return bound ? truncateOutput(safe, LIMITS.toolStdoutChars) : safe;
+    }
+    if (Array.isArray(value)) return value.map((item) => clean(item, bound));
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, clean(item, bound, key)]),
+      );
+    return value;
+  };
+  return messages.map((message) => {
+    if (message.role === "tool") return clean(message, true) as ModelMessage;
+    if (message.role === "assistant" && Array.isArray(message.content)) {
+      return {
+        ...message,
+        content: message.content.map((part) =>
+          part.type === "tool-call" ? (clean(part, false) as typeof part) : part,
+        ),
+      };
+    }
+    return message;
+  });
+}
+
+export async function saveToolLog(
+  sessionId: string,
+  messages: ModelMessage[],
+  secrets: string[] = [],
+) {
   await prisma.projectSession.update({
     where: { id: sessionId },
-    data: { toolLog: JSON.stringify(messages) },
+    data: { toolLog: JSON.stringify(sanitizeToolHistory(messages, secrets)) },
   });
 }
 

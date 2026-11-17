@@ -26,6 +26,8 @@ import {
   snapshotWorkspaceDiff,
   withContinuityWarning,
 } from "./workspace.js";
+import { redactToolOutput, truncateOutput } from "./tool-output.js";
+import { projectEnvVars } from "./sanitize.js";
 import type { TurnKind } from "./lifecycle.js";
 
 export type ActiveTurn = { controller: AbortController; kind: TurnKind };
@@ -46,6 +48,7 @@ export async function pipeAgentUIMessageStream(
   onFinish: (turn: Awaited<ReturnType<typeof drainAgentStream>>) => Promise<void>,
   onPlan?: (tasksJson: string) => void,
   onError?: (error: unknown) => Promise<void>,
+  secrets: string[] = [],
 ): Promise<void> {
   const stream = createUIMessageStream({
     execute: async ({ writer }) => {
@@ -56,6 +59,7 @@ export async function pipeAgentUIMessageStream(
           result,
           (delta) => writer.write({ type: "text-delta", id, delta }),
           onPlan,
+          secrets,
         );
         await onFinish(turn);
         writer.write({ type: "text-end", id });
@@ -111,7 +115,7 @@ function escapeMarkerAttribute(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-function toolArgument(name: string, input: unknown): string {
+function toolArgument(name: string, input: unknown, secrets: string[]): string {
   const record = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   const preferredKey: Record<string, string> = {
     list_files: "path",
@@ -128,16 +132,21 @@ function toolArgument(name: string, input: unknown): string {
   const fallback = Object.values(record).find((value) => typeof value === "string");
   const value =
     typeof preferred === "string" ? preferred : typeof fallback === "string" ? fallback : "";
-  const compact = value.replace(/\s+/g, " ").trim();
+  const compact = redactToolOutput(value, secrets).replace(/\s+/g, " ").trim();
   return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
 }
 
-export function toolCallMarker(name: string, input: unknown, toolCallId?: string): string {
+export function toolCallMarker(
+  name: string,
+  input: unknown,
+  toolCallId?: string,
+  secrets: string[] = [],
+): string {
   if (name === "ask_user")
     return `\n\n<div data-question='${questionPayload(input, toolCallId)}'>\n\n`;
   if (name === "update_plan") return `\n\n<div data-plan='${planPayload(input)}'>\n\n`;
   if (name === "share_file") return "";
-  const argument = escapeMarkerAttribute(toolArgument(name, input));
+  const argument = escapeMarkerAttribute(toolArgument(name, input, secrets));
   return `\n\n<details data-tool="call" data-arg="${argument}"><summary>${name}</summary>\n\n`;
 }
 
@@ -145,17 +154,39 @@ export function fileMarker(payloadJson: string): string {
   return `\n\n<div data-file='${payloadJson.replace(/'/g, "&#39;")}'>\n\n</div>\n\n`;
 }
 
-export function toolDoneMarker(name: string, partType: string, output: unknown): string {
+export function toolDoneMarker(
+  name: string,
+  partType: string,
+  output: unknown,
+  secrets: string[] = [],
+): string {
   if (name === "ask_user" || name === "update_plan") return `\n</div>\n\n`;
-  if (partType === "tool-error") return `\n<div data-tool-status="failed"></div>\n\n</details>\n\n`;
+  if (partType === "tool-error")
+    return `\n<div data-tool-status="failed"></div>\n<div data-tool-output='"Tool invocation failed."'></div>\n\n</details>\n\n`;
   if (typeof output === "string" && output.startsWith("__PLAN__")) {
     const raw = output.slice("__PLAN__".length).replace(/'/g, "&#39;");
     return `\n<div data-plan='${raw}'>\n\n</div>\n\n`;
   }
-  return `\n</details>\n\n`;
+  const raw =
+    typeof output === "string"
+      ? output
+      : output == null
+        ? ""
+        : (JSON.stringify(output, null, 2) ?? "");
+  const failed =
+    name === "run_command" &&
+    /^exit=(-?\d+)/.test(raw) &&
+    Number(raw.match(/^exit=(-?\d+)/)?.[1]) !== 0;
+  const safe = truncateOutput(redactToolOutput(raw, secrets), LIMITS.toolStdoutChars);
+  const payload = JSON.stringify(safe || "No output.")
+    .replace(/&/g, "\\u0026")
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/'/g, "&#39;");
+  return `\n${failed ? '<div data-tool-status="failed"></div>\n' : ""}<div data-tool-output='${payload}'></div>\n\n</details>\n\n`;
 }
 
-function suggestionsMarker(output: unknown): string {
+function suggestionsMarker(output: unknown, secrets: string[] = []): string {
   try {
     const value: unknown = typeof output === "string" ? JSON.parse(output) : output;
     if (
@@ -173,7 +204,9 @@ function suggestionsMarker(output: unknown): string {
         ),
       ),
     ];
-    const payload = JSON.stringify(suggestions)
+    const payload = JSON.stringify(
+      suggestions.map((suggestion) => redactToolOutput(suggestion, secrets)),
+    )
       .replace(/&/g, "\\u0026")
       .replace(/</g, "\\u003c")
       .replace(/>/g, "\\u003e")
@@ -194,6 +227,7 @@ export async function drainAgentStream(
   },
   sink: (chunk: string) => void,
   onPlan?: (tasksJson: string) => void,
+  secrets: string[] = [],
 ): Promise<{
   messages: ModelMessage[];
   text: string;
@@ -213,7 +247,7 @@ export async function drainAgentStream(
     } else if (p.type === "tool-call") {
       const name = p.toolName;
       if (name !== "share_file") {
-        const marker = toolCallMarker(name, p.input, p.toolCallId);
+        const marker = toolCallMarker(name, p.input, p.toolCallId, secrets);
         if (name === "ask_user" || name === "update_plan") visibleText += marker;
         write(marker);
       }
@@ -231,10 +265,10 @@ export async function drainAgentStream(
         write(marker);
       }
       if (name !== "share_file") {
-        write(toolDoneMarker(name, p.type, output));
+        write(toolDoneMarker(name, p.type, output, secrets));
       }
       if (p.type === "tool-result") {
-        const marker = suggestionsMarker(output);
+        const marker = suggestionsMarker(output, secrets);
         visibleText += marker;
         write(marker);
       }
@@ -300,6 +334,7 @@ export type TurnPersistence = {
   toolMessages: ModelMessage[];
   planJson: string | null;
   usage: AgentUsage | undefined;
+  secrets?: string[];
 };
 
 export async function persistFinishedTurn(sessionId: string, turn: TurnPersistence): Promise<void> {
@@ -307,7 +342,11 @@ export async function persistFinishedTurn(sessionId: string, turn: TurnPersisten
   if (!content) throw new Error("The agent finished without an assistant response.");
   await prisma.message.create({ data: { sessionId, role: "assistant", content } });
   try {
-    await saveToolLog(sessionId, trimToolLog([...turn.modelHistory, ...turn.toolMessages]));
+    await saveToolLog(
+      sessionId,
+      trimToolLog([...turn.modelHistory, ...turn.toolMessages]),
+      turn.secrets,
+    );
   } catch (error) {
     console.error("Could not persist agent tool history", error);
   }
@@ -457,6 +496,7 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
       (planJson) => {
         latestPlan = planJson;
       },
+      Object.values(projectEnvVars(session.project.envVars)),
     );
     if (!visibleText.trim()) {
       throw new Error("The agent finished without an assistant response. Retry the task.");
@@ -467,6 +507,7 @@ export async function runInitialTurn(sessionId: string): Promise<void> {
       toolMessages: messages,
       planJson: latestPlan,
       usage,
+      secrets: Object.values(projectEnvVars(session.project.envVars)),
     });
   } catch (error) {
     await failAgentTurn(sessionId, error, controller?.signal, previousError);
