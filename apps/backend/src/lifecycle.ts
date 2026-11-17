@@ -24,6 +24,19 @@ export type VerificationPhase = (typeof VERIFICATION_PHASES)[number];
 
 export type TurnKind = "initial" | "chat";
 
+export const workspaceOperations = new Set<string>();
+export const CHECKPOINT_LEASE_MS = 30 * 60_000;
+export function workspaceLocked(session: {
+  workspaceOperation?: string | null;
+  workspaceOperationAt?: Date | null;
+}): boolean {
+  return Boolean(
+    session.workspaceOperation &&
+    (!session.workspaceOperationAt ||
+      Date.now() - session.workspaceOperationAt.getTime() < CHECKPOINT_LEASE_MS),
+  );
+}
+
 export type LifecycleState = {
   provisioning: ProvisioningPhase;
   agent: AgentPhase;

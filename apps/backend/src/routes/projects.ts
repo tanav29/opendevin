@@ -5,7 +5,14 @@ import { prisma } from "../db/prisma.js";
 import { runInitialTurn, stopAgentTurn } from "../chat.js";
 import { LIMITS, resolveChatModel, WORKSPACE_PATH } from "../config.js";
 import { githubHeaders, githubTokenForUser } from "../github.js";
-import { currentUser, ownedProject, routeParam, scheduleBackgroundTask } from "../http.js";
+import {
+  currentUser,
+  HttpError,
+  ownedProject,
+  routeParam,
+  scheduleBackgroundTask,
+} from "../http.js";
+import { workspaceLocked } from "../lifecycle.js";
 import { dropPty } from "../pty.js";
 import { isRepoUrl, parseGitHubRepo, sanitizeBranch } from "../sanitize.js";
 import { cancelSandboxProvisioning, killSandbox, provisionSandbox } from "../sandbox.js";
@@ -68,8 +75,13 @@ router.delete("/api/projects/:id", async (req, res) => {
   const { project } = await ownedProject(req, routeParam(req, "id"));
   const sessions = await prisma.projectSession.findMany({
     where: { projectId: project.id },
-    select: { id: true, sandboxId: true },
+    select: { id: true, sandboxId: true, workspaceOperation: true, workspaceOperationAt: true },
   });
+  if (sessions.some(workspaceLocked))
+    throw new HttpError(
+      409,
+      "Wait for checkpoint operations to finish before deleting this project.",
+    );
   for (const s of sessions) {
     dropPty(s.id);
     stopAgentTurn(s.id);

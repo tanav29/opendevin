@@ -22,6 +22,7 @@ import { usePanelPrefs } from "./panel-prefs";
 import { api, ApiError } from "@/lib/api";
 import DevRunButton from "./dev-run-button";
 import SessionInfo from "./session-info";
+import CheckpointsDialog from "./checkpoints-dialog";
 import ChatComposer from "@/components/chat/composer";
 import { parseSuggestions } from "@/components/chat/suggestions";
 import ChatQuestionnaire, { parseQuestion } from "@/components/chat/questionnaire";
@@ -74,11 +75,8 @@ function ReconnectConflictDialog({
     <Dialog open={Boolean(conflict)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Replace the unavailable sandbox?</DialogTitle>
-          <DialogDescription>
-            This session may contain uncommitted work. A fresh clone does not restore the previous
-            workspace.
-          </DialogDescription>
+          <DialogTitle>Replace the workspace?</DialogTitle>
+          <DialogDescription>{conflict?.message}</DialogDescription>
         </DialogHeader>
         {conflict?.patchAvailable && (
           <div className="rounded-lg border bg-muted/30 p-3 text-[13px] leading-5">
@@ -91,7 +89,6 @@ function ReconnectConflictDialog({
             </p>
           </div>
         )}
-        <p className="text-sm text-muted-foreground">{conflict?.message}</p>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
@@ -113,7 +110,7 @@ function ReconnectConflictDialog({
             onClick={onConfirm}
             disabled={reconnecting}
           >
-            {reconnecting ? "Creating fresh sandbox…" : "Create fresh sandbox"}
+            {reconnecting ? "Replacing workspace…" : "Replace workspace"}
           </Button>
         </div>
       </DialogContent>
@@ -136,6 +133,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const pendingDraft = useRef<(() => void) | null>(null);
   const [sending, setSending] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [checkpointBusy, setCheckpointBusy] = useState(false);
   const [reconnectConflict, setReconnectConflict] = useState<ReconnectConflict | null>(null);
   const [killing, setKilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -239,17 +237,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       const result = await api<{
         replaced?: boolean;
         reattached?: boolean;
-        continuity?: "fresh-clone" | "existing-sandbox";
+        continuity?: "fresh-clone" | "existing-sandbox" | "checkpoint";
+        checkpoint?: { createdAt: string };
       }>(
         `/api/sessions/${sessionId}/reconnect`,
         {
           method: "POST",
           body: JSON.stringify({ confirmReplace }),
         },
-        60_000,
+        300_000,
       );
       setReconnectConflict(null);
-      if (result.replaced) {
+      if (result.continuity === "checkpoint") {
+        toast.success(
+          `Restored checkpoint from ${new Date(result.checkpoint!.createdAt).toLocaleString()}. Later unsaved changes are not included.`,
+        );
+      } else if (result.replaced) {
         toast.info("Fresh sandbox created. The previous workspace was not restored.");
       } else if (result.reattached) {
         toast.success("Reconnected to the existing sandbox.");
@@ -411,7 +414,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }
 
   const ready = provisioningPhase === "ready" && (status?.sandboxAvailable ?? false);
-  const chatDisabled = !ready || sending || agentBusy;
+  const chatDisabled = !ready || sending || agentBusy || checkpointBusy || reconnecting;
   const sessionNotFound = isNotFoundError(loadError);
   const latestMessage = messages.at(-1);
   const question =
@@ -479,6 +482,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <CheckpointsDialog
+            sessionId={sessionId}
+            ready={ready}
+            busy={agentBusy || sending || reconnecting || killing || deleting}
+            onChanged={() => void refresh(sessionId, false)}
+            onBusyChange={setCheckpointBusy}
+          />
           <DevRunButton
             sessionId={sessionId}
             sandboxReady={ready}
@@ -504,6 +514,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </Tooltip>
         </div>
       </header>
+      {status?.checkpointError && (
+        <p role="alert" className="border-b px-4 py-2 text-xs text-destructive">
+          Automatic recovery is not current: {status.checkpointError} Open Checkpoints to inspect
+          saved copies.
+        </p>
+      )}
       <div className="relative flex min-h-0 flex-1">
         <section
           aria-label="Agent conversation"

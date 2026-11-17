@@ -4,6 +4,7 @@ import { SANDBOX_TIMEOUT_MS, WORKSPACE_PATH } from "./config.js";
 import { githubTokenForUser } from "./github.js";
 import { isRepoUrl, projectEnvVars, shellQuote } from "./sanitize.js";
 import { canTransition } from "./lifecycle.js";
+import { automaticCheckpoint } from "./checkpoints.js";
 
 export type SandboxResult = { exitCode: number; stdout: string; stderr: string };
 
@@ -296,6 +297,7 @@ async function provisionSandboxUnlocked(sessionId: string): Promise<boolean> {
       where: { id: sessionId },
       data: { sandboxStatus: "ready", status: "queued", lastError: null },
     });
+    await automaticCheckpoint(existing, sandbox);
     return true;
   } catch (error) {
     await prisma.projectSession.update({

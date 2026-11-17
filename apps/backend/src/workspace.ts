@@ -3,6 +3,7 @@ import { prisma } from "./db/prisma.js";
 import { DIFF_MAX_BYTES, MAX_UNTRACKED_FILES, WORKSPACE_PATH } from "./config.js";
 import { runSandbox } from "./sandbox.js";
 import { shellQuote } from "./sanitize.js";
+import { automaticCheckpoint } from "./checkpoints.js";
 
 export const FRESH_CLONE_WARNING =
   "Fresh sandbox created; the previous workspace was not restored. Review the saved patch before continuing.";
@@ -94,7 +95,10 @@ export async function readWorkspaceDiff(
 // Best-effort diff snapshot so the Changes tab survives sandbox expiry. The
 // caller owns the final lifecycle status; failures must not silently become idle.
 export async function snapshotWorkspaceDiff(sessionId: string): Promise<void> {
-  const session = await prisma.projectSession.findUnique({ where: { id: sessionId } });
+  const session = await prisma.projectSession.findUnique({
+    where: { id: sessionId },
+    include: { project: true },
+  });
   if (!session?.sandboxId) return;
   // A confirmed replacement leaves the previous review-only patch authoritative
   // until the user explicitly acts on it. Never overwrite it with fresh-clone state.
@@ -106,6 +110,7 @@ export async function snapshotWorkspaceDiff(sessionId: string): Promise<void> {
       where: { id: sessionId },
       data: { lastDiff: diff, lastDiffAt: new Date() },
     });
+    await automaticCheckpoint(session, sandbox);
   } catch {
     // Unreachable sandbox: keep the last known diff and let the caller set state.
   }

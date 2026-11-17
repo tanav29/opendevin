@@ -36,6 +36,7 @@ export type SessionDetail = {
 };
 
 export type SessionStatus = {
+  checkpointError?: string | null;
   sandboxStatus: string;
   sandboxAvailable: boolean;
   sandboxId: string;

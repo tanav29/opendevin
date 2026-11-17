@@ -1,6 +1,8 @@
 import { Sandbox } from "e2b";
 import type { Socket } from "socket.io";
 import { WORKSPACE_PATH } from "./config.js";
+import { prisma } from "./db/prisma.js";
+import { workspaceLocked, workspaceOperations } from "./lifecycle.js";
 
 // Single shared PTY per session. Entries survive tab close/reconnect and die
 // only when the sandbox is replaced (dropPty) or the backend restarts, in
@@ -121,6 +123,24 @@ async function sendToPty(
   workspacePath: string,
   text: string,
 ): Promise<boolean> {
+  const owner = await prisma.projectSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      archivedAt: true,
+      sandboxId: true,
+      workspaceOperation: true,
+      workspaceOperationAt: true,
+    },
+  });
+  if (
+    !owner ||
+    owner.archivedAt ||
+    owner.sandboxId !== sandboxId ||
+    workspaceLocked(owner) ||
+    workspaceOperations.has(sessionId)
+  ) {
+    throw new Error("Workspace is unavailable or a checkpoint operation is in progress");
+  }
   const entry = entries.get(sessionId);
   if (!entry || entry.sandboxId !== sandboxId)
     throw new Error("Terminal is not attached to this sandbox");
