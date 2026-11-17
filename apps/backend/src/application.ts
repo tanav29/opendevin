@@ -14,9 +14,7 @@ import systemRoutes from "./routes/system.js";
 import settingsRoutes from "./routes/settings.js";
 import workspaceRoutes from "./routes/workspace.js";
 
-export function createApp(): express.Express {
-  const app = express();
-
+export function createApp(app: express.Express = express()): express.Express {
   app.disable("x-powered-by");
   app.use(cors({ origin: FRONTEND_ORIGINS, credentials: true }));
   app.all("/api/auth/*splat", toNodeHandler(auth));

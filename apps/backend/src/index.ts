@@ -1,8 +1,9 @@
+import express from "express";
 import { config } from "./config.js";
 import { createApp } from "./application.js";
 import { attachTerminal } from "./server.js";
 
-const app = createApp();
+const app = createApp(express());
 
 if (!process.env.VERCEL) {
   const server = app.listen(config.port, (error) => {

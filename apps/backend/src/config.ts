@@ -25,7 +25,9 @@ export function resolveChatModel(): { modelId: string; apiKey: string | undefine
   return { modelId, apiKey: process.env.OPENROUTER_API_KEY };
 }
 
-const configuredFrontendOrigins = (process.env.FRONTEND_ORIGINS || "")
+const configuredFrontendOrigins = [process.env.FRONTEND_URL, process.env.FRONTEND_ORIGINS]
+  .filter(Boolean)
+  .join(",")
   .split(",")
   .map((origin) => origin.trim().replace(/\/+$/, ""))
   .filter(Boolean);

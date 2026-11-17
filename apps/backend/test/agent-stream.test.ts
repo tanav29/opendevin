@@ -3,7 +3,7 @@ import test from "node:test";
 import { streamText, type TextStreamPart, type ToolSet } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV2 } from "ai/test";
 import type { Sandbox } from "e2b";
-import { AGENT_STOP } from "../src/agent.js";
+import { AGENT_STOP, sanitizeToolHistory } from "../src/agent.js";
 import {
   activeTurns,
   claimAgentTurn,
@@ -223,4 +223,88 @@ test("the SDK stops after asking a blocking question without another model call"
   assert.equal(model.doStreamCalls.length, 1);
   assert.match(turn.visibleText, /Which target/);
   assert.equal(turn.usage?.totalTokens, 15);
+});
+
+test("streams and replays redacted, bounded command activity with its exit status", async () => {
+  for (const [output, failed] of [
+    ["exit=0\nstdout:\nok", false],
+    ["exit=1\nstderr:\nTOKEN=hidden-value", true],
+    ["exit=0", false],
+    ["exit=0\nstdout:\n" + "x".repeat(30000), false],
+  ] as const) {
+    let live = "";
+    const result = await drainAgentStream(
+      stream([
+        {
+          type: "tool-call",
+          toolCallId: "cmd",
+          toolName: "run_command",
+          input: { command: "echo hidden-value" },
+        },
+        { type: "tool-result", toolCallId: "cmd", toolName: "run_command", input: {}, output },
+        { type: "text-delta", id: "t", text: "Done" },
+      ]),
+      (chunk) => {
+        live += chunk;
+      },
+      undefined,
+      ["hidden-value"],
+    );
+    assert.equal(result.text, live);
+    assert.equal(live.includes('data-tool-status="failed"'), failed);
+    assert.match(live, /data-tool-output=/);
+    assert.doesNotMatch(live, /hidden-value/);
+    assert.ok(live.length < 13000);
+    if (output.length > 30000) assert.match(live, /output truncated/);
+  }
+});
+
+test("tool invocation errors have a distinct failure message", async () => {
+  const result = await drainAgentStream(
+    stream([
+      { type: "tool-call", toolCallId: "cmd", toolName: "run_command", input: {} },
+      {
+        type: "tool-error",
+        toolCallId: "cmd",
+        toolName: "run_command",
+        input: {},
+        error: new Error("private"),
+      },
+    ]),
+    () => undefined,
+  );
+  assert.match(result.text, /Tool invocation failed/);
+  assert.match(result.text, /data-tool-status="failed"/);
+  assert.doesNotMatch(result.text, /private/);
+});
+
+test("redacts tool history while retaining messages for replay", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "1",
+          toolName: "run_command",
+          input: { command: "echo known-secret" },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "1",
+          toolName: "run_command",
+          output: { type: "text", value: "exit=1\nstderr:\nBearer abc123 known-secret" },
+        },
+      ],
+    },
+  ] as Parameters<typeof sanitizeToolHistory>[0];
+  const replay = JSON.stringify(sanitizeToolHistory(messages, ["known-secret"]));
+  assert.doesNotMatch(replay, /known-secret|abc123/);
+  assert.match(replay, /exit=1/);
+  assert.match(replay, /redacted/);
 });
