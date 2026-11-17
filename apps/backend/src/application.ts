@@ -11,6 +11,7 @@ import projectRoutes from "./routes/projects.js";
 import sessionRoutes from "./routes/sessions.js";
 import skillRoutes from "./routes/skills.js";
 import systemRoutes from "./routes/system.js";
+import settingsRoutes from "./routes/settings.js";
 import workspaceRoutes from "./routes/workspace.js";
 
 export function createApp(): express.Express {
@@ -23,6 +24,7 @@ export function createApp(): express.Express {
 
   app.use(
     systemRoutes,
+    settingsRoutes,
     githubRoutes,
     projectRoutes,
     sessionRoutes,

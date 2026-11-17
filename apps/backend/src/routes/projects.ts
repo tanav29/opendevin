@@ -226,6 +226,10 @@ router.post("/api/projects/:projectId/sessions", async (req, res) => {
   }
   const branch = sanitizeBranch(req.body?.branch);
   if (!branch) return res.status(400).json({ error: "A source branch is required." });
+  const settings = await prisma.user.findUnique({
+    where: { id: found.user.id },
+    select: { defaultModel: true },
+  });
 
   const created = await prisma.projectSession.create({
     data: {
@@ -236,7 +240,7 @@ router.post("/api/projects/:projectId/sessions", async (req, res) => {
       sandboxStatus: "creating",
       workspacePath: WORKSPACE_PATH,
       branch,
-      model: resolveChatModel().modelId,
+      model: settings?.defaultModel || resolveChatModel().modelId,
       toolLog: JSON.stringify([{ role: "user", content: message }]),
       messages: { create: { role: "user", content: message } },
     },
