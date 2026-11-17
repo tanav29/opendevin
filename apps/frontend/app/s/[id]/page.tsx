@@ -659,9 +659,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           }
           onReconnect={() => void reconnect()}
           onCommitted={() => void refresh(sessionId, false)}
-          onUseComment={(comment) =>
-            setInput((current) => (current ? `${current}\n\n${comment}` : comment))
-          }
           defaultPort={status?.devPort}
         />
       </div>

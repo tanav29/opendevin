@@ -2,7 +2,7 @@
 
 import { FileDiff } from "@pierre/diffs/react";
 import { parsePatchFiles, type FileDiffOptions, type FileDiffMetadata } from "@pierre/diffs";
-import { Download, GitBranch, Pencil, RefreshCw } from "lucide-react";
+import { ArrowUpRight, Download, GitBranch, GitPullRequest, Pencil, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -16,7 +16,6 @@ export default function ChangesTab({
   active,
   onReconnect,
   onCommitted,
-  onUseComment,
 }: {
   sessionId: string;
   sandboxId: string;
@@ -25,7 +24,6 @@ export default function ChangesTab({
   defaultTitle: string;
   onReconnect: () => void;
   onCommitted?: () => void;
-  onUseComment: (comment: string) => void;
 }) {
   const confirm = useConfirm();
   const [diff, setDiff] = useState<string | null>(null);
@@ -47,15 +45,12 @@ export default function ChangesTab({
   const [git, setGit] = useState<{
     branch: string;
     files: { path: string; staged: string; unstaged: string }[];
-    commits: { hash: string; subject: string }[];
-    commitsError: string;
     workspaceError: string;
     pullRequests: {
       number: number;
       title: string;
       url: string;
       state: string;
-      comments: { id: string; author: string; body: string; path?: string; url: string }[];
     }[];
     pullRequestError: string;
   } | null>(null);
@@ -294,8 +289,8 @@ export default function ChangesTab({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+    <div className="flex h-full min-w-0 flex-col">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
         <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         {editingBranch ? (
           <form onSubmit={renameBranch} className="flex min-w-0 flex-1 items-center gap-1">
@@ -367,7 +362,18 @@ export default function ChangesTab({
         >
           <Download className="size-3.5" aria-hidden="true" />
         </Button>
-        <Button size="xs" onClick={() => void commit()} disabled={!git || !available || committing}>
+        <Button
+          size="xs"
+          onClick={() => void commit()}
+          disabled={
+            !git ||
+            !!git.workspaceError ||
+            !git.files.length ||
+            !available ||
+            committing ||
+            creatingPr
+          }
+        >
           {committing ? "Pushing…" : "Commit & push"}
         </Button>
       </div>
@@ -400,7 +406,7 @@ export default function ChangesTab({
         </p>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="space-y-1 px-3 pt-3 text-xs">
+        <div className="px-3 pt-3 text-xs">
           {gitError && <p className="text-danger">{gitError}</p>}
           {!git && !gitError && <p className="text-muted-foreground">Loading Git details…</p>}
           {git && (
@@ -440,7 +446,7 @@ export default function ChangesTab({
                       : "All files will be included unless you select files")}
                 </p>
                 {git.files.length ? (
-                  <ul className="mt-2 overflow-hidden rounded-md border border-border">
+                  <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border">
                     {git.files.map((file) => (
                       <li key={file.path}>
                         <label className="flex cursor-pointer items-center gap-2.5 px-2.5 py-2 hover:bg-muted/60">
@@ -480,101 +486,47 @@ export default function ChangesTab({
                   <p className="mt-2 text-muted-foreground">Working tree is clean.</p>
                 ) : null}
               </section>
-              <section className="border-t border-border py-2.5">
-                <h3 className="font-medium">Pull request</h3>
-                <form onSubmit={createPullRequest} className="mt-2 space-y-2">
-                  <Button
-                    type="submit"
-                    size="xs"
-                    disabled={creatingPr || !available || !git || !!git.workspaceError}
-                  >
-                    {creatingPr ? "Creating…" : "Create draft pull request"}
-                  </Button>
-                  {createdPr && (
-                    <p>
-                      <a
-                        href={createdPr.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline"
-                      >
-                        Open pull request #{createdPr.number}
-                      </a>
+              <section className="border-t border-border py-3">
+                <div className="flex items-center gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <GitPullRequest
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">Pull request</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      {createdPr || git.pullRequests.some((pr) => pr.state === "open")
+                        ? "Ready to review on GitHub"
+                        : "Create a draft from these changes"}
                     </p>
-                  )}
-                </form>
-                {git.pullRequestError ? (
-                  <p className="mt-1 text-muted-foreground">{git.pullRequestError}</p>
-                ) : git.pullRequests.length === 0 ? (
-                  <p className="mt-1 text-muted-foreground">No pull requests for this branch.</p>
-                ) : (
-                  git.pullRequests.map((pr) => (
-                    <div key={pr.number} className="mt-2 space-y-2">
-                      <a
-                        href={pr.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-medium underline break-words"
+                  </div>
+                  {createdPr || git.pullRequests.find((pr) => pr.state === "open") ? (
+                    <a
+                      href={
+                        createdPr?.url || git.pullRequests.find((pr) => pr.state === "open")?.url
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      Open PR <ArrowUpRight className="size-3.5" aria-hidden="true" />
+                    </a>
+                  ) : (
+                    <form onSubmit={createPullRequest}>
+                      <Button
+                        type="submit"
+                        size="xs"
+                        disabled={creatingPr || committing || !available || !!git.workspaceError}
                       >
-                        #{pr.number} {pr.title}
-                      </a>{" "}
-                      <span className="text-muted-foreground">{pr.state}</span>
-                      {pr.comments.length === 0 ? (
-                        <p className="text-muted-foreground">No comments.</p>
-                      ) : (
-                        pr.comments.map((comment) => (
-                          <button
-                            key={comment.id}
-                            type="button"
-                            onClick={() =>
-                              onUseComment(
-                                `PR #${pr.number} comment by @${comment.author}${comment.path ? ` on ${comment.path}` : ""}:\n${comment.body}\n${comment.url}`,
-                              )
-                            }
-                            className="block w-full rounded-md border border-border p-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                            title="Add comment to chat input"
-                          >
-                            <span className="font-medium">@{comment.author}</span>
-                            {comment.path && (
-                              <span className="ml-2 text-muted-foreground break-all">
-                                {comment.path}
-                              </span>
-                            )}
-                            <span className="mt-1 block whitespace-pre-wrap break-words">
-                              {comment.body}
-                            </span>
-                            <span className="mt-1 block text-muted-foreground">
-                              Click to add to chat
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  ))
+                        {creatingPr ? "Creating?" : "Create PR"}
+                      </Button>
+                    </form>
+                  )}
+                </div>
+                {git.pullRequestError && !createdPr && (
+                  <p className="mt-2 text-muted-foreground">{git.pullRequestError}</p>
                 )}
               </section>
-              <details className="border-t border-border py-2.5">
-                <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
-                  Commits not in main{" "}
-                  <span className="text-muted-foreground">{git.commits.length}</span>
-                </summary>
-                {git.commitsError ? (
-                  <p className="mt-1 text-danger">{git.commitsError}</p>
-                ) : git.commits.length ? (
-                  <ul className="mt-1 space-y-1">
-                    {git.commits.map((commit) => (
-                      <li key={commit.hash} className="flex gap-2">
-                        <span className="shrink-0 font-mono text-muted-foreground">
-                          {commit.hash}
-                        </span>
-                        <span className="break-words">{commit.subject}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-1 text-muted-foreground">No commits unique to this branch.</p>
-                )}
-              </details>
             </>
           )}
         </div>
@@ -608,7 +560,13 @@ export default function ChangesTab({
               </pre>
             </div>
           )}
-          <div className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
+          <div
+            className={
+              parsedFiles.length
+                ? "mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border"
+                : ""
+            }
+          >
             {parsedFiles.map((fileDiff, index) => (
               <details open key={`${fileDiff.name}-${index}`}>
                 <summary
