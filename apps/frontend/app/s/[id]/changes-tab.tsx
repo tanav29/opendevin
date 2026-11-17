@@ -265,7 +265,11 @@ export default function ChangesTab({
           `/api/sessions/${sessionId}/commit`,
           {
             method: "POST",
-            body: JSON.stringify({ files: selectedFiles, confirmUntracked: true }),
+            body: JSON.stringify({
+              files: selectedFiles,
+              confirmUntracked: true,
+              forPullRequest: true,
+            }),
           },
           180_000,
         );

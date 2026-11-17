@@ -575,7 +575,39 @@ router.post("/api/sessions/:id/commit", async (req, res) => {
       return res.status(409).json({ error: "Commit preflight failed: Git branch is invalid." });
     }
     const sourceBranch = sanitizeBranch(current.stdout.trim());
-    const destinationBranch = sourceBranch;
+    let destinationBranch = sourceBranch;
+    if (req.body?.forPullRequest === true) {
+      const repoResponse = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(slug.owner)}/${encodeURIComponent(slug.name)}`,
+        { headers: githubHeaders(token) },
+      );
+      if (!repoResponse.ok)
+        return res
+          .status(repoResponse.status)
+          .json({ error: "Could not access the GitHub repository. Check your GitHub connection." });
+      const repoInfo = (await repoResponse.json()) as { default_branch?: string };
+      if (!repoInfo.default_branch)
+        return res.status(502).json({ error: "Could not determine the default branch." });
+      if (
+        sourceBranch === repoInfo.default_branch ||
+        sourceBranch === "main" ||
+        sourceBranch === "master"
+      ) {
+        destinationBranch = `changes-${owner.id.slice(-8)}-${crypto.randomUUID().slice(0, 8)}`;
+        const checkout = await run(`git checkout -b ${shellQuote(destinationBranch)}`);
+        if (checkout.exitCode !== 0)
+          return res.status(409).json({ error: "Could not create a pull request branch." });
+        try {
+          await prisma.projectSession.update({
+            where: { id: owner.id },
+            data: { branch: destinationBranch },
+          });
+        } catch (error) {
+          await run(`git checkout ${shellQuote(sourceBranch)}`);
+          throw error;
+        }
+      }
+    }
     if (!destinationBranch || destinationBranch === "HEAD") {
       return res
         .status(409)
@@ -729,9 +761,6 @@ router.post("/api/sessions/:id/commit", async (req, res) => {
     );
     if (push.exitCode !== 0) {
       const detail = (push.stderr || push.stdout || "git push failed").slice(0, 500);
-      if (sourceBranch && sourceBranch !== "HEAD") {
-        await run(`git checkout ${shellQuote(sourceBranch)}`).catch(() => undefined);
-      }
       if (/403|permission[^.]*denied|denied[^.]*permission/i.test(detail)) {
         return res.status(403).json({
           error: `GitHub denied the push: ${detail.slice(0, 200)} The stored GitHub token lacks repository push access — sign out and sign in with GitHub again to grant it, then retry.`,
@@ -822,12 +851,10 @@ router.post("/api/sessions/:id/pull-request", async (req, res) => {
       { headers },
     );
     if (!comparison.ok)
-      return res
-        .status(comparison.status)
-        .json({
-          error:
-            "Could not compare the pushed branch with the default branch. Push the branch and retry.",
-        });
+      return res.status(comparison.status).json({
+        error:
+          "Could not compare the pushed branch with the default branch. Push the branch and retry.",
+      });
     const changes = (await comparison.json()) as {
       commits?: { commit?: { message?: string } }[];
       files?: { filename: string; status: string; patch?: string }[];
@@ -870,7 +897,7 @@ router.post("/api/sessions/:id/pull-request", async (req, res) => {
         head,
         base,
         draft: true,
-        body,
+        body: `${body}\n\n---\nCreated with OpenDevin.`,
       }),
     });
     const result = (await response.json().catch(() => ({}))) as {
