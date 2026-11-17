@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import dynamic from "next/dynamic";
@@ -47,6 +47,7 @@ const SessionPanel = dynamic(() => import("./session-panel"), {
 import { API, isWorking, type ChatMessage, type SessionDetail, type SessionStatus } from "./lib";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Attachment01Icon } from "@hugeicons/core-free-icons";
+import { useComposerDraft } from "@/hooks/use-composer-draft";
 
 type ReconnectConflict = {
   message: string;
@@ -121,13 +122,18 @@ function ReconnectConflictDialog({
 }
 
 export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
-  const [sessionId, setSessionId] = useState("");
+  const { id: sessionId } = use(params);
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
-  const [input, setInput] = useState("");
+  const [input, setInput, draftReady, clearDraft] = useComposerDraft(
+    sessionId ? `session:${sessionId}` : null,
+  );
+  const pendingDraft = useRef<(() => void) | null>(null);
   const [sending, setSending] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectConflict, setReconnectConflict] = useState<ReconnectConflict | null>(null);
@@ -163,6 +169,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     id: sessionId,
     transport: chatTransport,
     onError: (error) => toast.error(error.message),
+    onFinish: ({ isAbort, isError, isDisconnect }) => {
+      if (!isAbort && !isError && !isDisconnect) pendingDraft.current?.();
+      pendingDraft.current = null;
+    },
   });
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [prefs, setPrefs] = usePanelPrefs();
@@ -197,14 +207,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   }, []);
 
   useEffect(() => {
-    void params.then(({ id }) => {
-      setSessionId(id);
-      try {
-        window.localStorage.setItem("opendevin:selected-session", id);
-      } catch {}
-      void refresh(id, true, true);
-    });
-  }, [params, refresh]);
+    try {
+      window.localStorage.setItem("opendevin:selected-session", sessionId);
+    } catch {}
+    void refresh(sessionId, true, true);
+  }, [sessionId, refresh]);
 
   const sandboxStatus = status?.sandboxStatus ?? detail?.sandboxStatus ?? "pending";
   const lifecycle = status?.lifecycle;
@@ -318,11 +325,16 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       toast.error(`Message exceeds the ${MAX_MESSAGE_CHARS.toLocaleString()}-character limit.`);
       return;
     }
-    if (!questionMessageId) {
-      setInput("");
-      resetAttachments();
-      resetSkills();
-    }
+    pendingDraft.current =
+      !questionMessageId && text === input
+        ? () => {
+            clearDraft(input);
+            if (currentSession.current === sessionId) {
+              resetAttachments();
+              resetSkills();
+            }
+          }
+        : null;
     setSending(true);
     try {
       if (questionMessageId) {
@@ -571,7 +583,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               onSubmit={send}
               onStop={stop}
               busy={sending || activeAgent}
-              disabled={chatDisabled}
+              disabled={chatDisabled || !draftReady}
               canSend={Boolean(input.trim()) || attachments.length > 0 || skills.length > 0}
               placeholder="Tell the agent what to do…"
               onPasteFiles={(files) => void addFiles(files)}
