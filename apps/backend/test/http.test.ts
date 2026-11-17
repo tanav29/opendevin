@@ -23,6 +23,7 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
       },
     },
     project: { findFirst: async () => null },
+    account: { findFirst: async () => ({ accessToken: "test-token" }) },
   };
   const globals = globalThis as unknown as { prisma?: unknown };
   const originalPrisma = globals.prisma;
@@ -138,6 +139,55 @@ test("Express routes handle errors, ownership, and sandbox reconnects", async (t
     lastDiff: "diff --git a/file b/file",
     lastDiffAt: new Date("2026-09-25"),
   };
+  await t.test("reports unavailable generation without preventing manual entry", async () => {
+    const key = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    try {
+      const response = await request("/api/sessions/session/publish-metadata", { method: "POST" });
+      assert.equal(response.status, 503);
+      assert.match(response.body.error, /manually/);
+    } finally {
+      if (key !== undefined) process.env.OPENROUTER_API_KEY = key;
+    }
+  });
+  await t.test(
+    "publishes manual pull request details to the chosen base without a model",
+    async () => {
+      owner!.project = { repo: "https://github.com/example/repo", userId: "user" };
+      owner!.branch = "feature";
+      const originalFetch = globalThis.fetch;
+      let posted: any;
+      const fetchMock = t.mock.method(globalThis, "fetch", async (input, init) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.github.com/")) return originalFetch(input, init);
+        if (init?.method === "POST") {
+          posted = JSON.parse(String(init.body));
+          return Response.json(
+            { html_url: "https://github.com/example/repo/pull/1", number: 1 },
+            { status: 201 },
+          );
+        }
+        assert.match(url, /base=release%2Fnext/);
+        return Response.json([]);
+      });
+      const post = (body: unknown) =>
+        request("/api/sessions/session/pull-request", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      assert.equal(
+        (await post({ title: "Manual title", body: "Manual body", base: "release/next" })).status,
+        201,
+      );
+      assert.equal(posted.title, "Manual title");
+      assert.match(posted.body, /^Manual body/);
+      assert.equal(posted.base, "release/next");
+      assert.equal((await post({ title: "x", body: "", base: "bad..branch" })).status, 400);
+      assert.equal((await post({ title: "x\ny", body: "", base: "main" })).status, 400);
+      fetchMock.mock.restore();
+    },
+  );
   await t.test(
     "requires confirmation before replacing a workspace with a saved patch",
     async () => {
