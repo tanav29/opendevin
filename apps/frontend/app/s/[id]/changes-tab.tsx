@@ -38,6 +38,8 @@ export default function ChangesTab({
   const [loading, setLoading] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [committing, setCommitting] = useState(false);
+  const [creatingPr, setCreatingPr] = useState(false);
+  const [createdPr, setCreatedPr] = useState<{ url: string; number: number } | null>(null);
   const [editingBranch, setEditingBranch] = useState(false);
   const [branchName, setBranchName] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -254,6 +256,39 @@ export default function ChangesTab({
     }
   }
 
+  async function createPullRequest(event: React.FormEvent) {
+    event.preventDefault();
+    setCreatingPr(true);
+    try {
+      try {
+        await api(
+          `/api/sessions/${sessionId}/commit`,
+          {
+            method: "POST",
+            body: JSON.stringify({ files: selectedFiles, confirmUntracked: true }),
+          },
+          180_000,
+        );
+        setSelectedFiles([]);
+        onCommitted?.();
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("Nothing to commit")) throw error;
+      }
+      const result = await api<{ url: string; number: number }>(
+        `/api/sessions/${sessionId}/pull-request`,
+        {
+          method: "POST",
+        },
+      );
+      setCreatedPr(result);
+      void readGit();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create pull request.");
+    } finally {
+      setCreatingPr(false);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
@@ -379,7 +414,7 @@ export default function ChangesTab({
                   <h3 className="font-medium">
                     Changes{" "}
                     <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {git.files.length}
+                      {git.workspaceError ? "?" : git.files.length}
                     </span>
                   </h3>
                   {selectedFiles.length > 0 && (
@@ -437,12 +472,33 @@ export default function ChangesTab({
                       </li>
                     ))}
                   </ul>
-                ) : (
+                ) : !git.workspaceError ? (
                   <p className="mt-2 text-muted-foreground">Working tree is clean.</p>
-                )}
+                ) : null}
               </section>
               <section className="border-t border-border py-2.5">
                 <h3 className="font-medium">Pull request</h3>
+                <form onSubmit={createPullRequest} className="mt-2 space-y-2">
+                  <Button
+                    type="submit"
+                    size="xs"
+                    disabled={creatingPr || !available || !git || !!git.workspaceError}
+                  >
+                    {creatingPr ? "Creating…" : "Create draft pull request"}
+                  </Button>
+                  {createdPr && (
+                    <p>
+                      <a
+                        href={createdPr.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        Open pull request #{createdPr.number}
+                      </a>
+                    </p>
+                  )}
+                </form>
                 {git.pullRequestError ? (
                   <p className="mt-1 text-muted-foreground">{git.pullRequestError}</p>
                 ) : git.pullRequests.length === 0 ? (
