@@ -88,6 +88,7 @@ model ProjectSession {
   sandboxStatus String   @default("pending")
   workspacePath String   @default("/home/user/workspace")
   branch        String   @default("")
+  baseBranch    String?
   model         String   @default("")
   plan          String   @default("[]")
   usage         String   @default("{}")

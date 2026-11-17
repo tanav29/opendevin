@@ -22,6 +22,7 @@ import {
 } from "../sanitize.js";
 import { probePort, runSandbox, waitForPort } from "../sandbox.js";
 import { activeTurns } from "../chat.js";
+import { GitHistoryError, readBranchCommits } from "../git-history.js";
 import {
   hasUnrestoredWorkspace,
   listWorkspaceTree,
@@ -79,24 +80,12 @@ router.get("/api/sessions/:id/git", async (req, res) => {
           repo && token
             ? `https://oauth2:${token}@github.com/${repo.owner}/${repo.name}.git`
             : "origin";
-        const shallow = await run("git rev-parse --is-shallow-repository");
-        const fetch = await run(
-          `git fetch --no-tags ${shallow.stdout.trim() === "true" ? "--unshallow" : ""} ${shellQuote(url)} +refs/heads/main:refs/remotes/origin/main`,
-        );
-        const log =
-          fetch.exitCode === 0
-            ? await run("git log --format='%h%x00%s%x00' refs/remotes/origin/main..HEAD")
-            : null;
-        if (log?.exitCode === 0) {
-          const parts = log.stdout.replace(/\n/g, "").split("\0");
-          for (let i = 0; i + 1 < parts.length; i += 2) {
-            if (parts[i]) commits.push({ hash: parts[i], subject: parts[i + 1] });
-          }
-        } else
-          commitsError =
-            "Could not compare this branch with main. Check that main exists and refresh.";
-      } catch {
-        commitsError = "Could not compare this branch with main. Check the connection and refresh.";
+        commits = await readBranchCommits(run, url, owner.baseBranch);
+      } catch (error) {
+        commitsError =
+          error instanceof GitHistoryError
+            ? error.message
+            : "Could not compare the workspace history. Check the connection and refresh.";
       }
     } catch {
       workspaceError = "Could not read the Git workspace. Reconnect and refresh.";
