@@ -59,7 +59,7 @@ export async function cloneRepo(
   workspacePath: string,
   branch = "",
   token: string | null = null,
-): Promise<void> {
+): Promise<boolean> {
   const url = repo.trim();
   const isGitHub = /^https:\/\/github\.com\//i.test(url);
   const cleanWorkspace = () =>
@@ -94,7 +94,7 @@ export async function cloneRepo(
     result = await tryClone(authedUrl, branch);
     if (result.exitCode === 0) await scrubOrigin();
   }
-  if (result.exitCode === 0) return;
+  if (result.exitCode === 0) return Boolean(branch);
 
   // Branch may be new (not on remote): clone default then checkout -B.
   if (branch) {
@@ -116,12 +116,12 @@ export async function cloneRepo(
         const co = await runSandbox(sandbox, `git checkout ${shellQuote(branch)}`, cwd).catch(
           () => ({ exitCode: 128, stdout: "", stderr: "" }),
         );
-        if (co.exitCode === 0) return;
+        if (co.exitCode === 0) return true;
       }
       const create = await runSandbox(sandbox, `git checkout -B ${shellQuote(branch)}`, cwd).catch(
         () => ({ exitCode: 128, stdout: "", stderr: "" }),
       );
-      if (create.exitCode === 0) return;
+      if (create.exitCode === 0) return false;
     }
   }
   if (result.exitCode !== 0) {
@@ -130,6 +130,7 @@ export async function cloneRepo(
       !token && isGitHub ? " The repository may be private — sign in with GitHub and retry." : "";
     throw new Error(`${raw}${hint}`);
   }
+  throw new Error("Repository checkout failed.");
 }
 
 export async function ensureRipgrep(sandbox: Sandbox): Promise<void> {
@@ -205,13 +206,19 @@ async function provisionSandboxUnlocked(sessionId: string): Promise<boolean> {
     if (isRepoUrl(repo)) {
       try {
         const token = await githubTokenForUser(existing.project.userId);
-        await cloneRepo(
+        const selectedExists = await cloneRepo(
           sandbox,
           repo,
           existing.workspacePath || WORKSPACE_PATH,
           existing.branch || "",
           token,
         );
+        if (existing.baseBranch && existing.baseBranch === existing.branch && !selectedExists) {
+          await prisma.projectSession.update({
+            where: { id: sessionId },
+            data: { baseBranch: null },
+          });
+        }
       } catch (error) {
         await killSandbox(sandbox.sandboxId);
         await prisma.projectSession.update({

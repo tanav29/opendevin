@@ -133,7 +133,7 @@ router.get("/api/projects/:projectId/branches", async (req, res) => {
 
       return res.json({
         branches,
-        defaultBranch: repoData.default_branch || branches[0] || "",
+        defaultBranch: repoData.default_branch || "",
       });
     }
 
@@ -162,13 +162,6 @@ router.get("/api/projects/:projectId/branches", async (req, res) => {
       .split("\n")
       .map((line) => line.split("\t")[1]?.replace("refs/heads/", "").trim())
       .filter((b): b is string => Boolean(b));
-    if (!defaultBranch) {
-      defaultBranch = branches.includes("main")
-        ? "main"
-        : branches.includes("master")
-          ? "master"
-          : branches[0] || "";
-    }
     return res.json({ branches, defaultBranch });
   } catch (error) {
     const safe = String(error instanceof Error ? error.message : error)
@@ -236,6 +229,7 @@ router.post("/api/projects/:projectId/sessions", async (req, res) => {
       sandboxStatus: "creating",
       workspacePath: WORKSPACE_PATH,
       branch,
+      baseBranch: branch,
       model: resolveChatModel().modelId,
       toolLog: JSON.stringify([{ role: "user", content: message }]),
       messages: { create: { role: "user", content: message } },
